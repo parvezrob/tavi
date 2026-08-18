@@ -8,6 +8,14 @@ The application consumes the versioned contract in [`../../protocol/`](../../pro
 
 The Xcode-generated project and shared `Mocha` scheme live in this directory. Never commit personal signing data, `xcuserdata`, Derived Data, or credentials.
 
+Build the pinned custom-I/O GhosttyKit dependency before working on the terminal surface:
+
+```bash
+./scripts/build-ghosttykit.sh
+```
+
+The script downloads checksum-verified Zig 0.15.2, checks out Ghostty commit `91fe505e60bbe72ff08c881d2882acad6a56cb9f`, applies Mocha's reviewed downstream patches, and creates a local ignored `Frameworks/GhosttyKit.xcframework` symlink. The binary is intentionally not committed. Xcode 26 requires its separately distributed Metal Toolchain; if it is missing, install it with `xcodebuild -downloadComponent MetalToolchain`.
+
 Build and test the baseline on the current iPhone simulator runtime:
 
 ```bash

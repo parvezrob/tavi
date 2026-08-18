@@ -14,3 +14,4 @@ coverage/
 DerivedData/
 xcuserdata/
 *.xcuserstate
+apps/ios/Frameworks/GhosttyKit.xcframework

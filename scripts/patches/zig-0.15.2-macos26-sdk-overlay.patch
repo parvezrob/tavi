@@ -1,0 +1,15 @@
+diff --git a/lib/std/zig/system/darwin.zig b/lib/std/zig/system/darwin.zig
+--- a/lib/std/zig/system/darwin.zig
++++ b/lib/std/zig/system/darwin.zig
+@@ -49,6 +49,11 @@ pub fn getSdk(allocator: Allocator, target: Target) ?[]const u8 {
+         .watchos => if (is_simulator_abi) "watchsimulator" else "watchos",
+         else => return null,
+     };
++    if (std.posix.getenv("MOCHA_SDK_OVERLAY_ROOT")) |overlay_root| {
++        if (overlay_root.len > 0) {
++            return std.fs.path.join(allocator, &.{ overlay_root, sdk }) catch null;
++        }
++    }
+     const argv = &[_][]const u8{ "xcrun", "--sdk", sdk, "--show-sdk-path" };
+     const result = std.process.Child.run(.{ .allocator = allocator, .argv = argv }) catch return null;
+     defer {

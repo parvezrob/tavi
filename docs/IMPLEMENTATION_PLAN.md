@@ -41,6 +41,12 @@ The native iOS app should consume a versioned evolution of this host protocol. W
 
 ## 3. Phase 1 — terminal and transport spike
 
+### Terminal dependency decision
+
+The first spike follows Moshi's proven shape: Ghostty's native Metal surface with an external byte-input/write-callback backend. Mocha pins the `wiedymi/ghostty` custom-I/O fork at `91fe505e60bbe72ff08c881d2882acad6a56cb9f` and builds it through [`scripts/build-ghosttykit.sh`](../scripts/build-ghosttykit.sh). The repository owns a minimal patch set for macOS 26 SDK compatibility and the fork's missing callback process-info case; the generated XCFramework remains an ignored local artifact.
+
+This pin is an experiment behind `AgentTerminalView`, not a stability claim. Ghostty issue [#13021](https://github.com/ghostty-org/ghostty/issues/13021) reports an iOS device use-after-free during surface teardown on the same fork revision. GitHub issue [#5](https://github.com/parvezrob/mocha/issues/5) is a release-blocking physical-device lifecycle gate. Mocha does not ship this renderer until repeated create/destroy, background/foreground, lock/unlock, and session-switch tests pass without the crash.
+
 ### Scope
 
 Implement the thinnest native vertical slice:
