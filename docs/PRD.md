@@ -1,10 +1,10 @@
 # Mocha product requirements document
 
-**Status:** Draft for approval
-**Version:** 0.1
+**Status:** Approved for initial implementation
+**Version:** 0.2
 **Updated:** 2026-08-19
 **Owner:** Product / Engineering
-**Initial release:** Native iOS, SwiftUI
+**Initial release:** Native SwiftUI, iOS 26 minimum, iPhone first
 
 ## 1. Product summary
 
@@ -60,7 +60,9 @@ Runs an unsupported CLI or ordinary shell. Mocha cannot supply structured status
 
 ### 7.1 App shell and onboarding
 
-- Native SwiftUI app for iPhone; adaptable layout for iPad.
+- Native SwiftUI app with a minimum deployment target of iOS 26, optimized for iPhone in V1.
+- Product/target/module name `Mocha`, bundle identifier `com.parvezrob.mocha`, and durable internal namespace `mocha`.
+- iPad-specific layout and interaction optimization is planned after the iPhone V1 and is not an initial release gate.
 - Dark-first, Orca-clean visual baseline: near-black canvas, quiet charcoal groups, restrained borders, system typography, consistent radii, and sparse semantic color. Avoid glow, gradients, ornamental depth, and dashboard spectacle.
 - System-provided Liquid Glass for the functional layer—navigation, toolbars, menus, sheets, and tab surfaces—not custom glass containers in the content layer.
 - V1 visual target is [`assets/agent-deck-v1-home-terminal.png`](./assets/agent-deck-v1-home-terminal.png): an attention-first Home with live resumable session previews, a compact labeled `Sessions | Inbox` glass dock plus separate new-connection action, and a terminal-first Herdr screen with a native `Jump to` workspace/tab sheet.
@@ -203,7 +205,7 @@ Runs an unsupported CLI or ordinary shell. Mocha cannot supply structured status
 | FR-012 | Device revocation | Must | Revoked credential fails immediately and receives no new terminal data. |
 | FR-013 | Recent safe preview | Should | Session list shows bounded output with privacy controls. |
 | FR-014 | Connection path diagnostics | Should | App reports direct/relay/unknown when host evidence is available. |
-| FR-015 | iPad adaptive layout | Should | Sidebar/detail layout works with hardware keyboard. |
+| FR-015 | iPad adaptive layout | Later | Post-iPhone plan provides a sidebar/detail layout and hardware-keyboard optimization. |
 
 ## 11. Non-functional requirements and targets
 
@@ -220,7 +222,7 @@ Targets are product goals to test, not current measurements.
 | Memory | Bounded scrollback and previews; no unbounded growth during an eight-hour host session. |
 | Accessibility | Dynamic Type outside terminal; VoiceOver-labeled controls; Reduce Motion and Increase Contrast respected. |
 | Privacy | No analytics, crash log, or notification payload contains terminal content by default. |
-| Compatibility | Current iOS plus one prior major version for initial beta, subject to renderer constraints. |
+| Compatibility | iOS 26 and later for V1; no earlier deployment target. |
 
 ## 12. Information architecture
 
@@ -287,7 +289,6 @@ Show cached context as stale → display last seen and path diagnostics → with
 
 ## 16. Open decisions
 
-- Minimum supported iOS version.
 - Initial pinned Ghostty commit/fork and the smallest downstream patch set required for custom remote I/O and safe surface teardown.
 - Whether notification fan-out can remain direct/local or needs an optional service.
 - Whether manual LAN HTTPS is sufficient for App Review alongside demo mode.

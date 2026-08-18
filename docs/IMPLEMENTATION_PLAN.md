@@ -1,6 +1,6 @@
 # Mocha implementation plan
 
-**Status:** Proposed, pending PRD and visual-direction approval
+**Status:** Approved for Phase 0 and terminal-spike execution
 **Updated:** 2026-08-19
 **Execution rule:** evidence-gated phases; do not expand the feature surface until the prior phase meets its exit criteria
 **Engineering policy:** every production change must satisfy [`DEVELOPMENT_PRINCIPLES.md`](./DEVELOPMENT_PRINCIPLES.md)
@@ -25,8 +25,8 @@ The native iOS app should consume a versioned evolution of this host protocol. W
 
 - Treat [`assets/agent-deck-v1-home-terminal.png`](./assets/agent-deck-v1-home-terminal.png) as the approved V1 Home + Terminal visual target; validate its primary customer journey on a real iPhone before expanding the screen set.
 - Treat [`assets/agent-deck-v1-pairing-flow.png`](./assets/agent-deck-v1-pairing-flow.png) as the approved V1 scan-first onboarding target.
-- Install full Xcode and configure a free Personal Team for device testing.
-- Create a minimal SwiftUI workspace and a terminal renderer abstraction.
+- Use the installed Xcode 26.6 toolchain and configure a free Personal Team for device testing.
+- Create the minimal iPhone-first SwiftUI workspace with product/target/module `Mocha`, bundle identifier `com.parvezrob.mocha`, minimum deployment target iOS 26, and Swift 6 language mode.
 - Add a reproducible script/build job for the pinned GhosttyKit XCFramework and record the exact upstream/fork commit plus downstream patches.
 - Build a recorded terminal corpus from Codex, Claude Code, tmux, Herdr, shell, Unicode, and high-frequency redraw cases.
 - Add host-side timestamping and connection diagnostics needed for latency measurement.
@@ -159,7 +159,7 @@ Core
 
 ### Pairing security
 
-- `agent-deck pair` shows a QR containing host URL, machine fingerprint, and single-use bootstrap secret.
+- `mocha pair` shows a QR containing host URL, machine fingerprint, and single-use bootstrap secret.
 - App shows a human-verifiable machine name/fingerprint.
 - Bootstrap exchange creates a random device credential and invalidates the QR secret.
 - Credential lives in Keychain and can be protected by biometry.
@@ -311,9 +311,12 @@ Require all of:
 
 ### Devices
 
-- Oldest supported iPhone.
+- Oldest practical iPhone that supports iOS 26.
 - Current standard-size iPhone.
 - Current Pro Max or equivalent large device.
+
+### Planned iPad qualification after iPhone V1
+
 - iPad with software keyboard.
 - iPad with hardware keyboard/trackpad.
 
@@ -357,7 +360,7 @@ Require all of:
 
 ## 11. Repository evolution
 
-Recommended structure after the native project is created:
+Current ownership structure and planned native contents:
 
 ```text
 apps/
@@ -368,13 +371,13 @@ protocol/                schemas, examples, compatibility fixtures
 fixtures/terminal/       renderer and protocol replay corpus
 ```
 
-Do not create `apps/ios` until Xcode is installed and the project settings, bundle identifier, deployment target, and dependency choice can be generated and verified rather than guessed.
+`apps/ios` now owns the native client. Generate the Xcode project with the locked identity and platform settings; select and pin the GhosttyKit source during the terminal qualification issue rather than guessing it in the project scaffold.
 
 The browser prototype and web deployment configuration have been removed. Do not reintroduce a second client target without an explicit product decision and an independently justified maintenance budget.
 
-## 12. Immediate next decisions
+## 12. Immediate next work
 
-1. Approve or edit the PRD.
-2. Select Attention Queue, Live Terminal, or Session Stack for refinement.
-3. Install full Xcode.
-4. Run the terminal/transport spike before implementing the complete shell.
+1. Migrate remaining legacy `agent-deck`/`deck.*` technical identifiers to the locked `mocha` namespace before the native client depends on them.
+2. Generate the minimal iOS 26, iPhone-first Xcode project with `com.parvezrob.mocha` and Swift 6 strict concurrency.
+3. Run the terminal/transport spike and pin the qualified GhosttyKit source before implementing the complete app shell.
+4. Plan iPad-specific layout, keyboard, and interaction optimization only after the iPhone V1 gates pass.
