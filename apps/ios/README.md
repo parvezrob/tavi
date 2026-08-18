@@ -6,4 +6,20 @@ Locked project identity: product/target/module `Mocha`, bundle identifier `com.p
 
 The application consumes the versioned contract in [`../../protocol/`](../../protocol/README.md). SwiftUI owns navigation and native surfaces; the terminal renderer remains behind a small UIKit/GhosttyKit adapter so transport, rendering, and provider semantics stay independent.
 
-Create project files through Xcode and commit the generated shared scheme. Never commit personal signing data, `xcuserdata`, Derived Data, or credentials.
+The Xcode-generated project and shared `Mocha` scheme live in this directory. Never commit personal signing data, `xcuserdata`, Derived Data, or credentials.
+
+Build and test the baseline on the current iPhone simulator runtime:
+
+```bash
+xcodebuild build \
+  -project apps/ios/Mocha.xcodeproj \
+  -scheme Mocha \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  CODE_SIGNING_ALLOWED=NO
+
+xcodebuild test \
+  -project apps/ios/Mocha.xcodeproj \
+  -scheme Mocha \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  CODE_SIGNING_ALLOWED=NO
+```
