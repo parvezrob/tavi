@@ -69,7 +69,7 @@ docs/        maintained product and architecture sources
 scripts/     reproducible repository tooling
 ```
 
-GitHub Issues are the work queue and sole known-issue tracker. Short-lived issue branches and pull requests carry multi-session coordination; the repository does not maintain a parallel bug ledger or session diary. Contributors and coding agents follow [`AGENTS.md`](./AGENTS.md).
+GitHub Issues are the work queue and sole known-issue tracker. During the owner-approved MVP fast track, one integration session may push verified issue-scoped commits directly to `main`; normal short-lived branch and pull-request flow begins after the MVP gate. The repository does not maintain a parallel bug ledger or session diary. Contributors and coding agents follow [`AGENTS.md`](./AGENTS.md).
 
 Useful checks:
 
