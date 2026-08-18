@@ -85,13 +85,13 @@ Copy [`.env.example`](./.env.example) or set environment variables before runnin
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DECK_HOST` | `127.0.0.1` | Bind address. Keep localhost when using Tailscale Serve. |
-| `DECK_PORT` | `8787` | Local host port. |
-| `DECK_TOKEN` | generated | Pairing token. Generated tokens live in `~/.agent-deck/config.json`. |
-| `DECK_ROOTS` | common folders in home | Comma-separated roots shown in the project launcher. |
-| `DECK_TMUX_BIN` | `tmux` | tmux executable or absolute path. |
-| `DECK_SHELL` | login shell | Shell used to identify shell sessions. |
-| `DECK_MACHINE_NAME` | hostname | Display name sent to the phone. |
+| `MOCHA_HOST` | `127.0.0.1` | Bind address. Keep localhost when using Tailscale Serve. |
+| `MOCHA_PORT` | `8787` | Local host port. |
+| `MOCHA_TOKEN` | generated | Pairing token. Existing prototype credentials migrate atomically to `~/.mocha/config.json`. |
+| `MOCHA_ROOTS` | common folders in home | Comma-separated roots shown in the project launcher. |
+| `MOCHA_TMUX_BIN` | `tmux` | tmux executable or absolute path. |
+| `MOCHA_SHELL` | login shell | Shell used to identify shell sessions. |
+| `MOCHA_MACHINE_NAME` | hostname | Display name sent to the phone. |
 
 If you change configuration after installing the macOS service, run `npm run service:install` again so the LaunchAgent receives the new values.
 

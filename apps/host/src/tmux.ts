@@ -7,11 +7,14 @@ import type { AgentKind, CreateSessionInput, SessionInfo, WorkspaceInfo } from "
 
 const execFileAsync = promisify(execFile);
 const FIELD_SEPARATOR = "\u001f";
+const MANAGED_SESSION_PREFIX = "mocha-";
+const LEGACY_SESSION_PREFIX = "deck-";
 
 export interface TmuxOptions {
   bin: string;
   shell: string;
   roots: string[];
+  execute?: (args: string[]) => Promise<string>;
 }
 
 export class TmuxService {
@@ -52,7 +55,7 @@ export class TmuxService {
 
   async createSession(input: CreateSessionInput): Promise<SessionInfo> {
     await this.assertDirectory(input.cwd);
-    const id = `deck-${this.slug(input.name)}-${randomBytes(3).toString("hex")}`;
+    const id = `${MANAGED_SESSION_PREFIX}${this.slug(input.name)}-${randomBytes(3).toString("hex")}`;
     const command = this.commandFor(input);
     const args = [
       "new-session",
@@ -125,7 +128,7 @@ export class TmuxService {
       windows: Number(windows),
       cwd,
       command,
-      managed: id.startsWith("deck-"),
+      managed: this.isManagedSession(id),
       agent: this.inferAgent(command),
     };
   }
@@ -155,8 +158,13 @@ export class TmuxService {
   }
 
   private displayName(id: string): string {
-    if (!id.startsWith("deck-")) return id;
-    return id.replace(/^deck-/, "").replace(/-[a-f0-9]{6}$/, "").replaceAll("-", " ");
+    const prefix = [MANAGED_SESSION_PREFIX, LEGACY_SESSION_PREFIX].find((candidate) => id.startsWith(candidate));
+    if (!prefix) return id;
+    return id.slice(prefix.length).replace(/-[a-f0-9]{6}$/, "").replaceAll("-", " ");
+  }
+
+  private isManagedSession(id: string): boolean {
+    return id.startsWith(MANAGED_SESSION_PREFIX) || id.startsWith(LEGACY_SESSION_PREFIX);
   }
 
   private slug(value: string): string {
@@ -188,6 +196,7 @@ export class TmuxService {
   }
 
   private async run(args: string[]): Promise<string> {
+    if (this.options.execute) return this.options.execute(args);
     const env = { ...process.env };
     delete env.npm_config_prefix;
     delete env.NPM_CONFIG_PREFIX;

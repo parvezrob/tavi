@@ -344,7 +344,7 @@ Measure whether users can identify the next session to open in under five second
 | Native Swift/SwiftUI for iOS | Locked | Best path to system integration, touch/keyboard fidelity, terminal performance, and App Store-quality UX. |
 | Minimum deployment target | Locked | V1 requires iOS 26 or later; compatibility with earlier iOS releases is not a release goal. |
 | Device priority | Locked | V1 is designed, implemented, and release-gated for iPhone first. iPad-specific optimization is a later planned phase. |
-| Technical identity | Locked | Product/target/module `Mocha`, bundle identifier `com.parvezrob.mocha`, and durable internal `mocha` namespace. Migrate legacy `agent-deck`/`deck.*` identifiers before native compatibility depends on them. |
+| Technical identity | Locked | Product/target/module `Mocha`, bundle identifier `com.parvezrob.mocha`, and durable internal `mocha` namespace. Active runtime identifiers are migrated; legacy state and tmux names remain supported only through explicit, tested compatibility paths. |
 | Android later | Locked | Preserve protocol now; avoid splitting product discovery and terminal-engine work. |
 | Tailscale direct-first | Locked | Strong firsthand result and external evidence for direct-path performance; no mandatory hosted relay. |
 | tmux + Herdr | Locked | tmux supplies universal durability; Herdr supplies richer attention semantics. |

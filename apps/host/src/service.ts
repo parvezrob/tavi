@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { access, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, platform, userInfo } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,34 +8,118 @@ import { promisify } from "node:util";
 import type { HostConfig } from "./config.js";
 
 const execFileAsync = promisify(execFile);
-const LABEL = "dev.agent-deck.host";
+const LABEL = "com.parvezrob.mocha.host";
+const LEGACY_LABEL = "dev.agent-deck.host";
 
-export async function installService(config: HostConfig): Promise<string> {
-  assertMac();
-  const launchAgents = path.join(homedir(), "Library", "LaunchAgents");
-  const plist = path.join(launchAgents, `${LABEL}.plist`);
-  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-  const entrypoint = path.join(projectRoot, "apps", "host", "dist", "index.js");
-  const logFile = path.join(config.stateDir, "host.log");
-  const domain = `gui/${userInfo().uid}`;
+type Execute = (command: string, args: string[]) => Promise<void>;
 
-  await mkdir(launchAgents, { recursive: true });
-  await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
-  await writeFile(plist, launchAgentXml({ config, projectRoot, entrypoint, logFile }), { mode: 0o600 });
-
-  await execFileAsync("launchctl", ["bootout", domain, plist]).catch(() => undefined);
-  await execFileAsync("launchctl", ["bootstrap", domain, plist]);
-  await execFileAsync("launchctl", ["kickstart", "-k", `${domain}/${LABEL}`]);
-  return plist;
+export interface ServiceOptions {
+  execute?: Execute;
+  homeDirectory?: string;
+  operatingSystem?: NodeJS.Platform;
+  projectRoot?: string;
+  userId?: number;
 }
 
-export async function uninstallService(): Promise<string> {
-  assertMac();
-  const plist = path.join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
-  const domain = `gui/${userInfo().uid}`;
-  await execFileAsync("launchctl", ["bootout", domain, plist]).catch(() => undefined);
-  await rm(plist, { force: true });
-  return plist;
+interface ServiceRuntime {
+  currentPlist: string;
+  domain: string;
+  execute: Execute;
+  legacyPlist: string;
+  projectRoot: string;
+}
+
+export async function installService(config: HostConfig, options: ServiceOptions = {}): Promise<string> {
+  const runtime = createRuntime(options);
+  const entrypoint = path.join(runtime.projectRoot, "apps", "host", "dist", "index.js");
+  const logFile = path.join(config.stateDir, "host.log");
+  const legacyExists = await fileExists(runtime.legacyPlist);
+
+  await mkdir(path.dirname(runtime.currentPlist), { recursive: true });
+  await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
+  await writeFileAtomically(
+    runtime.currentPlist,
+    launchAgentXml({ config, projectRoot: runtime.projectRoot, entrypoint, logFile }),
+  );
+
+  await bootout(runtime, LEGACY_LABEL);
+  await bootout(runtime, LABEL);
+
+  try {
+    await runtime.execute("launchctl", ["bootstrap", runtime.domain, runtime.currentPlist]);
+    await runtime.execute("launchctl", ["kickstart", "-k", `${runtime.domain}/${LABEL}`]);
+    await rm(runtime.legacyPlist, { force: true });
+    return runtime.currentPlist;
+  } catch (installationError) {
+    await bootout(runtime, LABEL);
+    await rm(runtime.currentPlist, { force: true });
+    if (legacyExists) {
+      try {
+        await runtime.execute("launchctl", ["bootstrap", runtime.domain, runtime.legacyPlist]);
+        await runtime.execute("launchctl", ["kickstart", "-k", `${runtime.domain}/${LEGACY_LABEL}`]);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [installationError, rollbackError],
+          "Mocha service installation failed and the legacy service could not be restored.",
+        );
+      }
+    }
+    throw installationError;
+  }
+}
+
+export async function uninstallService(options: ServiceOptions = {}): Promise<string[]> {
+  const runtime = createRuntime(options);
+  await bootout(runtime, LABEL);
+  await bootout(runtime, LEGACY_LABEL);
+  await rm(runtime.currentPlist, { force: true });
+  await rm(runtime.legacyPlist, { force: true });
+  return [runtime.currentPlist, runtime.legacyPlist];
+}
+
+function createRuntime(options: ServiceOptions): ServiceRuntime {
+  const operatingSystem = options.operatingSystem ?? platform();
+  if (operatingSystem !== "darwin") {
+    throw new Error("Automatic service installation currently supports macOS only.");
+  }
+
+  const homeDirectory = options.homeDirectory ?? homedir();
+  const launchAgents = path.join(homeDirectory, "Library", "LaunchAgents");
+  return {
+    currentPlist: path.join(launchAgents, `${LABEL}.plist`),
+    domain: `gui/${options.userId ?? userInfo().uid}`,
+    execute: options.execute ?? execute,
+    legacyPlist: path.join(launchAgents, `${LEGACY_LABEL}.plist`),
+    projectRoot:
+      options.projectRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.."),
+  };
+}
+
+async function bootout(runtime: ServiceRuntime, label: string): Promise<void> {
+  await runtime.execute("launchctl", ["bootout", `${runtime.domain}/${label}`]).catch(() => undefined);
+}
+
+async function execute(command: string, args: string[]): Promise<void> {
+  await execFileAsync(command, args);
+}
+
+async function writeFileAtomically(file: string, contents: string): Promise<void> {
+  const temporaryFile = path.join(
+    path.dirname(file),
+    `.${path.basename(file)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`,
+  );
+  try {
+    await writeFile(temporaryFile, contents, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    await rename(temporaryFile, file);
+  } finally {
+    await rm(temporaryFile, { force: true });
+  }
+}
+
+async function fileExists(file: string): Promise<boolean> {
+  return access(file)
+    .then(() => true)
+    .catch(() => false);
 }
 
 function launchAgentXml(input: {
@@ -44,14 +129,14 @@ function launchAgentXml(input: {
   logFile: string;
 }): string {
   const environment: Record<string, string> = {
-    DECK_HOST: input.config.bindHost,
-    DECK_PORT: String(input.config.port),
-    DECK_TOKEN: input.config.token,
-    DECK_STATE_DIR: input.config.stateDir,
-    DECK_MACHINE_NAME: input.config.machineName,
-    DECK_TMUX_BIN: input.config.tmuxBin,
-    DECK_SHELL: input.config.shell,
-    DECK_ROOTS: input.config.roots.join(","),
+    MOCHA_HOST: input.config.bindHost,
+    MOCHA_PORT: String(input.config.port),
+    MOCHA_TOKEN: input.config.token,
+    MOCHA_STATE_DIR: input.config.stateDir,
+    MOCHA_MACHINE_NAME: input.config.machineName,
+    MOCHA_TMUX_BIN: input.config.tmuxBin,
+    MOCHA_SHELL: input.config.shell,
+    MOCHA_ROOTS: input.config.roots.join(","),
     PATH: process.env.PATH || "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
   };
   const envXml = Object.entries(environment)
@@ -92,8 +177,4 @@ ${envXml}
 
 function xml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-}
-
-function assertMac(): void {
-  if (platform() !== "darwin") throw new Error("Automatic service installation currently supports macOS only.");
 }

@@ -1,7 +1,7 @@
 # Mocha host protocol
 
 **Status:** current prototype contract
-**Protocol:** `deck.v1`
+**Protocol:** `mocha.v1`
 **Updated:** 2026-08-19
 
 This document preserves the transport contract used by the native Mocha client. It is platform-neutral and is the compatibility baseline while the protocol evolves toward versioned capability negotiation.
@@ -14,6 +14,14 @@ This document preserves the transport contract used by the native Mocha client. 
 - Every protected HTTP request and terminal connection requires the per-host token.
 - Treat the token as shell access. The current token is a bootstrap-era credential, not the final per-device pairing design.
 - JSON response bodies use UTF-8. Successful responses and errors are not cacheable.
+
+### Prototype namespace migration
+
+- Active runtime identifiers use `mocha`: `MOCHA_*`, `~/.mocha`, `mocha-*`, `mocha.v1`, and `mocha.token.*`.
+- On first start, a valid legacy `~/.agent-deck/config.json` token is copied atomically into `~/.mocha/config.json`; the legacy file remains as a rollback source.
+- Conflicting current and legacy credentials stop startup with an actionable error. The host never guesses which shell-access credential is authoritative.
+- Legacy `DECK_*` environment variables are rejected. Reinstall the service or rename the variables explicitly.
+- Existing `deck-*` tmux sessions remain discoverable and attachable, while every new managed session uses the `mocha-*` prefix.
 
 ## HTTP authentication
 
@@ -61,7 +69,7 @@ Returns `{ "sessions": SessionInfo[] }`, ordered by most recent activity.
 {
   "sessions": [
     {
-      "id": "deck-api-work-a1b2c3",
+      "id": "mocha-api-work-a1b2c3",
       "name": "api work",
       "createdAt": 1787086800000,
       "activeAt": 1787086860000,
@@ -121,11 +129,11 @@ wss://<tailnet-host>/api/sessions/{id}/terminal
 Offer both WebSocket subprotocols:
 
 ```text
-deck.v1
-deck.token.<base64url-encoded UTF-8 token>
+mocha.v1
+mocha.token.<base64url-encoded UTF-8 token>
 ```
 
-The server selects `deck.v1`. Authentication failure returns HTTP `401`; an unknown session returns `404` before upgrade.
+The server selects `mocha.v1`. Authentication failure returns HTTP `401`; an unknown session returns `404` before upgrade.
 
 All frames are UTF-8 JSON. A client frame larger than 64 KiB is ignored. On connection the host creates a PTY attached to the existing tmux session using `TERM=xterm-256color` and true color.
 

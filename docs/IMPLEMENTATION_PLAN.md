@@ -377,7 +377,6 @@ The browser prototype and web deployment configuration have been removed. Do not
 
 ## 12. Immediate next work
 
-1. Migrate remaining legacy `agent-deck`/`deck.*` technical identifiers to the locked `mocha` namespace before the native client depends on them.
-2. Generate the minimal iOS 26, iPhone-first Xcode project with `com.parvezrob.mocha` and Swift 6 strict concurrency.
-3. Run the terminal/transport spike and pin the qualified GhosttyKit source before implementing the complete app shell.
-4. Plan iPad-specific layout, keyboard, and interaction optimization only after the iPhone V1 gates pass.
+1. Generate the minimal iOS 26, iPhone-first Xcode project with `com.parvezrob.mocha` and Swift 6 strict concurrency.
+2. Run the terminal/transport spike and pin the qualified GhosttyKit source before implementing the complete app shell.
+3. Plan iPad-specific layout, keyboard, and interaction optimization only after the iPhone V1 gates pass.

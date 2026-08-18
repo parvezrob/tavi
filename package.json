@@ -1,5 +1,5 @@
 {
-  "name": "agent-deck",
+  "name": "mocha",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,16 +7,16 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace @agent-deck/host",
-    "check": "npm run check --workspace @agent-deck/host",
-    "dev": "npm run dev --workspace @agent-deck/host",
-    "dev:host": "npm run dev --workspace @agent-deck/host",
+    "build": "npm run build --workspace @mocha/host",
+    "check": "npm run check --workspace @mocha/host",
+    "dev": "npm run dev --workspace @mocha/host",
+    "dev:host": "npm run dev --workspace @mocha/host",
     "postinstall": "node scripts/ensure-node-pty.mjs",
-    "service:install": "npm run service:install --workspace @agent-deck/host",
-    "service:uninstall": "npm run service:uninstall --workspace @agent-deck/host",
-    "start": "npm run start --workspace @agent-deck/host",
-    "test": "npm run test --workspace @agent-deck/host",
-    "token": "npm run token --workspace @agent-deck/host"
+    "service:install": "npm run service:install --workspace @mocha/host",
+    "service:uninstall": "npm run service:uninstall --workspace @mocha/host",
+    "start": "npm run start --workspace @mocha/host",
+    "test": "npm run test --workspace @mocha/host",
+    "token": "npm run token --workspace @mocha/host"
   },
   "devDependencies": {
     "typescript": "^5.9.2"

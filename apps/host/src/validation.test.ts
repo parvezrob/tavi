@@ -15,6 +15,6 @@ test("requires a command for custom sessions", () => {
 });
 
 test("rejects unsafe session ids", () => {
-  assert.equal(safeSessionId("deck-api-abc123"), "deck-api-abc123");
+  assert.equal(safeSessionId("mocha-api-abc123"), "mocha-api-abc123");
   assert.throws(() => safeSessionId("../../other"), InputError);
 });

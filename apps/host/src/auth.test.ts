@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { IncomingMessage } from "node:http";
 import test from "node:test";
 import { bearerToken, isAuthorized, websocketToken } from "./auth.js";
+import { TERMINAL_PROTOCOL, TERMINAL_TOKEN_PROTOCOL_PREFIX } from "./protocol.js";
 
 function requestWithHeaders(headers: IncomingMessage["headers"]): IncomingMessage {
   return { headers } as IncomingMessage;
@@ -16,7 +17,7 @@ test("extracts a UTF-8 token from the terminal WebSocket protocols", () => {
   const token = "host-secret-🔐";
   const encoded = Buffer.from(token, "utf8").toString("base64url");
   const request = requestWithHeaders({
-    "sec-websocket-protocol": `deck.v1, deck.token.${encoded}`,
+    "sec-websocket-protocol": `${TERMINAL_PROTOCOL}, ${TERMINAL_TOKEN_PROTOCOL_PREFIX}${encoded}`,
   });
 
   assert.equal(websocketToken(request), token);

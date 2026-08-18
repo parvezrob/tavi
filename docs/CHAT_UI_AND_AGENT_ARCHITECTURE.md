@@ -89,7 +89,7 @@ Implementation:
 
 1. The Mocha host launches the installed `codex app-server` locally.
 2. It communicates through stdio or a protected Unix socket.
-3. It initializes with an honest client identity such as `agent_deck_host`; it never impersonates the VS Code extension.
+3. It initializes with an honest client identity such as `mocha_host`; it never impersonates the VS Code extension.
 4. It stays on the stable capability surface by default. Experimental methods require an explicit development flag and never become a silent release dependency.
 5. It maps threads, turns, messages, tool items, approvals, status, and interrupts into the Mocha capability schema.
 6. The phone receives only Mocha data through the paired-device connection.

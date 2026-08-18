@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { loadConfig, VERSION } from "./config.js";
-import { createDeckServer } from "./server.js";
+import { createMochaServer } from "./server.js";
 import { installService, uninstallService } from "./service.js";
 import { TmuxService } from "./tmux.js";
 
@@ -18,8 +18,8 @@ if (process.argv[2] === "install-service") {
 }
 
 if (process.argv[2] === "uninstall-service") {
-  const plist = await uninstallService();
-  console.log(`Mocha service removed: ${plist}`);
+  const plists = await uninstallService();
+  console.log(`Mocha service removed: ${plists.join(", ")}`);
   process.exit(0);
 }
 
@@ -32,7 +32,7 @@ try {
   process.exit(1);
 }
 
-const server = await createDeckServer({ config, tmux });
+const server = await createMochaServer({ config, tmux });
 server.listen(config.port, config.bindHost, () => {
   console.log(`Mocha ${VERSION} is running on http://${config.bindHost}:${config.port}`);
   console.log(`Machine: ${config.machineName}`);

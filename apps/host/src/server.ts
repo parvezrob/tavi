@@ -5,23 +5,24 @@ import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { bearerToken, isAuthorized, websocketToken } from "./auth.js";
 import type { HostConfig } from "./config.js";
 import { VERSION } from "./config.js";
+import { TERMINAL_PROTOCOL } from "./protocol.js";
 import { TmuxService } from "./tmux.js";
 import type { ClientTerminalMessage, HostInfo, ServerTerminalMessage } from "./types.js";
 import { InputError, parseCreateSession, safeSessionId } from "./validation.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
-interface DeckServerOptions {
+interface MochaServerOptions {
   config: HostConfig;
   tmux: TmuxService;
 }
 
-export async function createDeckServer(options: DeckServerOptions) {
+export async function createMochaServer(options: MochaServerOptions) {
   const { config, tmux } = options;
   const wss = new WebSocketServer({
     noServer: true,
     handleProtocols(protocols) {
-      return protocols.has("deck.v1") ? "deck.v1" : false;
+      return protocols.has(TERMINAL_PROTOCOL) ? TERMINAL_PROTOCOL : false;
     },
   });
 

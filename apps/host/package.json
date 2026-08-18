@@ -1,10 +1,10 @@
 {
-  "name": "@agent-deck/host",
+  "name": "@mocha/host",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "agent-deck": "dist/index.js"
+    "mocha": "dist/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

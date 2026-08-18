@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
+import { TERMINAL_TOKEN_PROTOCOL_PREFIX } from "./protocol.js";
 
 function constantTimeEqual(left: string, right: string): boolean {
   const a = Buffer.from(left);
@@ -17,7 +18,9 @@ export function websocketToken(request: IncomingMessage): string | undefined {
   const protocols = request.headers["sec-websocket-protocol"]
     ?.split(",")
     .map((protocol) => protocol.trim());
-  const encoded = protocols?.find((protocol) => protocol.startsWith("deck.token."))?.slice(11);
+  const encoded = protocols
+    ?.find((protocol) => protocol.startsWith(TERMINAL_TOKEN_PROTOCOL_PREFIX))
+    ?.slice(TERMINAL_TOKEN_PROTOCOL_PREFIX.length);
   if (!encoded) return undefined;
   try {
     return Buffer.from(encoded, "base64url").toString("utf8");

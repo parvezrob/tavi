@@ -3,7 +3,7 @@ import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import type { HostConfig } from "./config.js";
-import { createDeckServer } from "./server.js";
+import { createMochaServer } from "./server.js";
 import type { TmuxService } from "./tmux.js";
 
 const config: HostConfig = {
@@ -38,7 +38,7 @@ test("the unauthenticated health endpoint remains available", async () => {
 });
 
 async function withServer(run: (origin: string) => Promise<void>): Promise<void> {
-  const server = await createDeckServer({ config, tmux: {} as TmuxService });
+  const server = await createMochaServer({ config, tmux: {} as TmuxService });
   await listen(server);
 
   try {
