@@ -1,0 +1,28 @@
+{
+  "name": "@agent-deck/host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "agent-deck": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/index.ts",
+    "service:install": "node dist/index.js install-service",
+    "service:uninstall": "node dist/index.js uninstall-service",
+    "start": "node dist/index.js",
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "token": "tsx src/index.ts token"
+  },
+  "dependencies": {
+    "node-pty": "^1.1.0",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.5"
+  }
+}

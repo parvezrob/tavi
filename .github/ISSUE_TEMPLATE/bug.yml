@@ -1,0 +1,58 @@
+name: Known issue
+description: Record a reproducible defect or production-quality gap
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Do not include access tokens, terminal contents, prompts, private paths, credentials, or unredacted diagnostics.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: State the observed behavior and why it is a defect.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Include the smallest deterministic sequence, or explain why reproduction is intermittent.
+      placeholder: |
+        1. Pair with…
+        2. Open…
+        3. Observe…
+    validations:
+      required: true
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact
+      options:
+        - Release blocker
+        - Core flow degraded
+        - Workaround available
+        - Minor or cosmetic
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: App/host version, device, OS, connection path, and agent/provider when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable conditions that prove the issue is fixed, including regression coverage.
+    validations:
+      required: true

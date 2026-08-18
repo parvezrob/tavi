@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Mocha market positioning map</title>
+  <desc id="desc">Products are positioned by provider neutrality on the horizontal axis and mobile intervention quality on the vertical axis. Mocha targets the high-neutrality, high-intervention top-right position.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#12161b"/><stop offset="1" stop-color="#090b0d"/></linearGradient>
+    <radialGradient id="target"><stop stop-color="#c7ff4a" stop-opacity=".24"/><stop offset="1" stop-color="#c7ff4a" stop-opacity="0"/></radialGradient>
+    <filter id="glow"><feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#c7ff4a" flood-opacity=".48"/></filter>
+  </defs>
+  <rect width="1200" height="760" rx="36" fill="url(#bg)"/>
+  <text x="64" y="72" fill="#f4f7f9" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="31" font-weight="700">Where Mocha should compete</text>
+  <text x="64" y="105" fill="#9ea6ae" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="16">Desk-research synthesis, not a measured market-share chart. Positions are directional product judgments.</text>
+
+  <rect x="134" y="156" width="950" height="476" rx="26" fill="#0c0f12" stroke="#2b3239"/>
+  <line x1="178" y1="580" x2="1042" y2="580" stroke="#65717b" stroke-width="2"/>
+  <line x1="178" y1="580" x2="178" y2="198" stroke="#65717b" stroke-width="2"/>
+  <line x1="178" y1="390" x2="1042" y2="390" stroke="#222a31" stroke-width="1" stroke-dasharray="8 8"/>
+  <line x1="610" y1="198" x2="610" y2="580" stroke="#222a31" stroke-width="1" stroke-dasharray="8 8"/>
+  <text x="178" y="612" fill="#8e98a1" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="13">Provider-specific</text>
+  <text x="1042" y="612" text-anchor="end" fill="#8e98a1" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="13">Provider-neutral</text>
+  <text x="610" y="658" text-anchor="middle" fill="#d4dbe1" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="16" font-weight="700">Provider neutrality →</text>
+  <text x="94" y="582" transform="rotate(-90 94 582)" fill="#8e98a1" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="13">Terminal access only</text>
+  <text x="94" y="210" transform="rotate(-90 94 210)" fill="#8e98a1" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="13">Decision-first control plane</text>
+  <text x="54" y="438" transform="rotate(-90 54 438)" fill="#d4dbe1" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="16" font-weight="700">Mobile intervention quality →</text>
+
+  <circle cx="936" cy="238" r="112" fill="url(#target)"/>
+  <g filter="url(#glow)"><circle cx="936" cy="238" r="13" fill="#c7ff4a"/></g>
+  <rect x="827" y="266" width="218" height="54" rx="18" fill="#1b2317" stroke="#6c8b31"/>
+  <text x="936" y="289" text-anchor="middle" fill="#eaffbd" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="17" font-weight="800">MOCHA</text>
+  <text x="936" y="308" text-anchor="middle" fill="#aec778" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11">direct • durable • attention-first</text>
+
+  <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">
+    <circle cx="300" cy="282" r="9" fill="#ff8c69"/><text x="318" y="288" fill="#e4e9ed" font-size="14">Claude Remote Control</text>
+    <circle cx="340" cy="236" r="9" fill="#78a9ff"/><text x="358" y="242" fill="#e4e9ed" font-size="14">Codex Remote</text>
+    <circle cx="360" cy="334" r="9" fill="#a887ff"/><text x="378" y="340" fill="#e4e9ed" font-size="14">GitHub Copilot Remote</text>
+
+    <circle cx="730" cy="296" r="9" fill="#f2ce58"/><text x="748" y="302" fill="#e4e9ed" font-size="14">Orca</text>
+    <circle cx="780" cy="345" r="9" fill="#ff6fa8"/><text x="798" y="351" fill="#e4e9ed" font-size="14">T3 Code</text>
+    <circle cx="674" cy="357" r="9" fill="#72dcc5"/><text x="692" y="363" fill="#e4e9ed" font-size="14">Happy / Happier</text>
+
+    <circle cx="854" cy="423" r="9" fill="#7bd36a"/><text x="872" y="429" fill="#e4e9ed" font-size="14">Moshi</text>
+    <circle cx="790" cy="480" r="9" fill="#6ab4ff"/><text x="808" y="486" fill="#e4e9ed" font-size="14">Agentmux</text>
+    <circle cx="910" cy="509" r="9" fill="#a4abb2"/><text x="928" y="515" fill="#e4e9ed" font-size="14">Remux</text>
+    <circle cx="690" cy="520" r="9" fill="#d088ff"/><text x="708" y="526" fill="#e4e9ed" font-size="14">ShadowTerm</text>
+  </g>
+
+  <rect x="134" y="690" width="950" height="1" fill="#2b3239"/>
+  <text x="134" y="724" fill="#aeb7bf" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="14">White space is not “more terminal features.” It is combining native decision views with a universal terminal and a visibly direct network path.</text>
+</svg>

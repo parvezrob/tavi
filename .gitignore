@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+.vercel/
+coverage/
+
+# Apple development
+.build/
+.swiftpm/
+DerivedData/
+xcuserdata/
+*.xcuserstate

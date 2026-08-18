@@ -1,0 +1,31 @@
+{
+  "name": "agent-deck",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @agent-deck/host",
+    "check": "npm run check --workspace @agent-deck/host",
+    "dev": "npm run dev --workspace @agent-deck/host",
+    "dev:host": "npm run dev --workspace @agent-deck/host",
+    "postinstall": "node scripts/ensure-node-pty.mjs",
+    "service:install": "npm run service:install --workspace @agent-deck/host",
+    "service:uninstall": "npm run service:uninstall --workspace @agent-deck/host",
+    "start": "npm run start --workspace @agent-deck/host",
+    "test": "npm run test --workspace @agent-deck/host",
+    "token": "npm run token --workspace @agent-deck/host"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "node-pty@1.1.0": true
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
