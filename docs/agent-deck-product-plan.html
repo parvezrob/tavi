@@ -641,7 +641,7 @@
             <table>
               <thead><tr><th>Layer</th><th>Decision</th><th>Why</th></tr></thead>
               <tbody>
-                <tr><td><strong>iOS UI</strong></td><td>SwiftUI</td><td>Native navigation, system surfaces, accessibility, Keychain/biometrics, iPad adaptation.</td></tr>
+                <tr><td><strong>iOS UI</strong></td><td>SwiftUI · iOS 26+</td><td>Native navigation, system surfaces, accessibility, and Keychain/biometrics; iPhone first, with iPad optimization planned later.</td></tr>
                 <tr><td><strong>Terminal</strong></td><td>UIKit-hosted GhosttyKit + Metal</td><td>Moshi and Remux validate the native performance pattern; Mocha owns a pinned XCFramework and small reviewable patch set.</td></tr>
                 <tr><td><strong>Terminal contingency</strong></td><td>SwiftTerm only for a release blocker</td><td>Preserves an escape hatch without planning a costly renderer migration after v1.</td></tr>
                 <tr><td><strong>Transport</strong></td><td>HTTPS + WebSocket over Tailscale/private network</td><td>Current proof works and is fast; host can expose structured capabilities beyond SSH.</td></tr>

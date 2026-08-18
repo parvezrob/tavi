@@ -342,6 +342,9 @@ Measure whether users can identify the next session to open in under five second
 | Decision | Status | Rationale |
 | --- | --- | --- |
 | Native Swift/SwiftUI for iOS | Locked | Best path to system integration, touch/keyboard fidelity, terminal performance, and App Store-quality UX. |
+| Minimum deployment target | Locked | V1 requires iOS 26 or later; compatibility with earlier iOS releases is not a release goal. |
+| Device priority | Locked | V1 is designed, implemented, and release-gated for iPhone first. iPad-specific optimization is a later planned phase. |
+| Technical identity | Locked | Product/target/module `Mocha`, bundle identifier `com.parvezrob.mocha`, and durable internal `mocha` namespace. Migrate legacy `agent-deck`/`deck.*` identifiers before native compatibility depends on them. |
 | Android later | Locked | Preserve protocol now; avoid splitting product discovery and terminal-engine work. |
 | Tailscale direct-first | Locked | Strong firsthand result and external evidence for direct-path performance; no mandatory hosted relay. |
 | tmux + Herdr | Locked | tmux supplies universal durability; Herdr supplies richer attention semantics. |
@@ -356,6 +359,7 @@ Measure whether users can identify the next session to open in under five second
 | SwiftTerm renderer | Contingency only | Retain as an escape hatch if an unpatchable Ghostty/Metal defect blocks release, not as the planned first renderer. |
 | Optional Chat view | Locked architecture, post-terminal delivery | One durable session with Terminal and capability-gated Chat projections; Codex uses official app-server, Claude follows the stricter auth matrix, and terminal remains authoritative. |
 | Mandatory cloud account/relay | Rejected | Conflicts with performance, privacy, cost, and ownership proposition. |
+| Browser client | Removed | SwiftUI is the sole client product. Do not restore a browser client or web deployment without a new product decision and maintenance budget. |
 
 ## 16. Research sources
 

@@ -65,7 +65,7 @@ Priority labels:
 | Terminal accessory row | Orca, Moshi, Agentmux, ShadowTerm expose hard-to-type keys. | Esc, Tab, Shift-Tab, Ctrl, arrows, interrupt, customizable slots. | Now |
 | Live typing mode | Orca distinguishes reply/composer from direct live input. | User-controlled mode with visible state. | Now |
 | Copy/paste and OSC 52 | Moshi, Agentmux, ShadowTerm call this out. | Support with security preference and clear clipboard feedback. | Now |
-| Hardware keyboard | Competitive iPad tools support it. | Correct shortcuts/focus, especially on iPad. | Now |
+| Hardware keyboard | Competitive mobile terminal tools support it. | Correct terminal key handling in the iPhone-first client; iPad-specific layout and focus optimization follows after V1. | Now |
 | CJK/IME and wide-glyph correctness | Moshi and Agentmux explicitly address it; terminal engines often fail here. | Include in renderer corpus and acceptance tests. | Now |
 | Gestures/D-pad/custom keyboard layouts | Moshi and ShadowTerm go deep. | Start with a small excellent control row; add customization from usage evidence. | Next |
 | Voice input | Moshi, Orca, ShadowTerm and vendor apps support it. | On-device dictation into composer after core input is stable. | Next |

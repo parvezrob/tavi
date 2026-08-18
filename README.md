@@ -4,7 +4,7 @@ Mocha is a fast, phone-first remote control surface for coding agents already ru
 
 ## Product planning
 
-The maintained PRD, research, feature landscape, implementation plan, and visual review report live in [`docs/`](./docs/README.md). The product is a native SwiftUI iOS app. Android follows after the iOS product and protocol are proven.
+The maintained PRD, research, feature landscape, implementation plan, and visual review report live in [`docs/`](./docs/README.md). The product is a native SwiftUI app with a minimum deployment target of iOS 26 and an iPhone-first V1. iPad optimization and Android follow after the iPhone product and protocol are proven.
 
 All implementation work is governed by the non-negotiable [`Mocha development principles`](./docs/DEVELOPMENT_PRINCIPLES.md). The SwiftUI app is the only client product; Mocha does not ship or maintain a browser client. The platform-neutral host contract lives in [`protocol/`](./protocol/README.md).
 
