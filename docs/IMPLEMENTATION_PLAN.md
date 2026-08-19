@@ -27,7 +27,7 @@ The native iOS app should consume a versioned evolution of this host protocol. W
 - Treat [`assets/agent-deck-v1-pairing-flow.png`](./assets/agent-deck-v1-pairing-flow.png) as the approved V1 scan-first onboarding target.
 - Use the installed Xcode 26.6 toolchain and configure a free Personal Team for device testing.
 - Create the minimal iPhone-first SwiftUI workspace with product/target/module `Mocha`, bundle identifier `com.parvezrob.mocha`, minimum deployment target iOS 26, and Swift 6 language mode.
-- Add a reproducible script/build job for the pinned GhosttyKit XCFramework and record the exact upstream/fork commit plus downstream patches.
+- Add a reproducible local script for the pinned GhosttyKit XCFramework and record the exact upstream/fork commit plus downstream patches. Do not rebuild GhosttyKit on GitHub-hosted CI without owner approval.
 - Build a recorded terminal corpus from Codex, Claude Code, tmux, Herdr, shell, Unicode, and high-frequency redraw cases.
 - Add host-side timestamping and connection diagnostics needed for latency measurement.
 - Document the initial protocol schema and capability negotiation.

@@ -21,7 +21,8 @@ Keep this file lean. It routes work and protects shared boundaries; detailed eng
 - GitHub Issues are the work queue and the only known-issue tracker. Do not create a local bug ledger, session diary, or shadow backlog.
 - Every implementation change or known defect starts with an issue containing scope and testable acceptance criteria. Read-only research and owner-requested documentation may proceed without one.
 - Before editing, claim the issue and name the paths you expect to own. Agents must not share a branch or concurrently edit overlapping files. Coordinate overlap in the issue before continuing.
-- **MVP fast track:** until the owner declares the MVP gate complete, one active integration session may commit issue-scoped work directly to `main` after all local gates pass, then push and verify remote CI. Parallel sessions use isolated branches/worktrees and hand commits to that integrator.
+- **MVP fast track:** until the owner declares the MVP gate complete, one active integration session may commit issue-scoped work directly to `main` after all local gates pass, then push and verify the applicable remote CI. Parallel sessions use isolated branches/worktrees and hand commits to that integrator.
+- GitHub-hosted CI runs host checks only. Do not build GhosttyKit or the iOS app on hosted CI without explicit owner approval; run native build/test gates locally and on physical devices.
 - **After MVP:** one issue has one active owner, one short-lived branch/worktree, and one PR. Use `codex/<issue>-<slug>` for Codex branches; other agents use their own prefix. Let CI pass and leave merging to the repository owner unless they explicitly ask otherwise.
 - Keep `main` releasable in both modes. Never force-push or rewrite shared history.
 - Use focused conventional commits such as `feat:`, `fix:`, `test:`, `docs:`, or `chore:`.

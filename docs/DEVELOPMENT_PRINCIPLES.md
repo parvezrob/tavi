@@ -99,7 +99,7 @@ Mocha does not currently ship a React client. This rule remains the acceptance p
 
 ## 10. Concurrency is safe by construction
 
-- Build Swift targets in Swift 6 language mode with complete concurrency checking enabled in local development and CI.
+- Build Swift targets in Swift 6 language mode with complete concurrency checking enabled locally. GitHub-hosted CI must not build GhosttyKit or the iOS app without explicit owner approval; native gates run locally and on physical devices until an approved artifact strategy exists.
 - Give mutable state one explicit isolation domain and owner. Prefer immutable values, value semantics, structured concurrency, actors, and `Sendable` boundaries.
 - UI state and updates belong to the main actor; network, persistence, protocol, and rendering work must not block it.
 - Cancellation and deadlines propagate through the complete operation tree. Unstructured or detached tasks require a documented lifetime, owner, cancellation path, and review justification.
