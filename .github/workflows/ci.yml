@@ -33,18 +33,26 @@ jobs:
 
   ios:
     runs-on: macos-26
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Select Xcode 26.6
         run: sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+      - name: Install Metal Toolchain when missing
+        run: |
+          if ! xcrun -sdk iphoneos metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+      - name: Build pinned GhosttyKit
+        run: ./scripts/build-ghosttykit.sh
       - name: Build
         run: |
           xcodebuild -quiet build \
             -project apps/ios/Mocha.xcodeproj \
             -scheme Mocha \
+            -configuration Release \
             -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
             CODE_SIGNING_ALLOWED=NO
       - name: Test

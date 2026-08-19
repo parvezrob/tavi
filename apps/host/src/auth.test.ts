@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import type { IncomingMessage } from "node:http";
 import test from "node:test";
-import { bearerToken, isAuthorized, websocketToken } from "./auth.js";
-import { TERMINAL_PROTOCOL, TERMINAL_TOKEN_PROTOCOL_PREFIX } from "./protocol.js";
+import { bearerToken, isAuthorized } from "./auth.js";
 
 function requestWithHeaders(headers: IncomingMessage["headers"]): IncomingMessage {
   return { headers } as IncomingMessage;
@@ -11,16 +10,6 @@ function requestWithHeaders(headers: IncomingMessage["headers"]): IncomingMessag
 test("extracts an HTTP bearer token", () => {
   const request = requestWithHeaders({ authorization: "Bearer host-secret" });
   assert.equal(bearerToken(request), "host-secret");
-});
-
-test("extracts a UTF-8 token from the terminal WebSocket protocols", () => {
-  const token = "host-secret-🔐";
-  const encoded = Buffer.from(token, "utf8").toString("base64url");
-  const request = requestWithHeaders({
-    "sec-websocket-protocol": `${TERMINAL_PROTOCOL}, ${TERMINAL_TOKEN_PROTOCOL_PREFIX}${encoded}`,
-  });
-
-  assert.equal(websocketToken(request), token);
 });
 
 test("rejects absent and incorrect credentials", () => {

@@ -17,7 +17,7 @@ This document preserves the transport contract used by the native Mocha client. 
 
 ### Prototype namespace migration
 
-- Active runtime identifiers use `mocha`: `MOCHA_*`, `~/.mocha`, `mocha-*`, `mocha.v1`, and `mocha.token.*`.
+- Active runtime identifiers use `mocha`: `MOCHA_*`, `~/.mocha`, `mocha-*`, and `mocha.v1`.
 - On first start, a valid legacy `~/.agent-deck/config.json` token is copied atomically into `~/.mocha/config.json`; the legacy file remains as a rollback source.
 - Conflicting current and legacy credentials stop startup with an actionable error. The host never guesses which shell-access credential is authoritative.
 - Legacy `DECK_*` environment variables are rejected. Reinstall the service or rename the variables explicitly.
@@ -126,16 +126,15 @@ Connect to:
 wss://<tailnet-host>/api/sessions/{id}/terminal
 ```
 
-Offer both WebSocket subprotocols:
+Send the access token in the standard authorization header:
 
-```text
-mocha.v1
-mocha.token.<base64url-encoded UTF-8 token>
+```http
+Authorization: Bearer <token>
 ```
 
-The server selects `mocha.v1`. Authentication failure returns HTTP `401`; an unknown session returns `404` before upgrade.
+Offer only the `mocha.v1` WebSocket subprotocol. The server must select that exact protocol; a missing or unsupported protocol returns HTTP `400` before session lookup or PTY creation. Authentication failure returns `401`, and an unknown session returns `404` before upgrade.
 
-All frames are UTF-8 JSON. A client frame larger than 64 KiB is ignored. On connection the host creates a PTY attached to the existing tmux session using `TERM=xterm-256color` and true color.
+Every application frame is a UTF-8 JSON text frame no larger than 64 KiB. Binary frames return an error and close with code `1003`; oversized client frames return an error and close with code `1009`. The host chunks large PTY output into bounded frames and pauses the temporary PTY attachment when the WebSocket send buffer crosses its high-water mark. On connection the host creates the attachment using `TERM=xterm-256color` and true color.
 
 ### Client messages
 
@@ -153,6 +152,14 @@ Terminal resize:
 
 The host clamps columns to `20...400` and rows to `5...200`.
 
+Connection liveness probe:
+
+```json
+{ "type": "ping", "id": "5A13F176-0F83-4DF9-94BB-A63A678A1F2A" }
+```
+
+`id` is an opaque 1–64 character ASCII identifier using letters, digits, and hyphens. The host echoes it in a `pong`; it does not interpret or persist the value.
+
 ### Server messages
 
 ```json
@@ -164,6 +171,10 @@ The host clamps columns to `20...400` and rows to `5...200`.
 ```
 
 ```json
+{ "type": "pong", "id": "5A13F176-0F83-4DF9-94BB-A63A678A1F2A" }
+```
+
+```json
 { "type": "exit", "code": 0, "signal": 15 }
 ```
 
@@ -171,7 +182,9 @@ The host clamps columns to `20...400` and rows to `5...200`.
 { "type": "error", "message": "Invalid terminal message." }
 ```
 
-`signal` is optional. A normal PTY exit closes the socket with code `1000`. Failure to open the terminal closes with code `1011`. Closing the socket kills only the temporary attachment PTY; tmux continues to own the durable session and its child process.
+`signal` is optional. Unknown or malformed messages return an `error` without writing to the PTY. A normal PTY exit closes the socket with code `1000`. Failure to open the terminal closes with code `1011`. Closing the socket kills only the temporary attachment PTY; tmux continues to own the durable session and its child process.
+
+The shared compatibility fixtures live in [`fixtures/terminal-v1/`](./fixtures/terminal-v1/). They are synthetic and contain no captured prompts, terminal contents, credentials, or private paths.
 
 ## Client invariants
 

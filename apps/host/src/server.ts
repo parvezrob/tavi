@@ -2,23 +2,33 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { arch, platform } from "node:os";
 import * as pty from "node-pty";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
-import { bearerToken, isAuthorized, websocketToken } from "./auth.js";
+import { bearerToken, isAuthorized } from "./auth.js";
 import type { HostConfig } from "./config.js";
 import { VERSION } from "./config.js";
-import { TERMINAL_PROTOCOL } from "./protocol.js";
+import {
+  MAX_TERMINAL_FRAME_BYTES,
+  chunkTerminalOutput,
+  parseClientTerminalMessage,
+  TERMINAL_PROTOCOL,
+} from "./protocol.js";
 import { TmuxService } from "./tmux.js";
-import type { ClientTerminalMessage, HostInfo, ServerTerminalMessage } from "./types.js";
+import type { HostInfo, ServerTerminalMessage } from "./types.js";
 import { InputError, parseCreateSession, safeSessionId } from "./validation.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
+const WEBSOCKET_HIGH_WATER_BYTES = 512 * 1024;
+const WEBSOCKET_LOW_WATER_BYTES = 128 * 1024;
+const MAX_PENDING_OUTPUT_BYTES = 1024 * 1024;
+const BACKPRESSURE_POLL_MILLISECONDS = 25;
 
-interface MochaServerOptions {
+export interface MochaServerOptions {
   config: HostConfig;
   tmux: TmuxService;
+  spawnTerminal?: typeof pty.spawn;
 }
 
 export async function createMochaServer(options: MochaServerOptions) {
-  const { config, tmux } = options;
+  const { config, tmux, spawnTerminal = pty.spawn } = options;
   const wss = new WebSocketServer({
     noServer: true,
     handleProtocols(protocols) {
@@ -47,8 +57,13 @@ export async function createMochaServer(options: MochaServerOptions) {
     try {
       const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
       const match = url.pathname.match(/^\/api\/sessions\/([^/]+)\/terminal$/);
-      if (!match || !isAuthorized(websocketToken(request), config.token)) {
+      if (!match || !isAuthorized(bearerToken(request), config.token)) {
         socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      if (!offersTerminalProtocol(request)) {
+        socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
         socket.destroy();
         return;
       }
@@ -70,7 +85,7 @@ export async function createMochaServer(options: MochaServerOptions) {
 
   wss.on("connection", (websocket: WebSocket, _request: IncomingMessage, id: string) => {
     try {
-      bridgeTerminal(websocket, id, config, tmux);
+      bridgeTerminal(websocket, id, config, tmux, spawnTerminal);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not open the terminal.";
       sendTerminal(websocket, { type: "error", message });
@@ -147,11 +162,17 @@ async function routeRequest(
   sendJson(response, 404, { error: "Not found." });
 }
 
-function bridgeTerminal(websocket: WebSocket, id: string, config: HostConfig, tmux: TmuxService): void {
+function bridgeTerminal(
+  websocket: WebSocket,
+  id: string,
+  config: HostConfig,
+  tmux: TmuxService,
+  spawnTerminal: typeof pty.spawn,
+): void {
   const env = { ...process.env };
   delete env.npm_config_prefix;
   delete env.NPM_CONFIG_PREFIX;
-  const terminal = pty.spawn(config.tmuxBin, tmux.attachArgs(id), {
+  const terminal = spawnTerminal(config.tmuxBin, tmux.attachArgs(id), {
     name: "xterm-256color",
     cols: 100,
     rows: 30,
@@ -164,9 +185,76 @@ function bridgeTerminal(websocket: WebSocket, id: string, config: HostConfig, tm
     handleFlowControl: true,
   });
 
+  let attachmentClosed = false;
+  let terminalPaused = false;
+  let pendingOutputBytes = 0;
+  let backpressureTimer: NodeJS.Timeout | undefined;
+  const pendingOutputChunks: string[] = [];
+
+  const clearBackpressureTimer = () => {
+    if (backpressureTimer) clearInterval(backpressureTimer);
+    backpressureTimer = undefined;
+  };
+  const killAttachment = () => {
+    clearBackpressureTimer();
+    if (attachmentClosed) return;
+    attachmentClosed = true;
+    terminal.kill();
+  };
+  const pauseTerminal = () => {
+    if (!terminalPaused) terminal.pause();
+    terminalPaused = true;
+    if (backpressureTimer) return;
+    backpressureTimer = setInterval(() => {
+      if (websocket.readyState !== websocket.OPEN) {
+        clearBackpressureTimer();
+        return;
+      }
+      if (websocket.bufferedAmount > WEBSOCKET_LOW_WATER_BYTES) return;
+      flushOutput();
+      if (pendingOutputChunks.length === 0 && websocket.bufferedAmount <= WEBSOCKET_LOW_WATER_BYTES) {
+        terminal.resume();
+        terminalPaused = false;
+        clearBackpressureTimer();
+      }
+    }, BACKPRESSURE_POLL_MILLISECONDS);
+  };
+  const flushOutput = () => {
+    while (
+      pendingOutputChunks.length > 0 &&
+      websocket.readyState === websocket.OPEN &&
+      websocket.bufferedAmount <= WEBSOCKET_HIGH_WATER_BYTES
+    ) {
+      const chunk = pendingOutputChunks.shift();
+      if (chunk === undefined) break;
+      pendingOutputBytes -= Buffer.byteLength(chunk);
+      if (!sendTerminal(websocket, { type: "output", data: chunk })) break;
+    }
+    if (pendingOutputChunks.length > 0 || websocket.bufferedAmount > WEBSOCKET_HIGH_WATER_BYTES) {
+      pauseTerminal();
+    }
+  };
+
   sendTerminal(websocket, { type: "ready" });
-  terminal.onData((data) => sendTerminal(websocket, { type: "output", data }));
+  terminal.onData((data) => {
+    const dataBytes = Buffer.byteLength(data);
+    if (dataBytes > MAX_PENDING_OUTPUT_BYTES - pendingOutputBytes) {
+      sendTerminal(websocket, {
+        type: "error",
+        message: "Terminal output exceeded the connection safety buffer.",
+      });
+      websocket.close(1013, "terminal output overloaded");
+      killAttachment();
+      return;
+    }
+    pendingOutputChunks.push(...chunkTerminalOutput(data));
+    pendingOutputBytes += dataBytes;
+    flushOutput();
+  });
   terminal.onExit(({ exitCode, signal }) => {
+    if (attachmentClosed) return;
+    attachmentClosed = true;
+    clearBackpressureTimer();
     sendTerminal(websocket, {
       type: "exit",
       code: exitCode,
@@ -175,30 +263,52 @@ function bridgeTerminal(websocket: WebSocket, id: string, config: HostConfig, tm
     websocket.close(1000, "terminal exited");
   });
 
-  websocket.on("message", (raw: RawData) => {
-    if (Buffer.byteLength(raw.toString()) > MAX_BODY_BYTES) return;
+  websocket.on("message", (raw: RawData, isBinary: boolean) => {
+    if (isBinary) {
+      sendTerminal(websocket, { type: "error", message: "Binary terminal messages are unsupported." });
+      websocket.close(1003, "text frames required");
+      return;
+    }
+    if (Buffer.byteLength(raw.toString()) > MAX_TERMINAL_FRAME_BYTES) {
+      sendTerminal(websocket, { type: "error", message: "Terminal message is too large." });
+      websocket.close(1009, "message too large");
+      return;
+    }
     try {
-      const message = JSON.parse(raw.toString()) as ClientTerminalMessage;
-      if (message.type === "input" && typeof message.data === "string") {
-        terminal.write(message.data.slice(0, MAX_BODY_BYTES));
-      } else if (
-        message.type === "resize" &&
-        Number.isInteger(message.cols) &&
-        Number.isInteger(message.rows)
-      ) {
-        terminal.resize(clamp(message.cols, 20, 400), clamp(message.rows, 5, 200));
+      const message = parseClientTerminalMessage(JSON.parse(raw.toString()));
+      if (!message) {
+        sendTerminal(websocket, { type: "error", message: "Invalid terminal message." });
+        return;
+      }
+      switch (message.type) {
+        case "input":
+          terminal.write(message.data);
+          break;
+        case "resize":
+          terminal.resize(clamp(message.cols, 20, 400), clamp(message.rows, 5, 200));
+          break;
+        case "ping":
+          sendTerminal(websocket, { type: "pong", id: message.id });
+          break;
       }
     } catch {
       sendTerminal(websocket, { type: "error", message: "Invalid terminal message." });
     }
   });
 
-  websocket.once("close", () => terminal.kill());
-  websocket.once("error", () => terminal.kill());
+  websocket.once("close", killAttachment);
+  websocket.once("error", killAttachment);
 }
 
-function sendTerminal(websocket: WebSocket, message: ServerTerminalMessage): void {
-  if (websocket.readyState === websocket.OPEN) websocket.send(JSON.stringify(message));
+function sendTerminal(websocket: WebSocket, message: ServerTerminalMessage): boolean {
+  if (websocket.readyState !== websocket.OPEN) return false;
+  const frame = JSON.stringify(message);
+  if (Buffer.byteLength(frame) > MAX_TERMINAL_FRAME_BYTES) {
+    websocket.close(1011, "server frame too large");
+    return false;
+  }
+  websocket.send(frame);
+  return true;
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
@@ -238,4 +348,10 @@ function setCors(request: IncomingMessage, response: ServerResponse): void {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function offersTerminalProtocol(request: IncomingMessage): boolean {
+  const value = request.headers["sec-websocket-protocol"];
+  const header = Array.isArray(value) ? value.join(",") : value;
+  return header?.split(",").some((protocol) => protocol.trim() === TERMINAL_PROTOCOL) ?? false;
 }

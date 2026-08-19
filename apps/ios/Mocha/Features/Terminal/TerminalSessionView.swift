@@ -1,0 +1,256 @@
+import SwiftUI
+import UIKit
+
+struct TerminalSessionView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var controller = TerminalSessionController()
+    @State private var credential = ""
+    @State private var draft = ""
+    @State private var host = ""
+    @State private var sessionID = ""
+    @State private var showingConnection = true
+    @State private var didApplyDevelopmentBootstrap = false
+
+    private let developmentBootstrap: TerminalDevelopmentBootstrap
+
+    init() {
+        let bootstrap = TerminalDevelopmentBootstrap.launchEnvironment()
+        developmentBootstrap = bootstrap
+        _host = State(initialValue: bootstrap.host)
+        _sessionID = State(initialValue: bootstrap.sessionID)
+        _credential = State(initialValue: bootstrap.credential)
+        _showingConnection = State(initialValue: !bootstrap.isComplete)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                connectionBanner
+                AgentTerminalView(
+                    bridge: controller.bridge,
+                    isActive: scenePhase == .active,
+                    onGridSizeChange: controller.terminalGridDidChange,
+                    onRendererFailure: controller.rendererDidFail
+                )
+                .background(.black)
+
+                quickKeys
+                composer
+            }
+            .background(.black)
+            .navigationTitle("Terminal")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Connection", systemImage: "network") {
+                        showingConnection = true
+                    }
+                    .accessibilityIdentifier("terminal.connection")
+                }
+            }
+            .sheet(isPresented: $showingConnection) {
+                connectionSheet
+                    .presentationDetents([.medium, .large])
+            }
+            .onChange(of: scenePhase) { _, phase in
+                switch phase {
+                case .active:
+                    controller.sceneDidBecomeActive()
+                case .background:
+                    controller.sceneWillResignActive()
+                case .inactive:
+                    break
+                @unknown default:
+                    controller.sceneWillResignActive()
+                }
+            }
+            .task {
+                #if DEBUG
+                if let chunks = developmentBootstrap.rendererStressChunks {
+                    while !Task.isCancelled {
+                        for chunk in chunks {
+                            guard !Task.isCancelled else { return }
+                            controller.renderDevelopmentOutput(chunk)
+                            await Task.yield()
+                        }
+                        try? await Task.sleep(for: .milliseconds(10))
+                    }
+                    return
+                }
+                #endif
+                guard developmentBootstrap.isComplete,
+                      !didApplyDevelopmentBootstrap else { return }
+                didApplyDevelopmentBootstrap = true
+                controller.connect(
+                    hostText: developmentBootstrap.host,
+                    sessionText: developmentBootstrap.sessionID,
+                    credential: developmentBootstrap.credential
+                )
+                credential = ""
+            }
+            .onDisappear {
+                controller.stop()
+            }
+        }
+    }
+
+    private var connectionBanner: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(connectionColor)
+                    .frame(width: 8, height: 8)
+                Text(controller.connectionState.accessibilityDescription)
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                if let firstPaint = controller.firstPaintMilliseconds {
+                    Text("First paint \(firstPaint, format: .number.precision(.fractionLength(0))) ms")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                if let latency = controller.inputToOutputMilliseconds {
+                    Text("I/O \(latency, format: .number.precision(.fractionLength(0))) ms")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let error = controller.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.bar)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("terminal.status")
+    }
+
+    private var quickKeys: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(TerminalQuickKey.allCases) { key in
+                    Button(key.rawValue) {
+                        controller.sendQuickKey(key)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!controller.connectionState.canSubmitInput)
+                    .accessibilityLabel(quickKeyAccessibilityLabel(key))
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
+        .background(.bar)
+    }
+
+    private var composer: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            TextField("Send to terminal", text: $draft, axis: .vertical)
+                .lineLimit(1...5)
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .accessibilityIdentifier("terminal.composer")
+
+            Button("Paste", systemImage: "doc.on.clipboard") {
+                if let pasted = UIPasteboard.general.string {
+                    draft += pasted
+                }
+            }
+            .labelStyle(.iconOnly)
+            .accessibilityHint("Reads the clipboard only after you tap")
+
+            Button("Send", systemImage: "arrow.up.circle.fill") {
+                let submitted = draft
+                draft = ""
+                controller.submit(text: submitted)
+            }
+            .labelStyle(.iconOnly)
+            .font(.title2)
+            .disabled(draft.isEmpty || !controller.connectionState.canSubmitInput)
+            .accessibilityIdentifier("terminal.send")
+        }
+        .padding()
+        .background(.bar)
+    }
+
+    private var connectionSheet: some View {
+        NavigationStack {
+            Form {
+                Section("Development host") {
+                    TextField("https://mac-name.tailnet.ts.net", text: $host)
+                        .textContentType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("connection.host")
+                    TextField("tmux session ID", text: $sessionID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("connection.session")
+                    SecureField("Host access token", text: $credential)
+                        .textContentType(.password)
+                        .accessibilityIdentifier("connection.token")
+                }
+
+                Section {
+                    Button("Connect") {
+                        controller.connect(
+                            hostText: host,
+                            sessionText: sessionID,
+                            credential: credential
+                        )
+                        credential = ""
+                        showingConnection = false
+                    }
+                    .disabled(host.isEmpty || sessionID.isEmpty || credential.isEmpty)
+                    .accessibilityIdentifier("connection.connect")
+
+                    if controller.connectionState != .idle {
+                        Button("Disconnect", role: .destructive) {
+                            controller.stop()
+                        }
+                    }
+                } footer: {
+                    Text("The token stays in memory for this connection and is never saved or logged. Only Tailscale Serve .ts.net addresses are accepted. Mocha cannot detect Funnel, so keep Funnel disabled.")
+                }
+            }
+            .accessibilityIdentifier("connection.sheet")
+            .navigationTitle("Connection")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showingConnection = false }
+                }
+            }
+        }
+    }
+
+    private var connectionColor: Color {
+        switch controller.connectionState {
+        case .connected:
+            .green
+        case .connecting, .reconnecting:
+            .orange
+        case .failed, .ended:
+            .red
+        case .idle, .suspended:
+            .secondary
+        }
+    }
+
+    private func quickKeyAccessibilityLabel(_ key: TerminalQuickKey) -> String {
+        switch key {
+        case .escape: "Escape"
+        case .tab: "Tab"
+        case .interrupt: "Interrupt with Control C"
+        case .up: "Up arrow"
+        case .down: "Down arrow"
+        }
+    }
+}
+
+#Preview {
+    TerminalSessionView()
+}

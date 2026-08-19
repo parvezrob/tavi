@@ -36,10 +36,12 @@ export interface CreateSessionInput {
 
 export type ClientTerminalMessage =
   | { type: "input"; data: string }
-  | { type: "resize"; cols: number; rows: number };
+  | { type: "resize"; cols: number; rows: number }
+  | { type: "ping"; id: string };
 
 export type ServerTerminalMessage =
   | { type: "ready" }
   | { type: "output"; data: string }
+  | { type: "pong"; id: string }
   | { type: "exit"; code: number; signal?: number }
   | { type: "error"; message: string };

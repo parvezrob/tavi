@@ -1,6 +1,6 @@
 # Mocha implementation plan
 
-**Status:** Approved for Phase 0 and terminal-spike execution
+**Status:** Phase 1 implementation complete; physical-iPhone qualification pending
 **Updated:** 2026-08-19
 **Execution rule:** evidence-gated phases; do not expand the feature surface until the prior phase meets its exit criteria
 **Engineering policy:** every production change must satisfy [`DEVELOPMENT_PRINCIPLES.md`](./DEVELOPMENT_PRINCIPLES.md)
@@ -86,6 +86,25 @@ Qualify:
 - No session loss across repeated background/foreground and network-switch tests.
 - No ambiguous input replay.
 - Terminal can operate Codex and Claude Code TUIs on a physical phone.
+
+### Phase 1 implementation evidence (2026-08-19)
+
+The code-complete simulator slice now includes the pinned GhosttyKit Metal renderer, secure WebSocket transport, strict `mocha.v1` messages, bounded frames, heartbeat, resize, explicit connection states, bounded exponential reconnect, deliberate composer/quick-key input, and no ambiguous input replay. Authentication and protocol failures are covered before a PTY can be spawned; malformed input is never written to the terminal.
+
+| Check | Evidence | Result |
+|---|---|---|
+| Real transport | Tailscale Serve WSS to the local host, authenticated without a token in the URL | Passed in iOS 26.5 simulator |
+| Durable terminal | Attached to a synthetic tmux fixture, executed a command, observed its output, and retained the same session across reconnect | Passed |
+| App lifecycle | Background/foreground resumed the existing terminal; rotation recomputed the grid while connected | Passed in simulator |
+| Network/host loss | Stopping the host surfaced `Reconnecting`; restarting it restored the same tmux session without replaying input | Passed in simulator |
+| Renderer lifecycle | UI automation replayed the shared ANSI/Unicode/split-control/chatty corpus through Ghostty while creating and destroying the surface eight times, including one background/foreground cycle | Passed in simulator |
+| Automated tests | 22 logical tests / 30 parameterized runs, including two UI journeys, plus 27 host tests | Passed locally |
+| Independent review | Swift/lifecycle/accessibility and transport/security reviewers re-reviewed every resolved finding | No actionable P0/P1/P2 findings remain |
+| First output | 149–529 ms from connection start to first terminal output across warm and cold simulator runs on an Apple Silicon development Mac | Provisional simulator measurement |
+| Input-to-output | 23 ms from deliberate input submission to the first returned PTY output | Provisional simulator measurement |
+| Memory | 217,200 KiB resident for the debug simulator process during a connected session | Provisional; not a release budget |
+
+These numbers establish a reproducible local baseline, not phone performance. GitHub issue [#4](https://github.com/parvezrob/mocha/issues/4) remains open for the physical-device checklist. Ghostty lifecycle issue [#5](https://github.com/parvezrob/mocha/issues/5) remains release-blocking until repeated real-device create/destroy, background/foreground, lock/unlock, network switching, sustained corpus output, selection/paste, and Codex/Claude Code TUI tests pass without the reported teardown fault.
 
 ## 4. Phase 2 — stable host protocol and providers
 

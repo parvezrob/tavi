@@ -1,0 +1,38 @@
+{
+  "clientValid": [
+    { "type": "input", "data": "npm test\r" },
+    { "type": "input", "data": "\u0003" },
+    { "type": "resize", "cols": 117, "rows": 34 },
+    { "type": "ping", "id": "5A13F176-0F83-4DF9-94BB-A63A678A1F2A" }
+  ],
+  "clientInvalid": [
+    null,
+    [],
+    {},
+    { "type": "input" },
+    { "type": "input", "data": 4 },
+    { "type": "resize", "cols": 80.5, "rows": 24 },
+    { "type": "resize", "cols": 80 },
+    { "type": "ping", "id": "" },
+    { "type": "ping", "id": "not valid because spaces are forbidden" },
+    { "type": "unknown" }
+  ],
+  "serverValid": [
+    { "type": "ready" },
+    { "type": "output", "data": "\u001b[32mready\u001b[0m\r\n" },
+    { "type": "pong", "id": "5A13F176-0F83-4DF9-94BB-A63A678A1F2A" },
+    { "type": "exit", "code": 0 },
+    { "type": "exit", "code": 1, "signal": 15 },
+    { "type": "error", "message": "Invalid terminal message." }
+  ],
+  "serverInvalid": [
+    null,
+    [],
+    {},
+    { "type": "output" },
+    { "type": "pong" },
+    { "type": "exit", "code": "0" },
+    { "type": "error" },
+    { "type": "unknown" }
+  ]
+}

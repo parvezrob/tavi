@@ -19,6 +19,7 @@ struct HostEndpointTests {
         "https://studio.tailnet.ts.net/mocha",
         "https://studio.tailnet.ts.net?token=secret",
         "https://studio.tailnet.ts.net#terminal",
+        "https://public-relay.example.com",
     ])
     func rejectsUnsafeOrAmbiguousBaseURLs(_ rawURL: String) throws {
         let url = try #require(URL(string: rawURL))

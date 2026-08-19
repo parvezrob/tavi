@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "ansi-and-truecolor",
+      "chunks": [
+        "\u001b[2J\u001b[H",
+        "\u001b[1;32mPASS\u001b[0m \u001b[38;2;255;140;0mtrue color\u001b[0m\r\n"
+      ]
+    },
+    {
+      "name": "unicode-wide-and-bidi",
+      "chunks": [
+        "English · বাংলা · 日本語 · 한국어 · 👩🏽‍💻 · مرحبا\r\n",
+        "combining: é · box: ┌─┬─┐\r\n"
+      ]
+    },
+    {
+      "name": "split-control-sequences",
+      "chunks": [
+        "\u001b[",
+        "2J\u001b]0;Mocha fixture",
+        "\u0007",
+        "split ANSI boundaries rendered safely\r",
+        "\n"
+      ]
+    },
+    {
+      "name": "codex-synthetic-redraw",
+      "chunks": [
+        "\u001b[?1049h\u001b[H\u001b[2J",
+        "Codex\r\nWorking (synthetic fixture)…\r\n",
+        "\u001b[2A\u001b[2KCodex\r\nDone · 3 files changed\r\n",
+        "\u001b[?1049l"
+      ]
+    },
+    {
+      "name": "claude-synthetic-redraw",
+      "chunks": [
+        "\u001b[?1049h\u001b[H\u001b[2J",
+        "Claude Code\r\n⠋ Reading files (synthetic fixture)\r\n",
+        "\u001b[1A\u001b[2K✓ Ready for input\r\n",
+        "\u001b[?1049l"
+      ]
+    },
+    {
+      "name": "chatty-agent-output",
+      "repeat": 500,
+      "chunks": [
+        "\u001b[2K\rstreamed output line 0123456789 abcdefghijklmnopqrstuvwxyz\r\n"
+      ]
+    }
+  ]
+}

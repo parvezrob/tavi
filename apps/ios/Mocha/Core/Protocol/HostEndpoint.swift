@@ -10,8 +10,11 @@ struct HostEndpoint: Equatable, Hashable, Sendable {
         guard components.scheme?.lowercased() == "https" else {
             throw HostEndpointError.secureTransportRequired
         }
-        guard components.host?.isEmpty == false else {
+        guard let host = components.host?.lowercased(), !host.isEmpty else {
             throw HostEndpointError.missingHost
+        }
+        guard host.hasSuffix(".ts.net"), host != "ts.net" else {
+            throw HostEndpointError.tailscaleServeRequired
         }
         guard components.user == nil, components.password == nil else {
             throw HostEndpointError.embeddedCredentialsNotAllowed
@@ -39,13 +42,33 @@ struct HostEndpoint: Equatable, Hashable, Sendable {
     }
 }
 
-enum HostEndpointError: Error, Equatable {
+enum HostEndpointError: Error, Equatable, LocalizedError {
     case basePathNotAllowed
     case embeddedCredentialsNotAllowed
     case invalidURL
     case missingHost
     case queryOrFragmentNotAllowed
     case secureTransportRequired
+    case tailscaleServeRequired
+
+    var errorDescription: String? {
+        switch self {
+        case .basePathNotAllowed:
+            "Enter only the host origin, without an extra path."
+        case .embeddedCredentialsNotAllowed:
+            "Credentials must not be embedded in the host URL."
+        case .invalidURL:
+            "Enter a valid host URL."
+        case .missingHost:
+            "The host URL is missing a hostname."
+        case .queryOrFragmentNotAllowed:
+            "The host URL must not contain a query or fragment."
+        case .secureTransportRequired:
+            "The host must use HTTPS through Tailscale Serve."
+        case .tailscaleServeRequired:
+            "Enter a Tailscale Serve hostname ending in .ts.net."
+        }
+    }
 }
 
 struct SessionIdentifier: Equatable, Hashable, Sendable {
@@ -70,6 +93,10 @@ struct SessionIdentifier: Equatable, Hashable, Sendable {
     }
 }
 
-enum SessionIdentifierError: Error, Equatable {
+enum SessionIdentifierError: Error, Equatable, LocalizedError {
     case invalidValue
+
+    var errorDescription: String? {
+        "Enter a valid tmux session identifier."
+    }
 }
