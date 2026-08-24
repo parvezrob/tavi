@@ -89,6 +89,7 @@ test("new sessions get low-latency tmux options with no status chrome", async (c
     ["set-option", "-s", "escape-time", "10"],
     ["set-option", "-s", "focus-events", "on"],
     ["set-option", "-t", session.id, "status", "off"],
+    ["set-option", "-t", session.id, "mouse", "on"],
   ]);
 });
 

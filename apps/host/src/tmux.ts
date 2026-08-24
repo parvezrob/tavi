@@ -132,10 +132,13 @@ export class TmuxService implements SessionBackend {
   // tmux defaults are tuned for interactive desktop use: a 500ms escape-key
   // delay and a visible status bar. Mocha treats tmux as an invisible
   // backbone, so managed sessions get low-latency keys and no tmux chrome.
+  // Mouse mode makes touch scrolling reach tmux as wheel events (native
+  // copy-mode scrollback) instead of degrading into arrow-key input.
   private async makeSessionResponsive(id: string): Promise<void> {
     await this.run(["set-option", "-s", "escape-time", "10"]);
     await this.run(["set-option", "-s", "focus-events", "on"]);
     await this.run(["set-option", "-t", id, "status", "off"]);
+    await this.run(["set-option", "-t", id, "mouse", "on"]);
   }
 
   private socketArgs(): string[] {
