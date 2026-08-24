@@ -16,7 +16,7 @@ protocol TerminalMessageSending: Sendable {
 }
 
 protocol TerminalTransporting: TerminalMessageSending {
-    func connect(configuration: TerminalConnectionConfiguration) async throws
+    func connect(configuration: TerminalConnectionConfiguration, resume: TerminalResumePoint?) async throws
     func receive() async -> TerminalTransportEvent
     func disconnect() async
 }
@@ -52,12 +52,22 @@ actor TerminalWebSocketClient: TerminalTransporting {
         self.makeSocket = makeSocket
     }
 
-    func connect(configuration: TerminalConnectionConfiguration) throws {
+    func connect(configuration: TerminalConnectionConfiguration, resume: TerminalResumePoint?) throws {
         guard socket == nil else {
             throw TerminalTransportError.alreadyConnected
         }
 
-        var request = URLRequest(url: configuration.endpoint)
+        var endpoint = configuration.endpoint
+        if let resume,
+           var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) {
+            var items = components.queryItems ?? []
+            items.append(URLQueryItem(name: "stream", value: resume.stream))
+            items.append(URLQueryItem(name: "resume", value: String(resume.offset)))
+            components.queryItems = items
+            endpoint = components.url ?? endpoint
+        }
+
+        var request = URLRequest(url: endpoint)
         request.setValue("Bearer \(configuration.credential)", forHTTPHeaderField: "Authorization")
         request.setValue(TerminalWireProtocol.name, forHTTPHeaderField: "Sec-WebSocket-Protocol")
 
@@ -76,9 +86,7 @@ actor TerminalWebSocketClient: TerminalTransporting {
             let frame = try await activeSocket.receive()
             guard socket === activeSocket else { return .disconnected }
             try validateNegotiatedProtocol(for: activeSocket)
-            let data = try validatedData(from: frame)
-            let message = try decoder.decode(TerminalServerMessage.self, from: data)
-            return .message(message)
+            return .message(try decodeMessage(from: frame))
         } catch is CancellationError {
             finish(activeSocket, closeCode: .normalClosure)
             return .disconnected
@@ -152,22 +160,37 @@ actor TerminalWebSocketClient: TerminalTransporting {
         negotiatedProtocolValidated = false
     }
 
-    private func validatedData(
+    private func decodeMessage(
         from frame: URLSessionWebSocketTask.Message
-    ) throws -> Data {
-        let data: Data
+    ) throws -> TerminalServerMessage {
         switch frame {
-        case .data:
-            throw TerminalTransportError.invalidFrame
+        case let .data(payload):
+            return try parseOutputFrame(payload)
         case let .string(value):
-            data = Data(value.utf8)
+            let data = Data(value.utf8)
+            guard data.count <= TerminalWireProtocol.maximumFrameBytes else {
+                throw TerminalTransportError.oversizedFrame
+            }
+            return try decoder.decode(TerminalServerMessage.self, from: data)
         @unknown default:
             throw TerminalTransportError.invalidFrame
         }
+    }
 
-        guard data.count <= TerminalWireProtocol.maximumFrameBytes else {
+    private func parseOutputFrame(_ payload: Data) throws -> TerminalServerMessage {
+        guard payload.count <= TerminalWireProtocol.maximumFrameBytes else {
             throw TerminalTransportError.oversizedFrame
         }
-        return data
+        guard payload.count >= TerminalWireProtocol.outputFrameHeaderBytes,
+              payload.first == TerminalWireProtocol.outputFrameType else {
+            throw TerminalTransportError.invalidFrame
+        }
+        var offset: UInt64 = 0
+        let headerStart = payload.index(payload.startIndex, offsetBy: 1)
+        let headerEnd = payload.index(payload.startIndex, offsetBy: TerminalWireProtocol.outputFrameHeaderBytes)
+        for byte in payload[headerStart..<headerEnd] {
+            offset = offset << 8 | UInt64(byte)
+        }
+        return .outputChunk(offset: offset, data: Data(payload[headerEnd...]))
     }
 }

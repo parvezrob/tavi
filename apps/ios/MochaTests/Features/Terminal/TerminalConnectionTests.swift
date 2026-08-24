@@ -68,7 +68,7 @@ struct TerminalConnectionTests {
             sessionText: "fixture",
             credential: "valid-token"
         )
-        try await transport.emit(.message(.ready))
+        try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
         try await waitUntil { controller.connectionState == .connected }
 
         paths.emit(NetworkPathSnapshot(isSatisfied: false, interfaceIdentity: "none"))
@@ -76,7 +76,7 @@ struct TerminalConnectionTests {
 
         paths.emit(NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "en0"))
         try await waitUntil { await transport.connectCount >= 2 }
-        try await transport.emit(.message(.ready))
+        try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
         try await waitUntil { controller.connectionState == .connected }
         controller.stop()
     }
@@ -102,7 +102,7 @@ struct TerminalConnectionTests {
             sessionText: "fixture",
             credential: "valid-token"
         )
-        try await transport.emit(.message(.ready))
+        try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
         try await waitUntil { controller.connectionState == .connected }
 
         paths.emit(NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "en0"))
@@ -111,7 +111,7 @@ struct TerminalConnectionTests {
 
         paths.emit(NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "pdp_ip0"))
         try await waitUntil { await transport.connectCount >= 2 }
-        try await transport.emit(.message(.ready))
+        try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
         try await waitUntil { controller.connectionState == .connected }
         controller.stop()
     }
@@ -144,6 +144,40 @@ struct TerminalConnectionTests {
             if case .reconnecting = controller.connectionState { return true }
             return false
         }
+        controller.stop()
+    }
+
+    @Test
+    @MainActor
+    func reconnectResumesFromTheExactByteOffset() async throws {
+        let transport = ScriptedTerminalTransport()
+        let controller = TerminalSessionController(
+            client: transport,
+            reconnectPolicy: ReconnectPolicy(
+                initialDelay: .milliseconds(1),
+                maximumDelay: .milliseconds(1),
+                multiplier: 1,
+                connectDeadline: .seconds(60)
+            )
+        )
+
+        controller.connect(
+            hostText: "https://mac.tailnet.ts.net",
+            sessionText: "fixture",
+            credential: "valid-token"
+        )
+        try await transport.emit(.message(.ready(stream: "epoch-a", offset: 0, resumed: false)))
+        try await waitUntil { controller.connectionState == .connected }
+        try await transport.emit(.message(.outputChunk(offset: 0, data: Data("hello".utf8))))
+        try await transport.emit(.message(.outputChunk(offset: 5, data: Data(" world".utf8))))
+        try await waitUntil { await transport.receiveCount >= 3 }
+
+        try await transport.emit(.disconnected)
+        try await waitUntil { await transport.connectCount >= 2 }
+
+        let resumes = await transport.connectResumes
+        #expect(resumes.first ?? nil == nil)
+        #expect(resumes.last ?? nil == TerminalResumePoint(stream: "epoch-a", offset: 11))
         controller.stop()
     }
 
@@ -185,7 +219,7 @@ struct TerminalConnectionTests {
             sessionText: "fixture",
             credential: "valid-token"
         )
-        try await transport.emit(.message(.ready))
+        try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
         try await waitUntil { controller.connectionState == .connected }
 
         controller.bridge.receiveTerminalInput(Data("ls -la\r".utf8))
@@ -208,7 +242,7 @@ struct TerminalConnectionTests {
             sessionText: "fixture",
             credential: "valid-token"
         )
-        try await transport.emit(.message(.ready))
+        try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
         try await waitUntil { controller.connectionState == .connected }
 
         controller.paste("echo safe")
@@ -234,7 +268,7 @@ struct TerminalConnectionTests {
             credential: "valid-token"
         )
         controller.terminalGridDidChange(TerminalGridSize(columns: 80, rows: 24))
-        try await transport.emit(.message(.ready))
+        try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
         try await waitUntil {
             await transport.sentMessages.filter { $0 == resize }.count == 1
         }
@@ -259,7 +293,7 @@ struct TerminalConnectionTests {
             sessionText: "fixture",
             credential: "valid-token"
         )
-        try await transport.emit(.message(.ready))
+        try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
         try await waitUntil { controller.connectionState == .connected }
 
         controller.bridge.receiveTerminalInput(Data("a".utf8))
@@ -332,7 +366,7 @@ struct TerminalConnectionTests {
             sessionText: "fixture",
             credential: "valid-token"
         )
-        try await transport.emit(.message(.ready))
+        try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
         try await waitUntil { await sleeper.hasWaiter(for: .seconds(10)) }
         try await sleeper.resumeFirst(for: .seconds(10))
         try await waitUntil { await sleeper.hasWaiter(for: .seconds(5)) }
@@ -369,7 +403,7 @@ struct TerminalConnectionTests {
             sessionText: "fixture",
             credential: "valid-token"
         )
-        try await transport.emit(.message(.ready))
+        try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
         try await waitUntil { controller.connectionState == .connected }
         try await waitUntil { await sleeper.hasWaiter(for: .seconds(10)) }
         try await sleeper.resumeFirst(for: .seconds(10))
@@ -412,7 +446,7 @@ struct TerminalConnectionTests {
             sessionText: "fixture",
             credential: "valid-token"
         )
-        try await transport.emit(.message(.ready))
+        try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
         try await waitUntil { await sleeper.hasWaiter(for: .seconds(10)) }
         try await sleeper.resumeFirst(for: .seconds(10))
         _ = try await waitForPingIdentifier(in: transport)
@@ -482,6 +516,7 @@ private actor FailingTerminalSender: TerminalMessageSending {
 
 private actor ScriptedTerminalTransport: TerminalTransporting {
     private(set) var connectCount = 0
+    private(set) var connectResumes: [TerminalResumePoint?] = []
     private(set) var receiveCount = 0
     private(set) var sentMessages: [TerminalClientMessage] = []
 
@@ -506,8 +541,9 @@ private actor ScriptedTerminalTransport: TerminalTransporting {
         }.first
     }
 
-    func connect(configuration: TerminalConnectionConfiguration) throws {
+    func connect(configuration: TerminalConnectionConfiguration, resume: TerminalResumePoint?) throws {
         connectCount += 1
+        connectResumes.append(resume)
         if let connectError { throw connectError }
         connected = true
     }
@@ -557,7 +593,7 @@ private actor GatedTerminalTransport: TerminalTransporting {
     private var receiveContinuation: CheckedContinuation<TerminalTransportEvent, Never>?
     private var sendContinuations: [CheckedContinuation<Void, Never>] = []
 
-    func connect(configuration: TerminalConnectionConfiguration) {
+    func connect(configuration: TerminalConnectionConfiguration, resume: TerminalResumePoint?) {
         connected = true
     }
 

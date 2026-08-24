@@ -12,9 +12,9 @@ struct TerminalWebSocketClientTests {
         let factory = FakeTerminalWebSocketFactory(tasks: [unauthorized, missing])
         let client = TerminalWebSocketClient(makeSocket: factory.makeTask)
 
-        try await client.connect(configuration: connectionConfiguration())
+        try await client.connect(configuration: connectionConfiguration(), resume: nil)
         #expect(await client.receive() == .failed(.authenticationRejected))
-        try await client.connect(configuration: connectionConfiguration())
+        try await client.connect(configuration: connectionConfiguration(), resume: nil)
         #expect(await client.receive() == .failed(.sessionNotFound))
 
         #expect(unauthorized.cancelCodes == [.goingAway])
@@ -24,6 +24,33 @@ struct TerminalWebSocketClientTests {
             factory.requests.first?.value(forHTTPHeaderField: "Sec-WebSocket-Protocol")
                 == TerminalWireProtocol.name
         )
+    }
+
+    @Test
+    func decodesBinaryOutputFramesAndSendsResumeQuery() async throws {
+        let task = FakeTerminalWebSocketTask(response: acceptedResponse())
+        var frame = Data([TerminalWireProtocol.outputFrameType])
+        let offset: UInt64 = 258
+        for shift in stride(from: 56, through: 0, by: -8) {
+            frame.append(UInt8(truncatingIfNeeded: offset >> UInt64(shift)))
+        }
+        frame.append(contentsOf: Data("delta".utf8))
+        task.enqueueFrame(.data(frame))
+        let factory = FakeTerminalWebSocketFactory(tasks: [task])
+        let client = TerminalWebSocketClient(makeSocket: factory.makeTask)
+
+        try await client.connect(
+            configuration: connectionConfiguration(),
+            resume: TerminalResumePoint(stream: "epoch-a", offset: 258)
+        )
+        #expect(
+            await client.receive()
+                == .message(.outputChunk(offset: 258, data: Data("delta".utf8)))
+        )
+        let query = factory.requests.first?.url?.query ?? ""
+        #expect(query.contains("stream=epoch-a"))
+        #expect(query.contains("resume=258"))
+        await client.disconnect()
     }
 
     @Test
@@ -43,11 +70,11 @@ struct TerminalWebSocketClientTests {
         let factory = FakeTerminalWebSocketFactory(tasks: [mismatch, binary, oversized])
         let client = TerminalWebSocketClient(makeSocket: factory.makeTask)
 
-        try await client.connect(configuration: connectionConfiguration())
+        try await client.connect(configuration: connectionConfiguration(), resume: nil)
         #expect(await client.receive() == .failed(.protocolMismatch))
-        try await client.connect(configuration: connectionConfiguration())
+        try await client.connect(configuration: connectionConfiguration(), resume: nil)
         #expect(await client.receive() == .failed(.invalidFrame))
-        try await client.connect(configuration: connectionConfiguration())
+        try await client.connect(configuration: connectionConfiguration(), resume: nil)
         #expect(await client.receive() == .failed(.oversizedFrame))
 
         #expect(mismatch.cancelCodes == [.protocolError])
@@ -66,15 +93,15 @@ struct TerminalWebSocketClientTests {
         let factory = FakeTerminalWebSocketFactory(tasks: [stale, replacement])
         let client = TerminalWebSocketClient(makeSocket: factory.makeTask)
 
-        try await client.connect(configuration: connectionConfiguration())
+        try await client.connect(configuration: connectionConfiguration(), resume: nil)
         let staleReceive = Task { await client.receive() }
         try await waitUntil { stale.hasPendingReceive }
         await client.disconnect()
-        try await client.connect(configuration: connectionConfiguration())
+        try await client.connect(configuration: connectionConfiguration(), resume: nil)
         stale.enqueueFrame(.string(#"{"type":"output","data":"stale"}"#))
 
         #expect(await staleReceive.value == .disconnected)
-        #expect(await client.receive() == .message(.ready))
+        #expect(await client.receive() == .message(.ready(stream: nil, offset: 0, resumed: false)))
         #expect(stale.cancelCodes == [.normalClosure])
         #expect(replacement.cancelCodes.isEmpty)
         await client.disconnect()

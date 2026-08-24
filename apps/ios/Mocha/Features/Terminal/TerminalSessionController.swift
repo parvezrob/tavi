@@ -43,6 +43,8 @@ final class TerminalSessionController {
     private var outstandingHeartbeatID: String?
     private var reconnectTask: Task<Void, Never>?
     private var reconnectAttempt = 0
+    private var resumeOffset: UInt64 = 0
+    private var resumeStream: String?
     private var shouldReconnect = false
 
     private let pathObserver: any NetworkPathObserving
@@ -81,6 +83,8 @@ final class TerminalSessionController {
             errorMessage = nil
             shouldReconnect = true
             reconnectAttempt = 0
+            resumeStream = nil
+            resumeOffset = 0
             firstPaintMilliseconds = nil
             inputToOutputMilliseconds = nil
             startPathMonitoringIfNeeded()
@@ -96,6 +100,8 @@ final class TerminalSessionController {
     func stop() {
         shouldReconnect = false
         configuration = nil
+        resumeStream = nil
+        resumeOffset = 0
         pathTask?.cancel()
         pathTask = nil
         lastPathSnapshot = nil
@@ -193,7 +199,7 @@ final class TerminalSessionController {
                 guard isCurrentConnection(generation) else { return }
                 await client.disconnect()
                 guard isCurrentConnection(generation) else { return }
-                try await client.connect(configuration: configuration)
+                try await client.connect(configuration: configuration, resume: currentResumePoint())
                 while isCurrentConnection(generation) {
                     let event = await client.receive()
                     guard isCurrentConnection(generation) else { return }
@@ -238,27 +244,28 @@ final class TerminalSessionController {
 
     private func handle(_ message: TerminalServerMessage) {
         switch message {
-        case .ready:
+        case let .ready(stream, offset, resumed):
             connectDeadlineTask?.cancel()
             connectDeadlineTask = nil
             reconnectAttempt = 0
             errorMessage = nil
             outstandingHeartbeatID = nil
             lastSentGrid = nil
+            resumeStream = stream
+            resumeOffset = offset
+            Self.logger.info("ready: resumed=\(resumed) offset=\(offset)")
             transition(.ready)
             if let grid = latestGridSize {
                 sendOnce(.resize(columns: grid.columns, rows: grid.rows))
             }
             startHeartbeat()
         case let .output(text):
-            if firstPaintMilliseconds == nil, let connectionStartedAt {
-                firstPaintMilliseconds = milliseconds(from: connectionStartedAt, to: clock.now)
-            }
-            if let inputSentAt {
-                inputToOutputMilliseconds = milliseconds(from: inputSentAt, to: clock.now)
-                self.inputSentAt = nil
-            }
+            recordOutputTimings()
             bridge.receiveRemoteOutput(Data(text.utf8))
+        case let .outputChunk(offset, data):
+            recordOutputTimings()
+            resumeOffset = offset + UInt64(data.count)
+            bridge.receiveRemoteOutput(data)
         case let .pong(identifier):
             if outstandingHeartbeatID == identifier {
                 outstandingHeartbeatID = nil
@@ -266,6 +273,8 @@ final class TerminalSessionController {
         case .exit:
             shouldReconnect = false
             configuration = nil
+            resumeStream = nil
+            resumeOffset = 0
             invalidateConnectionTasks()
             scheduleDisconnect()
             transition(.terminalExited)
@@ -393,6 +402,21 @@ final class TerminalSessionController {
             await client.disconnect()
             guard isCurrentConnection(generation) else { return }
             beginConnection()
+        }
+    }
+
+    private func currentResumePoint() -> TerminalResumePoint? {
+        guard let resumeStream else { return nil }
+        return TerminalResumePoint(stream: resumeStream, offset: resumeOffset)
+    }
+
+    private func recordOutputTimings() {
+        if firstPaintMilliseconds == nil, let connectionStartedAt {
+            firstPaintMilliseconds = milliseconds(from: connectionStartedAt, to: clock.now)
+        }
+        if let inputSentAt {
+            inputToOutputMilliseconds = milliseconds(from: inputSentAt, to: clock.now)
+            self.inputSentAt = nil
         }
     }
 
@@ -565,6 +589,8 @@ final class TerminalSessionController {
     private func failPermanently(_ error: TerminalTransportError) {
         shouldReconnect = false
         configuration = nil
+        resumeStream = nil
+        resumeOffset = 0
         errorMessage = error.localizedDescription
         invalidateConnectionTasks()
         scheduleDisconnect()
