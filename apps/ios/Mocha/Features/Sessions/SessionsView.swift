@@ -9,7 +9,10 @@ struct SessionsView: View {
     @State private var agentDirectory = AgentDirectory()
     @State private var draftHost = ""
     @State private var draftToken = ""
+    @State private var newTabError: String?
+    @State private var newTabInFlight = false
     @State private var showingHostForm = false
+    @State private var showingNewTabPicker = false
     @State private var terminalController = TerminalSessionController()
     @State private var terminalIsPresented = false
 
@@ -100,21 +103,54 @@ struct SessionsView: View {
                         .foregroundStyle(.orange)
                 }
                 .accessibilityIdentifier("sessions.agentsUnavailable")
-            } else if agentDirectory.agents.isEmpty {
-                Text("No agents are running in Herdr right now.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
             } else {
-                ForEach(agentDirectory.agents) { agent in
-                    Button {
-                        openAgent(agent)
-                    } label: {
-                        agentRow(agent)
+                if agentDirectory.agents.isEmpty {
+                    Text("No agents are running in Herdr right now.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(agentDirectory.agents) { agent in
+                        Button {
+                            openAgent(agent)
+                        } label: {
+                            agentRow(agent)
+                        }
+                        .foregroundStyle(.primary)
+                        .accessibilityIdentifier("sessions.agent.\(agent.id)")
                     }
-                    .foregroundStyle(.primary)
-                    .accessibilityIdentifier("sessions.agent.\(agent.id)")
+                }
+
+                Button {
+                    showingNewTabPicker = true
+                } label: {
+                    Label(newTabInFlight ? "Creating…" : "New Agent Tab", systemImage: "plus.circle")
+                }
+                .foregroundStyle(.tint)
+                .disabled(newTabInFlight)
+                .accessibilityIdentifier("sessions.newAgentTab")
+                .confirmationDialog("New Herdr tab", isPresented: $showingNewTabPicker) {
+                    Button("Claude") { createTab(agent: "claude") }
+                    Button("Codex") { createTab(agent: "codex") }
+                    Button("Empty tab") { createTab(agent: nil) }
+                    Button("Cancel", role: .cancel) {}
+                }
+
+                if let newTabError {
+                    Text(newTabError)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
                 }
             }
+        }
+    }
+
+    private func createTab(agent: String?) {
+        newTabError = nil
+        newTabInFlight = true
+        Task {
+            let failure = await agentDirectory.createTab(agent: agent)
+            newTabInFlight = false
+            newTabError = failure
         }
     }
 

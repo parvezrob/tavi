@@ -24,12 +24,23 @@ export type HerdrPreviewResult =
 
 export type HerdrPromptResult = { submitted: true } | { submitted: false; reason: string };
 
+export interface HerdrTabRequest {
+  agent?: string | undefined;
+  cwd?: string | undefined;
+  label?: string | undefined;
+}
+
+export type HerdrTabResult =
+  | { created: true; paneId: string; tabId: string }
+  | { created: false; reason: string };
+
 export interface HerdrAgentSource {
   listAgents(): Promise<HerdrAgentsResult>;
   findAgent(paneId: string): Promise<HerdrAgentLookup>;
   attachCommand(paneId: string): AttachCommand;
   readAgent(paneId: string, lines: number): Promise<HerdrPreviewResult>;
   promptAgent(paneId: string, text: string): Promise<HerdrPromptResult>;
+  createTab(request: HerdrTabRequest): Promise<HerdrTabResult>;
 }
 
 export class HerdrService implements HerdrAgentSource {
@@ -102,6 +113,35 @@ export class HerdrService implements HerdrAgentSource {
       return { submitted: true };
     } catch (error) {
       return { submitted: false, reason: describeConnectionFailure(error) };
+    }
+  }
+
+  // Verified live: tab.create answers { type: "tab_created", tab, root_pane },
+  // and agent.start launches the agent binary in that pane.
+  async createTab(request: HerdrTabRequest): Promise<HerdrTabResult> {
+    try {
+      const created = asRecord(
+        await this.request("tab.create", {
+          cwd: request.cwd ?? null,
+          label: request.label ?? null,
+          focus: false,
+        }),
+      );
+      const tabId = asString(asRecord(created.tab).tab_id);
+      const paneId = asString(asRecord(created.root_pane).pane_id);
+      if (!tabId || !paneId) {
+        return { created: false, reason: "Herdr did not report the new tab." };
+      }
+      if (request.agent) {
+        await this.request("agent.start", {
+          name: request.agent,
+          kind: request.agent,
+          pane_id: paneId,
+        });
+      }
+      return { created: true, paneId, tabId };
+    } catch (error) {
+      return { created: false, reason: describeConnectionFailure(error) };
     }
   }
 

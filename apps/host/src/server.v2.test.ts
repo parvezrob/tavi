@@ -150,6 +150,7 @@ test("herdr agents are attachable terminal targets with honest failure modes", a
   const harness = new TerminalHarness();
   const spawnedCommands: Array<{ bin: string; args: string[] }> = [];
   const prompts: Array<{ paneId: string; text: string }> = [];
+  const tabRequests: Array<{ agent?: string | undefined; cwd?: string | undefined }> = [];
   harness.recordSpawn = (bin, args) => spawnedCommands.push({ bin, args });
   let herdrUp = true;
   harness.herdr = {
@@ -184,6 +185,12 @@ test("herdr agents are attachable terminal targets with honest failure modes", a
       return herdrUp
         ? { submitted: true as const }
         : { submitted: false as const, reason: "The Herdr server is not running." };
+    },
+    createTab: async (request: { agent?: string | undefined; cwd?: string | undefined }) => {
+      tabRequests.push(request);
+      return herdrUp
+        ? { created: true as const, paneId: "wB:p9", tabId: "wB:t9" }
+        : { created: false as const, reason: "The Herdr server is not running." };
     },
   };
   const server = await harness.startServer();
@@ -230,6 +237,26 @@ test("herdr agents are attachable terminal targets with honest failure modes", a
     });
     assert.equal(emptyPrompt.status, 400);
     assert.equal(prompts.length, 1);
+
+    const tab = await fetch(`http://127.0.0.1:${address.port}/api/herdr/tabs`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ agent: "claude", cwd: "/Users/dev/project" }),
+    });
+    assert.equal(tab.status, 201);
+    assert.deepEqual(await tab.json(), { paneId: "wB:p9", tabId: "wB:t9" });
+    assert.deepEqual(tabRequests.at(-1), {
+      agent: "claude",
+      cwd: "/Users/dev/project",
+      label: "mocha claude",
+    });
+
+    const badTab = await fetch(`http://127.0.0.1:${address.port}/api/herdr/tabs`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ agent: "rm -rf" }),
+    });
+    assert.equal(badTab.status, 400);
 
     herdrUp = false;
     assert.equal(await harness.upgradeStatus(server, "/api/agents/wB:p1/terminal"), 503);

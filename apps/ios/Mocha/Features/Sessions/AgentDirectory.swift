@@ -77,6 +77,38 @@ final class AgentDirectory {
         host != nil && !credential.isEmpty
     }
 
+    // Creates a Herdr tab (optionally launching an agent in it). The new
+    // agent then arrives through the live snapshot feed like any other.
+    func createTab(agent: String?) async -> String? {
+        guard let host, !credential.isEmpty else { return "Connect a host first." }
+        guard var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else {
+            return "The host address is invalid."
+        }
+        components.path = "/api/herdr/tabs"
+        guard let url = components.url else { return "The host address is invalid." }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: String] = agent.map { ["agent": $0] } ?? [:]
+        request.httpBody = try? JSONEncoder().encode(body)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let status = (response as? HTTPURLResponse)?.statusCode else {
+                return "The host did not answer."
+            }
+            guard status == 201 else {
+                let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
+                return message ?? "The host could not create the tab (HTTP \(status))."
+            }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
     private func streamOnce(eventsURL: URL, credential: String) async {
         var request = URLRequest(url: eventsURL)
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")

@@ -24,6 +24,7 @@ import { InputError, parseCreateSession, safeSessionId } from "./validation.js";
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_PREVIEW_CHARACTERS = 4_096;
 const MAX_PROMPT_CHARACTERS = 16_384;
+const ALLOWED_TAB_AGENTS = ["claude", "codex"];
 // Small buffers on purpose: when the phone falls behind, pausing the pty
 // quickly means tmux holds fresh frames instead of the connection replaying a
 // large backlog of stale screen paints.
@@ -336,6 +337,32 @@ async function routeRequest(
       return;
     }
     sendJson(response, 202, { submitted: true, paneId });
+    return;
+  }
+
+  if (url.pathname === "/api/herdr/tabs" && request.method === "POST") {
+    if (!herdr) {
+      sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
+      return;
+    }
+    const body = await readJsonBody(request);
+    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const agent = typeof record.agent === "string" ? record.agent : undefined;
+    const cwd = typeof record.cwd === "string" ? record.cwd : undefined;
+    if (agent !== undefined && !ALLOWED_TAB_AGENTS.includes(agent)) {
+      sendJson(response, 400, { error: "agent must be one of: claude, codex." });
+      return;
+    }
+    if (cwd !== undefined && (cwd.length > 1_024 || !cwd.startsWith("/"))) {
+      sendJson(response, 400, { error: "cwd must be an absolute path." });
+      return;
+    }
+    const result = await herdr.createTab({ agent, cwd, label: agent ? `mocha ${agent}` : "mocha" });
+    if (!result.created) {
+      sendJson(response, 503, { error: result.reason });
+      return;
+    }
+    sendJson(response, 201, { paneId: result.paneId, tabId: result.tabId });
     return;
   }
 
