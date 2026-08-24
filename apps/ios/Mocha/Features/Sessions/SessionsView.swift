@@ -128,10 +128,11 @@ struct SessionsView: View {
                 .foregroundStyle(.tint)
                 .disabled(newTabInFlight)
                 .accessibilityIdentifier("sessions.newAgentTab")
+                // Empty tabs are omitted until plain panes are visible on the
+                // phone — an invisible tab reads as "nothing happened".
                 .confirmationDialog("New Herdr tab", isPresented: $showingNewTabPicker) {
                     Button("Claude") { createTab(agent: "claude") }
                     Button("Codex") { createTab(agent: "codex") }
-                    Button("Empty tab") { createTab(agent: nil) }
                     Button("Cancel", role: .cancel) {}
                 }
 

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { createConnection } from "node:net";
 import type { AgentStatus, AttachCommand, HerdrAgentInfo, HerdrAgentsResult } from "./types.js";
 
@@ -133,11 +134,23 @@ export class HerdrService implements HerdrAgentSource {
         return { created: false, reason: "Herdr did not report the new tab." };
       }
       if (request.agent) {
-        await this.request("agent.start", {
-          name: request.agent,
-          kind: request.agent,
-          pane_id: paneId,
-        });
+        try {
+          // The fresh pane's shell needs a moment to boot; until then
+          // agent.start answers "not an available shell". Retry briefly.
+          await retry(10, 300, () =>
+            this.request("agent.start", {
+              // Herdr requires a globally unique agent name; the kind alone
+              // collides as soon as a second claude/codex exists.
+              name: `${request.agent}-${randomBytes(2).toString("hex")}`,
+              kind: request.agent,
+              pane_id: paneId,
+            }),
+          );
+        } catch (startError) {
+          // Don't leave an orphaned empty tab behind a failed launch.
+          await this.request("tab.close", { tab_id: tabId }).catch(() => undefined);
+          throw startError;
+        }
       }
       return { created: true, paneId, tabId };
     } catch (error) {
@@ -182,7 +195,10 @@ export class HerdrService implements HerdrAgentSource {
             return;
           }
           if (message.error !== undefined) {
-            finish(() => reject(new Error(`Herdr rejected ${method}.`)));
+            const detail = asString(asRecord(message.error).message);
+            finish(() =>
+              reject(new Error(detail ? `Herdr rejected ${method}: ${detail}` : `Herdr rejected ${method}.`)),
+            );
             return;
           }
           finish(() => resolve(message.result));
@@ -211,6 +227,19 @@ function parseAgent(agent: Record<string, unknown>): HerdrAgentInfo {
 }
 
 // Verified live shape: { type: "pane_read", read: { text, truncated, ... } }.
+async function retry<T>(attempts: number, delayMilliseconds: number, run: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await run();
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, delayMilliseconds));
+    }
+  }
+  throw lastError;
+}
+
 function extractPreviewText(result: Record<string, unknown>): string {
   const read = asRecord(result.read);
   if (typeof read.text === "string") return read.text;
