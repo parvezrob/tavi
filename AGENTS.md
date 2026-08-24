@@ -4,6 +4,7 @@ Keep this file lean. It routes work and protects shared boundaries; detailed eng
 
 ## Start here
 
+- **Read [`current-session.md`](./current-session.md) first** — the live project state and the next piece of work. Recent context: [`handoffs.md`](./handoffs.md).
 - Always read [`README.md`](./README.md) and [`docs/DEVELOPMENT_PRINCIPLES.md`](./docs/DEVELOPMENT_PRINCIPLES.md).
 - Read only task-relevant sources: product behavior → [`docs/PRD.md`](./docs/PRD.md); execution → [`docs/IMPLEMENTATION_PLAN.md`](./docs/IMPLEMENTATION_PLAN.md); host/client contract → [`protocol/README.md`](./protocol/README.md); rich agent UI → [`docs/CHAT_UI_AND_AGENT_ARCHITECTURE.md`](./docs/CHAT_UI_AND_AGENT_ARCHITECTURE.md).
 - Inspect `git status` and active GitHub issue/PR state before editing. Preserve unrelated and in-flight work.
@@ -18,7 +19,7 @@ Keep this file lean. It routes work and protects shared boundaries; detailed eng
 
 ## Multi-session workflow
 
-- GitHub Issues are the work queue and the only known-issue tracker. Do not create a local bug ledger, session diary, or shadow backlog.
+- GitHub Issues are the work queue and the only known-issue tracker. Do not create a local bug ledger or shadow backlog. The one sanctioned session record (owner decision, 2026-08-25) is `current-session.md` + `handoffs.md`: update `current-session.md` before ending a session, move the superseded state into `handoffs.md`, and keep both short — bugs and work items still go to Issues, durable knowledge still goes to `docs/`.
 - Every implementation change or known defect starts with an issue containing scope and testable acceptance criteria. Read-only research and owner-requested documentation may proceed without one.
 - Before editing, claim the issue and name the paths you expect to own. Agents must not share a branch or concurrently edit overlapping files. Coordinate overlap in the issue before continuing.
 - **MVP fast track:** until the owner declares the MVP gate complete, one active integration session may commit issue-scoped work directly to `main` after all local gates pass, then push and verify the applicable remote CI. Parallel sessions use isolated branches/worktrees and hand commits to that integrator.
