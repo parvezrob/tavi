@@ -21,4 +21,25 @@ struct TerminalAccessibleTranscriptTests {
 
         #expect(transcript.value == "23456789")
     }
+
+    @Test
+    func backspaceAndAppendRemainCorrectAfterTheRingWraps() {
+        var transcript = TerminalAccessibleTranscript(maximumScalars: 4)
+
+        transcript.append(Data("012345\u{08}6".utf8))
+
+        #expect(transcript.value == "2346")
+    }
+
+    @Test
+    func sustainedSingleByteOutputStaysBounded() {
+        var transcript = TerminalAccessibleTranscript(maximumScalars: 8_192)
+
+        for _ in 0..<100_000 {
+            transcript.append(Data([0x78]))
+        }
+
+        #expect(transcript.value.unicodeScalars.count == 8_192)
+        #expect(transcript.value.allSatisfy { $0 == "x" })
+    }
 }

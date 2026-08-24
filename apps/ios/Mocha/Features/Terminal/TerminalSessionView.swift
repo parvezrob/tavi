@@ -102,11 +102,6 @@ struct TerminalSessionView: View {
                 Text(controller.connectionState.accessibilityDescription)
                     .font(.caption.weight(.semibold))
                 Spacer(minLength: 8)
-                if let latency = controller.inputToOutputMilliseconds {
-                    Text("\(latency, format: .number.precision(.fractionLength(0))) ms")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
             }
             if let error = controller.errorMessage {
                 Text(error)

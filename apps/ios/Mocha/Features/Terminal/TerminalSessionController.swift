@@ -4,10 +4,13 @@ import Observation
 @MainActor
 @Observable
 final class TerminalSessionController {
+    private static let maximumCoalescedInputBytes = 4 * 1_024
+    private static let maximumPendingInputBytes = 64 * 1_024
+
     private(set) var connectionState: TerminalConnectionState = .idle
     private(set) var errorMessage: String?
-    private(set) var firstPaintMilliseconds: Double?
-    private(set) var inputToOutputMilliseconds: Double?
+    @ObservationIgnored private(set) var firstPaintMilliseconds: Double?
+    @ObservationIgnored private(set) var inputToOutputMilliseconds: Double?
     private(set) var latestGridSize: TerminalGridSize?
 
     let bridge = TerminalIOBridge()
@@ -29,6 +32,8 @@ final class TerminalSessionController {
     private var inputSentAt: ContinuousClock.Instant?
     private var outboundTaskID: UUID?
     private var outboundTask: Task<Void, Never>?
+    private var pendingInputChunks: [PendingTerminalInput] = []
+    private var pendingInputByteCount = 0
     private var outstandingHeartbeatID: String?
     private var reconnectTask: Task<Void, Never>?
     private var reconnectAttempt = 0
@@ -108,7 +113,7 @@ final class TerminalSessionController {
         }
         guard !text.isEmpty else { return }
         let bracketedPaste = "\u{1B}[200~\(text)\u{1B}[201~"
-        deliverTerminalInput(Data(bracketedPaste.utf8))
+        deliverTerminalInput(Data(bracketedPaste.utf8), canCoalesce: false)
     }
 
     var needsConnectionConfiguration: Bool {
@@ -247,10 +252,37 @@ final class TerminalSessionController {
         }
     }
 
-    private func deliverTerminalInput(_ data: Data) {
+    private func deliverTerminalInput(_ data: Data, canCoalesce: Bool = true) {
         guard connectionState.canSubmitInput else { return }
-        let value = String(decoding: data, as: UTF8.self)
+        guard !data.isEmpty else { return }
         inputSentAt = clock.now
+
+        guard outboundTask == nil, pendingInputChunks.isEmpty else {
+            enqueuePendingInput(data, canCoalesce: canCoalesce)
+            return
+        }
+        sendInput(data)
+    }
+
+    private func enqueuePendingInput(_ data: Data, canCoalesce: Bool) {
+        guard pendingInputByteCount <= Self.maximumPendingInputBytes - data.count else {
+            errorMessage = "Terminal input is backed up. Wait for the connection to catch up."
+            return
+        }
+
+        if canCoalesce,
+           let lastIndex = pendingInputChunks.indices.last,
+           pendingInputChunks[lastIndex].canCoalesce,
+           pendingInputChunks[lastIndex].data.count <= Self.maximumCoalescedInputBytes - data.count {
+            pendingInputChunks[lastIndex].data.append(data)
+        } else {
+            pendingInputChunks.append(PendingTerminalInput(data: data, canCoalesce: canCoalesce))
+        }
+        pendingInputByteCount += data.count
+    }
+
+    private func sendInput(_ data: Data) {
+        let value = String(decoding: data, as: UTF8.self)
         sendOnce(.input(value), inputWasSubmitted: true)
     }
 
@@ -385,6 +417,8 @@ final class TerminalSessionController {
         heartbeatTask = nil
         outboundTask = nil
         outboundTaskID = nil
+        pendingInputChunks.removeAll(keepingCapacity: false)
+        pendingInputByteCount = 0
         reconnectTask = nil
         inputSentAt = nil
         outstandingHeartbeatID = nil
@@ -407,6 +441,10 @@ final class TerminalSessionController {
         guard outboundTaskID == taskID else { return }
         outboundTask = nil
         outboundTaskID = nil
+        guard !pendingInputChunks.isEmpty else { return }
+        let pending = pendingInputChunks.removeFirst()
+        pendingInputByteCount -= pending.data.count
+        sendInput(pending.data)
     }
 
     private func failPermanently(_ error: TerminalTransportError) {
@@ -428,6 +466,11 @@ final class TerminalSessionController {
         let attoseconds = Double(components.attoseconds) / 1_000_000_000_000_000
         return seconds + attoseconds
     }
+}
+
+private struct PendingTerminalInput {
+    var data: Data
+    let canCoalesce: Bool
 }
 
 enum TerminalQuickKey: String, CaseIterable, Identifiable, Sendable {

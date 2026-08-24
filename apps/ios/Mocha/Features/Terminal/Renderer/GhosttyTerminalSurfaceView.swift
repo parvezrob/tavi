@@ -148,6 +148,7 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
     private let callback: GhosttyWriteCallback
     private let inputHandler: @MainActor (Data) -> Void
     private var accessibleTranscript = TerminalAccessibleTranscript()
+    private var accessibilityUpdateTask: Task<Void, Never>?
     private var lastGridSize: TerminalGridSize?
     private var surface: ghostty_surface_t?
 
@@ -238,10 +239,6 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
 
     func receive(_ data: Data) {
         guard let surface, !data.isEmpty else { return }
-        accessibleTranscript.append(data)
-        accessibilityValue = accessibleTranscript.value.isEmpty
-            ? "No terminal output yet"
-            : accessibleTranscript.value
         data.withUnsafeBytes { rawBuffer in
             guard let address = rawBuffer.baseAddress else { return }
             ghostty_surface_feed_data(
@@ -250,6 +247,8 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
                 rawBuffer.count
             )
         }
+        accessibleTranscript.append(data)
+        scheduleAccessibilityUpdate()
     }
 
     func setActive(_ active: Bool) {
@@ -267,6 +266,8 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         self.surface = nil
         onGridSizeChange = nil
         resignFirstResponder()
+        accessibilityUpdateTask?.cancel()
+        accessibilityUpdateTask = nil
         ghostty_surface_set_focus(surface, false)
         ghostty_surface_set_occlusion(surface, true)
         callback.cancel()
@@ -299,6 +300,18 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         guard grid.columns > 0, grid.rows > 0, grid != lastGridSize else { return }
         lastGridSize = grid
         onGridSizeChange?(grid)
+    }
+
+    private func scheduleAccessibilityUpdate() {
+        guard accessibilityUpdateTask == nil else { return }
+        accessibilityUpdateTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled, let self else { return }
+            accessibilityValue = accessibleTranscript.isEmpty
+                ? "No terminal output yet"
+                : accessibleTranscript.value
+            accessibilityUpdateTask = nil
+        }
     }
 
     @objc private func sendEscape() {

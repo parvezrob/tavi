@@ -11,19 +11,33 @@ struct TerminalAccessibleTranscript {
 
     private let maximumScalars: Int
     private var parserState: ParserState = .normal
-    private(set) var value = ""
+    private var scalars: [Unicode.Scalar?]
+    private var firstScalarIndex = 0
+    private var scalarCount = 0
+
+    var isEmpty: Bool { scalarCount == 0 }
+
+    var value: String {
+        var result = String.UnicodeScalarView()
+        result.reserveCapacity(scalarCount)
+        for offset in 0..<scalarCount {
+            let index = (firstScalarIndex + offset) % maximumScalars
+            if let scalar = scalars[index] {
+                result.append(scalar)
+            }
+        }
+        return String(result)
+    }
 
     init(maximumScalars: Int = 8_192) {
         precondition(maximumScalars > 0)
         self.maximumScalars = maximumScalars
+        scalars = Array(repeating: nil, count: maximumScalars)
     }
 
     mutating func append(_ data: Data) {
         for scalar in String(decoding: data, as: UTF8.self).unicodeScalars {
             consume(scalar)
-        }
-        if value.unicodeScalars.count > maximumScalars {
-            value = String(value.unicodeScalars.suffix(maximumScalars))
         }
     }
 
@@ -60,17 +74,39 @@ struct TerminalAccessibleTranscript {
         case 0x1B:
             parserState = .escape
         case 0x08:
-            if !value.isEmpty { value.removeLast() }
+            removeLastScalar()
         case 0x09:
-            value.append("\t")
+            appendScalar(scalar)
         case 0x0A:
-            value.append("\n")
+            appendScalar(scalar)
         case 0x0D:
             break
         case 0x00...0x1F, 0x7F:
             break
         default:
-            value.unicodeScalars.append(scalar)
+            appendScalar(scalar)
+        }
+    }
+
+    private mutating func appendScalar(_ scalar: Unicode.Scalar) {
+        if scalarCount < maximumScalars {
+            let index = (firstScalarIndex + scalarCount) % maximumScalars
+            scalars[index] = scalar
+            scalarCount += 1
+            return
+        }
+
+        scalars[firstScalarIndex] = scalar
+        firstScalarIndex = (firstScalarIndex + 1) % maximumScalars
+    }
+
+    private mutating func removeLastScalar() {
+        guard scalarCount > 0 else { return }
+        let index = (firstScalarIndex + scalarCount - 1) % maximumScalars
+        scalars[index] = nil
+        scalarCount -= 1
+        if scalarCount == 0 {
+            firstScalarIndex = 0
         }
     }
 }

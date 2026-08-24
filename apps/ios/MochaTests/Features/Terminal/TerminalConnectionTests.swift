@@ -132,6 +132,38 @@ struct TerminalConnectionTests {
 
     @Test
     @MainActor
+    func rapidTypingCoalescesBehindASlowSendWithoutReordering() async throws {
+        let transport = GatedTerminalTransport()
+        let controller = TerminalSessionController(client: transport)
+
+        controller.connect(
+            hostText: "https://mac.tailnet.ts.net",
+            sessionText: "fixture",
+            credential: "valid-token"
+        )
+        try await transport.emit(.message(.ready))
+        try await waitUntil { controller.connectionState == .connected }
+
+        controller.bridge.receiveTerminalInput(Data("a".utf8))
+        try await waitUntil { await transport.inputMessages == ["a"] }
+
+        let queuedText = "bcdefghijklmnopqrstuvwxyz"
+        for byte in queuedText.utf8 {
+            controller.bridge.receiveTerminalInput(Data([byte]))
+        }
+        await yieldExecution()
+        #expect(await transport.inputMessages == ["a"])
+
+        try await transport.resumeNextSend()
+        try await waitUntil { await transport.inputMessages == ["a", queuedText] }
+        try await transport.resumeNextSend()
+
+        #expect(await transport.inputMessages.joined() == "a" + queuedText)
+        controller.stop()
+    }
+
+    @Test
+    @MainActor
     func permanentHandshakeFailureStopsRetriesAndStaysFailed() async throws {
         let transport = ScriptedTerminalTransport(connectError: .authenticationRejected)
         let controller = TerminalSessionController(
@@ -370,6 +402,64 @@ private actor ScriptedTerminalTransport: TerminalTransporting {
 
     func emit(_ event: TerminalTransportEvent) throws {
         enqueue(event)
+    }
+
+    private func enqueue(_ event: TerminalTransportEvent) {
+        if let continuation = receiveContinuation {
+            receiveContinuation = nil
+            continuation.resume(returning: event)
+        } else {
+            queuedEvents.append(event)
+        }
+    }
+}
+
+private actor GatedTerminalTransport: TerminalTransporting {
+    private(set) var inputMessages: [String] = []
+
+    private var connected = false
+    private var queuedEvents: [TerminalTransportEvent] = []
+    private var receiveContinuation: CheckedContinuation<TerminalTransportEvent, Never>?
+    private var sendContinuations: [CheckedContinuation<Void, Never>] = []
+
+    func connect(configuration: TerminalConnectionConfiguration) {
+        connected = true
+    }
+
+    func receive() async -> TerminalTransportEvent {
+        if !queuedEvents.isEmpty {
+            return queuedEvents.removeFirst()
+        }
+        return await withCheckedContinuation { continuation in
+            receiveContinuation = continuation
+        }
+    }
+
+    func send(_ message: TerminalClientMessage) async {
+        if case let .input(value) = message {
+            inputMessages.append(value)
+        }
+        await withCheckedContinuation { continuation in
+            sendContinuations.append(continuation)
+        }
+    }
+
+    func disconnect() {
+        guard connected else { return }
+        connected = false
+        enqueue(.disconnected)
+        let continuations = sendContinuations
+        sendContinuations.removeAll()
+        continuations.forEach { $0.resume() }
+    }
+
+    func emit(_ event: TerminalTransportEvent) throws {
+        enqueue(event)
+    }
+
+    func resumeNextSend() throws {
+        guard !sendContinuations.isEmpty else { throw TestFailure() }
+        sendContinuations.removeFirst().resume()
     }
 
     private func enqueue(_ event: TerminalTransportEvent) {

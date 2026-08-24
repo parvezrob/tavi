@@ -90,6 +90,30 @@ final class MochaUITests: XCTestCase {
     }
 
     @MainActor
+    func testSustainedTypingRemainsInteractiveUnderOutputLoad() throws {
+        let app = XCUIApplication()
+        let corpusData = try JSONEncoder().encode(try rendererStressChunks())
+        app.launchEnvironment["MOCHA_DEV_RENDERER_STRESS_CHUNKS"] = String(
+            decoding: corpusData,
+            as: UTF8.self
+        )
+        app.launch()
+
+        XCTAssertTrue(app.buttons["sessions.openTerminal"].waitForExistence(timeout: 5))
+        app.buttons["sessions.openTerminal"].tap()
+        let surface = app.descendants(matching: .any)["terminal.surface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 5))
+
+        surface.tap()
+        surface.typeText(String(repeating: "mocha123 ", count: 20))
+
+        let dismissKeyboard = app.buttons["terminal.dismissKeyboard"]
+        XCTAssertTrue(dismissKeyboard.waitForExistence(timeout: 3))
+        dismissKeyboard.tap()
+        XCTAssertTrue(app.navigationBars["Terminal"].exists)
+    }
+
+    @MainActor
     private func keepScreenshot(named name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
