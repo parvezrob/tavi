@@ -8,7 +8,16 @@ const REFRESH_DEBOUNCE_MILLISECONDS = 150;
 // Global pane lifecycle events (no pane_id); a per-pane status subscription
 // is added for every agent pane known at subscribe time. Any structural
 // change tears the subscription down and rebuilds it against a fresh list.
-const STRUCTURAL_SUBSCRIPTIONS = ["pane.created", "pane.closed", "pane.exited"];
+const STRUCTURAL_SUBSCRIPTIONS = [
+  "pane.created",
+  "pane.closed",
+  "pane.exited",
+  // Fires when an agent appears in an already-existing pane — without it a
+  // freshly started claude/codex is invisible until some other event fires.
+  "pane.agent_detected",
+];
+// Refresh-only trigger: catches an agent leaving a pane that stays open.
+const REFRESH_SUBSCRIPTIONS = ["pane.updated"];
 
 export interface HerdrAgentsSnapshot {
   available: boolean;
@@ -95,6 +104,7 @@ export class HerdrEventFeed implements AgentEventSource {
     socket.on("connect", () => {
       const subscriptions = [
         ...STRUCTURAL_SUBSCRIPTIONS.map((type) => ({ type })),
+        ...REFRESH_SUBSCRIPTIONS.map((type) => ({ type })),
         ...agents.map((agent) => ({ type: "pane.agent_status_changed", pane_id: agent.id })),
       ];
       const id = `mocha:events:${(this.subscriptionCounter += 1)}`;
@@ -151,7 +161,12 @@ export class HerdrEventFeed implements AgentEventSource {
 
     const eventName = typeof message.event === "string" ? message.event : "";
     if (!eventName) return;
-    if (eventName === "pane_created" || eventName === "pane_closed" || eventName === "pane_exited") {
+    if (
+      eventName === "pane_created" ||
+      eventName === "pane_closed" ||
+      eventName === "pane_exited" ||
+      eventName === "pane_agent_detected"
+    ) {
       if (this.socket === socket) {
         this.teardownSocket();
         void this.establish();

@@ -30,6 +30,8 @@ test("publishes a snapshot, refreshes on status events, and rebuilds on structur
     { type: "pane.created" },
     { type: "pane.closed" },
     { type: "pane.exited" },
+    { type: "pane.agent_detected" },
+    { type: "pane.updated" },
     { type: "pane.agent_status_changed", pane_id: "wB:p1" },
   ]);
 
