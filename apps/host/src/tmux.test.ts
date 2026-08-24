@@ -60,6 +60,51 @@ test("creates only Mocha-prefixed sessions", async (context) => {
   assert.equal(calls[0]?.includes("codex"), true);
 });
 
+test("new sessions get low-latency tmux options with no status chrome", async (context) => {
+  const workingDirectory = temporaryDirectory(context);
+  let createdId = "";
+  const calls: string[][] = [];
+  const service = new TmuxService({
+    bin: "tmux",
+    shell: "/bin/zsh",
+    roots: [],
+    execute: async (args) => {
+      calls.push(args);
+      if (args[0] === "new-session") {
+        createdId = args[args.indexOf("-s") + 1] || "";
+        return "";
+      }
+      return sessionLine(createdId, "codex");
+    },
+  });
+
+  const session = await service.createSession({
+    name: "API Work",
+    cwd: workingDirectory,
+    agent: "codex",
+  });
+
+  const optionCalls = calls.filter((args) => args[0] === "set-option");
+  assert.deepEqual(optionCalls, [
+    ["set-option", "-s", "escape-time", "10"],
+    ["set-option", "-s", "focus-events", "on"],
+    ["set-option", "-t", session.id, "status", "off"],
+  ]);
+});
+
+test("attach commands target the dedicated Mocha tmux socket", () => {
+  const service = new TmuxService({
+    bin: "/opt/homebrew/bin/tmux",
+    shell: "/bin/zsh",
+    roots: [],
+  });
+
+  assert.deepEqual(service.attachCommand("mocha-api-work-a1b2c3"), {
+    bin: "/opt/homebrew/bin/tmux",
+    args: ["-L", "mocha", "attach-session", "-t", "mocha-api-work-a1b2c3"],
+  });
+});
+
 function sessionLine(id: string, command: string): string {
   return [id, "100", "100", "0", "1", "/project", command].join(SEPARATOR);
 }

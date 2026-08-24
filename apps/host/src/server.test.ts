@@ -8,8 +8,7 @@ import WebSocket from "ws";
 import type { HostConfig } from "./config.js";
 import { TERMINAL_PROTOCOL } from "./protocol.js";
 import { createMochaServer } from "./server.js";
-import type { TmuxService } from "./tmux.js";
-import type { ServerTerminalMessage } from "./types.js";
+import type { ServerTerminalMessage, SessionBackend } from "./types.js";
 
 const config: HostConfig = {
   bindHost: "127.0.0.1",
@@ -46,8 +45,8 @@ test("terminal websocket authenticates and bridges typed protocol messages", asy
   const terminal = new FakeTerminal();
   const tmux = {
     getSession: async () => ({ id: "fixture" }),
-    attachArgs: (id: string) => ["attach-session", "-t", id],
-  } as unknown as TmuxService;
+    attachCommand: (id: string) => ({ bin: "tmux", args: ["-L", "mocha", "attach-session", "-t", id] }),
+  } as unknown as SessionBackend;
   const server = await createMochaServer({
     config,
     tmux,
@@ -149,7 +148,7 @@ test("terminal websocket fail-closes when pending output exceeds its safety buff
 
   try {
     const closed = once(websocket, "close");
-    terminal.emitData("x".repeat(1024 * 1024 + 1));
+    terminal.emitData("x".repeat(256 * 1024 + 1));
 
     assert.deepEqual(await messages.next(), {
       done: false,
@@ -167,11 +166,52 @@ test("terminal websocket fail-closes when pending output exceeds its safety buff
   }
 });
 
+test("terminal attach uses the backend attach command without pty flow control", async () => {
+  const terminal = new FakeTerminal();
+  let spawnedFile = "";
+  let spawnedArgs: string[] = [];
+  let spawnedOptions: Record<string, unknown> = {};
+  const tmux = {
+    getSession: async () => ({ id: "fixture" }),
+    attachCommand: (id: string) => ({ bin: "tmux", args: ["-L", "mocha", "attach-session", "-t", id] }),
+  } as unknown as SessionBackend;
+  const server = await createMochaServer({
+    config,
+    tmux,
+    spawnTerminal: (file, args, options) => {
+      spawnedFile = file;
+      spawnedArgs = [...(args as string[])];
+      spawnedOptions = { ...options };
+      return terminal.pty;
+    },
+  });
+  await listen(server);
+
+  const address = server.address() as AddressInfo;
+  const websocket = new WebSocket(
+    `ws://127.0.0.1:${address.port}/api/sessions/fixture/terminal`,
+    [TERMINAL_PROTOCOL],
+    { headers: { Authorization: `Bearer ${config.token}` } },
+  );
+
+  try {
+    await once(websocket, "open");
+    await waitUntil(() => spawnedFile !== "");
+    assert.equal(spawnedFile, "tmux");
+    assert.deepEqual(spawnedArgs, ["-L", "mocha", "attach-session", "-t", "fixture"]);
+    assert.equal("handleFlowControl" in spawnedOptions, false);
+  } finally {
+    await closeWebSocket(websocket);
+    await waitUntil(() => terminal.killed);
+    await close(server);
+  }
+});
+
 test("terminal websocket rejects missing credentials before spawning a pty", async () => {
   let spawnCount = 0;
   const server = await createMochaServer({
     config,
-    tmux: {} as TmuxService,
+    tmux: {} as SessionBackend,
     spawnTerminal: (..._args) => {
       spawnCount += 1;
       return new FakeTerminal().pty;
@@ -199,7 +239,7 @@ test("terminal websocket rejects an unsupported protocol before session lookup",
       lookupCount += 1;
       return { id: "fixture" };
     },
-  } as unknown as TmuxService;
+  } as unknown as SessionBackend;
   const server = await createMochaServer({
     config,
     tmux,
@@ -229,7 +269,7 @@ test("terminal websocket returns not found before spawning a pty", async () => {
   let spawnCount = 0;
   const tmux = {
     getSession: async () => undefined,
-  } as unknown as TmuxService;
+  } as unknown as SessionBackend;
   const server = await createMochaServer({
     config,
     tmux,
@@ -255,7 +295,7 @@ test("terminal websocket returns not found before spawning a pty", async () => {
 });
 
 async function withServer(run: (origin: string) => Promise<void>): Promise<void> {
-  const server = await createMochaServer({ config, tmux: {} as TmuxService });
+  const server = await createMochaServer({ config, tmux: {} as SessionBackend });
   await listen(server);
 
   try {
@@ -273,8 +313,8 @@ async function openTerminalSocket(terminal: FakeTerminal): Promise<{
 }> {
   const tmux = {
     getSession: async () => ({ id: "fixture" }),
-    attachArgs: (id: string) => ["attach-session", "-t", id],
-  } as unknown as TmuxService;
+    attachCommand: (id: string) => ({ bin: "tmux", args: ["-L", "mocha", "attach-session", "-t", id] }),
+  } as unknown as SessionBackend;
   const server = await createMochaServer({
     config,
     tmux,

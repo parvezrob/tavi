@@ -11,19 +11,21 @@ import {
   parseClientTerminalMessage,
   TERMINAL_PROTOCOL,
 } from "./protocol.js";
-import { TmuxService } from "./tmux.js";
-import type { HostInfo, ServerTerminalMessage } from "./types.js";
+import type { HostInfo, ServerTerminalMessage, SessionBackend } from "./types.js";
 import { InputError, parseCreateSession, safeSessionId } from "./validation.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
-const WEBSOCKET_HIGH_WATER_BYTES = 512 * 1024;
-const WEBSOCKET_LOW_WATER_BYTES = 128 * 1024;
-const MAX_PENDING_OUTPUT_BYTES = 1024 * 1024;
+// Small buffers on purpose: when the phone falls behind, pausing the pty
+// quickly means tmux holds fresh frames instead of the connection replaying a
+// large backlog of stale screen paints.
+const WEBSOCKET_HIGH_WATER_BYTES = 64 * 1024;
+const WEBSOCKET_LOW_WATER_BYTES = 16 * 1024;
+const MAX_PENDING_OUTPUT_BYTES = 256 * 1024;
 const BACKPRESSURE_POLL_MILLISECONDS = 25;
 
 export interface MochaServerOptions {
   config: HostConfig;
-  tmux: TmuxService;
+  tmux: SessionBackend;
   spawnTerminal?: typeof pty.spawn;
 }
 
@@ -100,7 +102,7 @@ async function routeRequest(
   request: IncomingMessage,
   response: ServerResponse,
   config: HostConfig,
-  tmux: TmuxService,
+  tmux: SessionBackend,
 ): Promise<void> {
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
@@ -166,13 +168,15 @@ function bridgeTerminal(
   websocket: WebSocket,
   id: string,
   config: HostConfig,
-  tmux: TmuxService,
+  tmux: SessionBackend,
   spawnTerminal: typeof pty.spawn,
 ): void {
   const env = { ...process.env };
   delete env.npm_config_prefix;
   delete env.NPM_CONFIG_PREFIX;
-  const terminal = spawnTerminal(config.tmuxBin, tmux.attachArgs(id), {
+  const attach = tmux.attachCommand(id);
+  // Flow control stays off so a stray XOFF (Ctrl-S) can never freeze output.
+  const terminal = spawnTerminal(attach.bin, attach.args, {
     name: "xterm-256color",
     cols: 100,
     rows: 30,
@@ -182,7 +186,6 @@ function bridgeTerminal(
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
     },
-    handleFlowControl: true,
   });
 
   let attachmentClosed = false;

@@ -3,21 +3,30 @@ import { randomBytes } from "node:crypto";
 import { access, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { AgentKind, CreateSessionInput, SessionInfo, WorkspaceInfo } from "./types.js";
+import type {
+  AgentKind,
+  AttachCommand,
+  CreateSessionInput,
+  SessionBackend,
+  SessionInfo,
+  WorkspaceInfo,
+} from "./types.js";
 
 const execFileAsync = promisify(execFile);
 const FIELD_SEPARATOR = "\u001f";
 const MANAGED_SESSION_PREFIX = "mocha-";
 const LEGACY_SESSION_PREFIX = "deck-";
+const DEFAULT_SOCKET_NAME = "mocha";
 
 export interface TmuxOptions {
   bin: string;
   shell: string;
   roots: string[];
+  socketName?: string;
   execute?: (args: string[]) => Promise<string>;
 }
 
-export class TmuxService {
+export class TmuxService implements SessionBackend {
   constructor(private readonly options: TmuxOptions) {}
 
   async version(): Promise<string> {
@@ -72,6 +81,7 @@ export class TmuxService {
     if (command) args.push(command);
 
     await this.run(args);
+    await this.makeSessionResponsive(id);
     const created = await this.getSession(id);
     if (!created) throw new Error("tmux created the session, but it could not be read back.");
     return created;
@@ -112,8 +122,24 @@ export class TmuxService {
     });
   }
 
-  attachArgs(id: string): string[] {
-    return ["attach-session", "-t", id];
+  attachCommand(id: string): AttachCommand {
+    return {
+      bin: this.options.bin,
+      args: [...this.socketArgs(), "attach-session", "-t", id],
+    };
+  }
+
+  // tmux defaults are tuned for interactive desktop use: a 500ms escape-key
+  // delay and a visible status bar. Mocha treats tmux as an invisible
+  // backbone, so managed sessions get low-latency keys and no tmux chrome.
+  private async makeSessionResponsive(id: string): Promise<void> {
+    await this.run(["set-option", "-s", "escape-time", "10"]);
+    await this.run(["set-option", "-s", "focus-events", "on"]);
+    await this.run(["set-option", "-t", id, "status", "off"]);
+  }
+
+  private socketArgs(): string[] {
+    return ["-L", this.options.socketName || DEFAULT_SOCKET_NAME];
   }
 
   private parseSession(line: string): SessionInfo {
@@ -200,7 +226,7 @@ export class TmuxService {
     const env = { ...process.env };
     delete env.npm_config_prefix;
     delete env.NPM_CONFIG_PREFIX;
-    const { stdout } = await execFileAsync(this.options.bin, args, { env });
+    const { stdout } = await execFileAsync(this.options.bin, [...this.socketArgs(), ...args], { env });
     return stdout;
   }
 }
