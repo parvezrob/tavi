@@ -18,10 +18,18 @@ export type HerdrAgentLookup =
   | { available: true; agent?: HerdrAgentInfo }
   | { available: false; reason: string };
 
+export type HerdrPreviewResult =
+  | { available: true; preview: string }
+  | { available: false; reason: string };
+
+export type HerdrPromptResult = { submitted: true } | { submitted: false; reason: string };
+
 export interface HerdrAgentSource {
   listAgents(): Promise<HerdrAgentsResult>;
   findAgent(paneId: string): Promise<HerdrAgentLookup>;
   attachCommand(paneId: string): AttachCommand;
+  readAgent(paneId: string, lines: number): Promise<HerdrPreviewResult>;
+  promptAgent(paneId: string, text: string): Promise<HerdrPromptResult>;
 }
 
 export class HerdrService implements HerdrAgentSource {
@@ -66,6 +74,35 @@ export class HerdrService implements HerdrAgentSource {
 
   attachCommand(paneId: string): AttachCommand {
     return { bin: this.options.bin ?? "herdr", args: ["agent", "attach", paneId] };
+  }
+
+  // Bounded plain-text snapshot for session cards. The text comes straight
+  // from Herdr's own read API — never scraped or reinterpreted here.
+  async readAgent(paneId: string, lines: number): Promise<HerdrPreviewResult> {
+    try {
+      const result = asRecord(
+        await this.request("agent.read", {
+          target: paneId,
+          source: "recent",
+          lines,
+          format: "text",
+        }),
+      );
+      return { available: true, preview: extractPreviewText(result) };
+    } catch (error) {
+      return { available: false, reason: describeConnectionFailure(error) };
+    }
+  }
+
+  // Submits exactly once and never replays: an uncertain outcome is
+  // reported as such, per the no-ambiguous-replay doctrine.
+  async promptAgent(paneId: string, text: string): Promise<HerdrPromptResult> {
+    try {
+      await this.request("agent.prompt", { target: paneId, text });
+      return { submitted: true };
+    } catch (error) {
+      return { submitted: false, reason: describeConnectionFailure(error) };
+    }
   }
 
   private request(method: string, params: Record<string, unknown>): Promise<unknown> {
@@ -131,6 +168,16 @@ function parseAgent(agent: Record<string, unknown>): HerdrAgentInfo {
     revision: typeof agent.revision === "number" ? agent.revision : 0,
     authority: "herdr",
   };
+}
+
+function extractPreviewText(result: Record<string, unknown>): string {
+  if (typeof result.text === "string") return result.text;
+  if (typeof result.output === "string") return result.output;
+  if (typeof result.content === "string") return result.content;
+  if (Array.isArray(result.lines)) {
+    return result.lines.filter((line): line is string => typeof line === "string").join("\n");
+  }
+  return "";
 }
 
 function unavailable(reason: string): HerdrAgentsResult {

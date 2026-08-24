@@ -149,6 +149,7 @@ test("v2 exit reaches the connected client and frees the attachment", async () =
 test("herdr agents are attachable terminal targets with honest failure modes", async () => {
   const harness = new TerminalHarness();
   const spawnedCommands: Array<{ bin: string; args: string[] }> = [];
+  const prompts: Array<{ paneId: string; text: string }> = [];
   harness.recordSpawn = (bin, args) => spawnedCommands.push({ bin, args });
   let herdrUp = true;
   harness.herdr = {
@@ -174,6 +175,16 @@ test("herdr agents are attachable terminal targets with honest failure modes", a
           : { available: true as const }
         : { available: false as const, reason: "The Herdr server is not running." },
     attachCommand: (paneId: string) => ({ bin: "herdr", args: ["agent", "attach", paneId] }),
+    readAgent: async (paneId: string, lines: number) =>
+      herdrUp
+        ? { available: true as const, preview: `preview of ${paneId} (${lines} lines)` }
+        : { available: false as const, reason: "The Herdr server is not running." },
+    promptAgent: async (paneId: string, text: string) => {
+      prompts.push({ paneId, text });
+      return herdrUp
+        ? { submitted: true as const }
+        : { submitted: false as const, reason: "The Herdr server is not running." };
+    },
   };
   const server = await harness.startServer();
 
@@ -192,8 +203,46 @@ test("herdr agents are attachable terminal targets with honest failure modes", a
     await socket.close();
 
     assert.equal(await harness.upgradeStatus(server, "/api/agents/wB:p9/terminal"), 404);
+
+    const address = server.address() as AddressInfo;
+    const preview = await fetch(`http://127.0.0.1:${address.port}/api/agents/wB:p1/preview?lines=99`, {
+      headers: { Authorization: `Bearer ${config.token}` },
+    });
+    assert.equal(preview.status, 200);
+    assert.deepEqual(await preview.json(), {
+      paneId: "wB:p1",
+      lines: 50,
+      preview: "preview of wB:p1 (50 lines)",
+    });
+
+    const prompt = await fetch(`http://127.0.0.1:${address.port}/api/agents/wB:p1/prompt`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "continue with the plan" }),
+    });
+    assert.equal(prompt.status, 202);
+    assert.deepEqual(prompts, [{ paneId: "wB:p1", text: "continue with the plan" }]);
+
+    const emptyPrompt = await fetch(`http://127.0.0.1:${address.port}/api/agents/wB:p1/prompt`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(emptyPrompt.status, 400);
+    assert.equal(prompts.length, 1);
+
     herdrUp = false;
     assert.equal(await harness.upgradeStatus(server, "/api/agents/wB:p1/terminal"), 503);
+    const downPreview = await fetch(`http://127.0.0.1:${address.port}/api/agents/wB:p1/preview`, {
+      headers: { Authorization: `Bearer ${config.token}` },
+    });
+    assert.equal(downPreview.status, 503);
+    const downPrompt = await fetch(`http://127.0.0.1:${address.port}/api/agents/wB:p1/prompt`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "lost" }),
+    });
+    assert.equal(downPrompt.status, 503);
   } finally {
     await close(server);
   }

@@ -22,6 +22,8 @@ import type { AttachCommand, HostInfo, ServerTerminalMessage, SessionBackend } f
 import { InputError, parseCreateSession, safeSessionId } from "./validation.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
+const MAX_PREVIEW_CHARACTERS = 4_096;
+const MAX_PROMPT_CHARACTERS = 16_384;
 // Small buffers on purpose: when the phone falls behind, pausing the pty
 // quickly means tmux holds fresh frames instead of the connection replaying a
 // large backlog of stale screen paints.
@@ -287,6 +289,53 @@ async function routeRequest(
 
   if (url.pathname === "/api/workspaces" && request.method === "GET") {
     sendJson(response, 200, { workspaces: await tmux.listWorkspaces() });
+    return;
+  }
+
+  const previewMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/preview$/);
+  if (previewMatch && request.method === "GET") {
+    if (!herdr) {
+      sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
+      return;
+    }
+    const paneId = safeSessionId(previewMatch[1] || "");
+    const requestedLines = Number.parseInt(url.searchParams.get("lines") || "12", 10);
+    const lines = Number.isFinite(requestedLines) ? clamp(requestedLines, 1, 50) : 12;
+    const result = await herdr.readAgent(paneId, lines);
+    if (!result.available) {
+      sendJson(response, 503, { error: result.reason });
+      return;
+    }
+    sendJson(response, 200, {
+      paneId,
+      lines,
+      preview: result.preview.slice(0, MAX_PREVIEW_CHARACTERS),
+    });
+    return;
+  }
+
+  const promptMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/prompt$/);
+  if (promptMatch && request.method === "POST") {
+    if (!herdr) {
+      sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
+      return;
+    }
+    const paneId = safeSessionId(promptMatch[1] || "");
+    const body = await readJsonBody(request);
+    const text =
+      typeof body === "object" && body !== null && "text" in body && typeof body.text === "string"
+        ? body.text
+        : undefined;
+    if (!text || text.length > MAX_PROMPT_CHARACTERS) {
+      sendJson(response, 400, { error: "Prompt text is required and must stay under the size limit." });
+      return;
+    }
+    const result = await herdr.promptAgent(paneId, text);
+    if (!result.submitted) {
+      sendJson(response, 503, { error: result.reason });
+      return;
+    }
+    sendJson(response, 202, { submitted: true, paneId });
     return;
   }
 
