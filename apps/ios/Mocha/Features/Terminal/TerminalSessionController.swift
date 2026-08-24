@@ -161,6 +161,26 @@ final class TerminalSessionController {
         deliverTerminalInput(Data(key.sequence.utf8))
     }
 
+    // One-shot Ctrl modifier for the quick-key row.
+    private(set) var controlLatchActive = false
+
+    func toggleControlLatch() {
+        controlLatchActive.toggle()
+    }
+
+    // Deliberate composer send for terminal targets: the text travels as a
+    // bracketed paste (so embedded newlines cannot self-execute) followed
+    // by a single explicit return.
+    func sendComposedText(_ text: String) {
+        guard connectionState.canSubmitInput else {
+            errorMessage = "Wait for the terminal to reconnect before sending."
+            return
+        }
+        guard !text.isEmpty else { return }
+        paste(text)
+        deliverTerminalInput(Data("\r".utf8), canCoalesce: false)
+    }
+
     func terminalGridDidChange(_ grid: TerminalGridSize) {
         guard grid != latestGridSize else { return }
         latestGridSize = grid
@@ -302,6 +322,16 @@ final class TerminalSessionController {
     private func deliverTerminalInput(_ data: Data, canCoalesce: Bool = true) {
         guard connectionState.canSubmitInput else { return }
         guard !data.isEmpty else { return }
+        var data = data
+        if controlLatchActive {
+            // One-shot Ctrl modifier from the quick row: the next single
+            // keystroke becomes its control code; anything unmappable
+            // passes through and still releases the latch.
+            controlLatchActive = false
+            if let controlCode = TerminalControlKeyMapper.controlCode(for: data) {
+                data = controlCode
+            }
+        }
         if data.first == 0x1B {
             Self.logger.info("terminal-originated control sequence, \(data.count) bytes")
         }
@@ -633,6 +663,8 @@ private struct PendingTerminalInput {
 enum TerminalQuickKey: String, CaseIterable, Identifiable, Sendable {
     case escape = "Esc"
     case tab = "Tab"
+    case shiftTab = "⇧Tab"
+    case enter = "Enter"
     case interrupt = "Ctrl-C"
     case left = "←"
     case up = "↑"
@@ -645,11 +677,25 @@ enum TerminalQuickKey: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .escape: "\u{1B}"
         case .tab: "\t"
+        case .shiftTab: "\u{1B}[Z"
+        case .enter: "\r"
         case .interrupt: "\u{03}"
         case .left: "\u{1B}[D"
         case .up: "\u{1B}[A"
         case .down: "\u{1B}[B"
         case .right: "\u{1B}[C"
         }
+    }
+}
+
+// Maps a single typed character to its control code (Ctrl-A ... Ctrl-_)
+// for the quick-row Ctrl latch. Anything that has no control counterpart
+// returns nil and the keystroke passes through unmodified.
+enum TerminalControlKeyMapper {
+    static func controlCode(for data: Data) -> Data? {
+        guard data.count == 1, var byte = data.first else { return nil }
+        if (0x61...0x7A).contains(byte) { byte -= 0x20 }
+        guard (0x40...0x5F).contains(byte) else { return nil }
+        return Data([byte & 0x1F])
     }
 }

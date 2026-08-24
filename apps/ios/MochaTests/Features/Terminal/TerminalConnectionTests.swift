@@ -257,6 +257,64 @@ struct TerminalConnectionTests {
 
     @Test
     @MainActor
+    func composerSendUsesBracketedPasteWithOneExplicitReturn() async throws {
+        let transport = ScriptedTerminalTransport()
+        let controller = TerminalSessionController(client: transport)
+
+        controller.connect(
+            hostText: "https://mac.tailnet.ts.net",
+            sessionText: "fixture",
+            credential: "valid-token"
+        )
+        try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
+        try await waitUntil { controller.connectionState == .connected }
+
+        controller.sendComposedText("line one\nline two")
+        let pasted = TerminalClientMessage.input("\u{1B}[200~line one\nline two\u{1B}[201~")
+        let returnKey = TerminalClientMessage.input("\r")
+        try await waitUntil {
+            await transport.sentMessages.contains(returnKey)
+        }
+
+        let sent = await transport.sentMessages
+        #expect(sent.filter { $0 == pasted }.count == 1)
+        let pasteIndex = try #require(sent.firstIndex(of: pasted))
+        let returnIndex = try #require(sent.firstIndex(of: returnKey))
+        #expect(pasteIndex < returnIndex)
+        controller.stop()
+    }
+
+    @Test
+    @MainActor
+    func controlLatchTransformsExactlyOneKeystroke() async throws {
+        let transport = ScriptedTerminalTransport()
+        let controller = TerminalSessionController(client: transport)
+
+        controller.connect(
+            hostText: "https://mac.tailnet.ts.net",
+            sessionText: "fixture",
+            credential: "valid-token"
+        )
+        try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
+        try await waitUntil { controller.connectionState == .connected }
+
+        controller.toggleControlLatch()
+        #expect(controller.controlLatchActive)
+        controller.bridge.receiveTerminalInput(Data("r".utf8))
+        try await waitUntil {
+            await transport.sentMessages.contains(.input("\u{12}"))
+        }
+        #expect(!controller.controlLatchActive)
+
+        controller.bridge.receiveTerminalInput(Data("r".utf8))
+        try await waitUntil {
+            await transport.sentMessages.contains(.input("r"))
+        }
+        controller.stop()
+    }
+
+    @Test
+    @MainActor
     func reattachingTheRendererRequestsATmuxRedraw() async throws {
         let transport = ScriptedTerminalTransport()
         let controller = TerminalSessionController(client: transport)

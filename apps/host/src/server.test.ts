@@ -55,6 +55,7 @@ test("agents endpoint serves herdr state and degrades honestly without it", asyn
     readAgent: async () => ({ available: true as const, preview: "$ npm test\nall green" }),
     promptAgent: async () => ({ submitted: true as const }),
     createTab: async () => ({ created: true as const, paneId: "wB:p9", tabId: "wB:t9" }),
+    closeTab: async () => ({ closed: true as const }),
     listTree: async () => ({
       available: true as const,
       workspaces: [
@@ -92,6 +93,13 @@ test("agents endpoint serves herdr state and degrades honestly without it", asyn
     assert.equal(tree.status, 200);
     const treeBody = (await tree.json()) as { workspaces: Array<{ workspaceId: string }> };
     assert.equal(treeBody.workspaces[0]?.workspaceId, "wB");
+
+    const closed = await fetch(`http://127.0.0.1:${address.port}/api/herdr/tabs/wB:t9`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${config.token}` },
+    });
+    assert.equal(closed.status, 200);
+    assert.deepEqual(await closed.json(), { closed: true, tabId: "wB:t9" });
   } finally {
     await close(server);
   }

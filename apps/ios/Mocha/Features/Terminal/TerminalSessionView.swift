@@ -9,6 +9,10 @@ struct TerminalSessionView: View {
     @State private var showingConnection = true
     @State private var showingJump = false
     @State private var didApplyDevelopmentBootstrap = false
+    @State private var composerText = ""
+    @State private var composerError: String?
+    @State private var composerSending = false
+    @FocusState private var composerFocused: Bool
 
     let controller: TerminalSessionController
     // Present only when the terminal was opened from the agent home; drives
@@ -185,6 +189,59 @@ struct TerminalSessionView: View {
     }
 
     private var terminalControls: some View {
+        VStack(spacing: 8) {
+            composerBar
+            quickKeyRow
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    // Deliberate send is the PRD's primary input mode: text stays local
+    // until the send button, and nothing is ever replayed automatically.
+    private var composerBar: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField(
+                    activeAgent == nil ? "Type a command…" : "Message \(activeAgent?.displayName ?? "the agent")…",
+                    text: $composerText,
+                    axis: .vertical
+                )
+                .lineLimit(1...5)
+                .font(.system(.callout, design: .monospaced))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($composerFocused)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .accessibilityIdentifier("terminal.composer")
+
+                Button {
+                    sendComposer()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.title2)
+                }
+                .disabled(
+                    composerSending
+                        || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || !controller.connectionState.canSubmitInput
+                )
+                .accessibilityLabel("Send")
+                .accessibilityIdentifier("terminal.composerSend")
+            }
+            if let composerError {
+                Text(composerError)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private var quickKeyRow: some View {
         HStack(spacing: 8) {
             Button("Keyboard", systemImage: "keyboard") {
                 controller.bridge.focusTerminal()
@@ -195,6 +252,21 @@ struct TerminalSessionView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
+                    Button("Ctrl") {
+                        controller.toggleControlLatch()
+                        controller.bridge.focusTerminal()
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(controller.controlLatchActive ? Color.accentColor : nil)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .disabled(!controller.connectionState.canSubmitInput)
+                    .accessibilityLabel(
+                        controller.controlLatchActive
+                            ? "Control modifier armed, next key sends its control code"
+                            : "Control modifier"
+                    )
+                    .accessibilityIdentifier("terminal.ctrl")
+
                     ForEach(TerminalQuickKey.allCases) { key in
                         Button(key.rawValue) {
                             controller.sendQuickKey(key)
@@ -227,10 +299,29 @@ struct TerminalSessionView: View {
             .frame(minWidth: 44, minHeight: 44)
             .accessibilityIdentifier("terminal.dismissKeyboard")
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .top) { Divider() }
+    }
+
+    // Herdr agents receive the composer through the structured prompt
+    // endpoint; plain terminals get bracketed-paste text plus one explicit
+    // return. Text clears only after a confirmed hand-off.
+    private func sendComposer() {
+        let text = composerText
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        composerError = nil
+        if let agent = activeAgent, let agentDirectory {
+            composerSending = true
+            Task {
+                let failure = await agentDirectory.promptAgent(paneId: agent.id, text: text)
+                composerSending = false
+                composerError = failure
+                if failure == nil {
+                    composerText = ""
+                }
+            }
+        } else {
+            controller.sendComposedText(text)
+            composerText = ""
+        }
     }
 
     private var disconnectedPrompt: some View {
@@ -317,6 +408,8 @@ struct TerminalSessionView: View {
         switch key {
         case .escape: "Escape"
         case .tab: "Tab"
+        case .shiftTab: "Shift Tab"
+        case .enter: "Enter"
         case .interrupt: "Interrupt with Control C"
         case .left: "Left arrow"
         case .up: "Up arrow"

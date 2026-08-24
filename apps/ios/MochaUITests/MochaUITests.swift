@@ -235,14 +235,20 @@ final class MochaUITests: XCTestCase {
 
     // Phase C: tapping an agent on the home lands in its pane with an
     // identity header, and the Jump-to sheet lists the hierarchy with the
-    // current pane badged. Needs a live host with at least one Herdr agent
-    // running; skips otherwise.
+    // current pane badged. Creates its own disposable agent tab through the
+    // host API — never touches agents the owner has running — and closes
+    // it again afterwards.
     @MainActor
-    func testAgentTerminalShowsIdentityAndJumpSheet() throws {
+    func testAgentTerminalShowsIdentityAndJumpSheet() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let host = environment["MOCHA_DEV_HOST"],
               let token = environment["MOCHA_DEV_TOKEN"] else {
             throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live jump test.")
+        }
+
+        let (paneId, tabId) = try await createAgentTab(host: host, token: token)
+        addTeardownBlock {
+            try? await Self.closeAgentTab(host: host, token: token, tabId: tabId)
         }
 
         let app = XCUIApplication()
@@ -250,12 +256,11 @@ final class MochaUITests: XCTestCase {
         app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
         app.launch()
 
-        let agentRow = app.buttons.matching(
-            NSPredicate(format: "identifier BEGINSWITH 'sessions.agent.'")
-        ).firstMatch
-        guard agentRow.waitForExistence(timeout: 8) else {
-            throw XCTSkip("No live Herdr agent is running on the host.")
-        }
+        let agentRow = app.buttons["sessions.agent.\(paneId)"]
+        XCTAssertTrue(
+            agentRow.waitForExistence(timeout: 15),
+            "The freshly created agent never appeared on the home."
+        )
         agentRow.tap()
 
         XCTAssertTrue(
@@ -277,6 +282,48 @@ final class MochaUITests: XCTestCase {
         )
         app.buttons["Done"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["terminal.surface"].waitForExistence(timeout: 3))
+
+        // Deliberate composer send to the live agent: the field clears only
+        // after the host confirms delivery, so an emptied field proves the
+        // prompt endpoint accepted the text.
+        let composer = app.textFields["terminal.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 3))
+        composer.tap()
+        let marker = "COMPOSER-LIVE-OK reply with exactly: COMPOSER-ACK"
+        composer.typeText(marker)
+        let send = app.buttons["terminal.composerSend"]
+        XCTAssertTrue(send.isEnabled)
+        send.tap()
+        let cleared = NSPredicate { _, _ in
+            (composer.value as? String).map { $0.isEmpty || !$0.contains("COMPOSER-LIVE-OK") } ?? true
+        }
+        let expectation = XCTNSPredicateExpectation(predicate: cleared, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation], timeout: 10),
+            .completed,
+            "The composer never cleared, so the prompt was not confirmed."
+        )
+    }
+
+    private func createAgentTab(host: String, token: String) async throws -> (paneId: String, tabId: String) {
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/herdr/tabs")))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["agent": "claude"])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 201 else {
+            throw XCTSkip("The host could not create a disposable agent tab.")
+        }
+        let payload = try JSONDecoder().decode([String: String].self, from: data)
+        return (try XCTUnwrap(payload["paneId"]), try XCTUnwrap(payload["tabId"]))
+    }
+
+    private static func closeAgentTab(host: String, token: String, tabId: String) async throws {
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/herdr/tabs/\(tabId)")))
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        _ = try await URLSession.shared.data(for: request)
     }
 
     @MainActor

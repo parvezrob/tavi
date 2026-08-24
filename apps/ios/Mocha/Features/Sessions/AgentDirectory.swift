@@ -145,6 +145,39 @@ final class AgentDirectory {
         }
     }
 
+    // Deliberate composer send for an agent target via the host's prompt
+    // endpoint. Submits exactly once; returns a user-facing error message
+    // on failure, nil on success. Note the host-side contract: the text
+    // appends to whatever is already typed in the agent's own composer.
+    func promptAgent(paneId: String, text: String) async -> String? {
+        guard let host, !credential.isEmpty else { return "Connect a host first." }
+        guard var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else {
+            return "The host address is invalid."
+        }
+        components.path = "/api/agents/\(paneId)/prompt"
+        guard let url = components.url else { return "The host address is invalid." }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONEncoder().encode(["text": text])
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let status = (response as? HTTPURLResponse)?.statusCode else {
+                return "The host did not answer."
+            }
+            guard status == 200 || status == 202 || status == 204 else {
+                let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
+                return message ?? "The host could not deliver the prompt (HTTP \(status))."
+            }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
     func fetchTree() async -> HerdrTreeFetch {
         guard let host, !credential.isEmpty else {
             return .failure("Connect a host first.")

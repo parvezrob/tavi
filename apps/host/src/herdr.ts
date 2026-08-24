@@ -53,9 +53,12 @@ export type HerdrTreeResult =
   | { available: true; workspaces: HerdrTreeWorkspace[] }
   | { available: false; reason: string };
 
+export type HerdrTabCloseResult = { closed: true } | { closed: false; reason: string };
+
 export interface HerdrAgentSource {
   listAgents(): Promise<HerdrAgentsResult>;
   listTree(): Promise<HerdrTreeResult>;
+  closeTab(tabId: string): Promise<HerdrTabCloseResult>;
   findAgent(paneId: string): Promise<HerdrAgentLookup>;
   attachCommand(paneId: string): AttachCommand;
   readAgent(paneId: string, lines: number): Promise<HerdrPreviewResult>;
@@ -231,6 +234,15 @@ export class HerdrService implements HerdrAgentSource {
       return { created: true, paneId, tabId };
     } catch (error) {
       return { created: false, reason: describeConnectionFailure(error) };
+    }
+  }
+
+  async closeTab(tabId: string): Promise<HerdrTabCloseResult> {
+    try {
+      await this.request("tab.close", { tab_id: tabId });
+      return { closed: true };
+    } catch (error) {
+      return { closed: false, reason: describeConnectionFailure(error) };
     }
   }
 

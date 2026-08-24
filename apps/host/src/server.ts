@@ -354,6 +354,22 @@ async function routeRequest(
     return;
   }
 
+  const tabCloseMatch = url.pathname.match(/^\/api\/herdr\/tabs\/([^/]+)$/);
+  if (tabCloseMatch && request.method === "DELETE") {
+    if (!herdr) {
+      sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
+      return;
+    }
+    const tabId = safeSessionId(tabCloseMatch[1] || "");
+    const result = await herdr.closeTab(tabId);
+    if (!result.closed) {
+      sendJson(response, 503, { error: result.reason });
+      return;
+    }
+    sendJson(response, 200, { closed: true, tabId });
+    return;
+  }
+
   if (url.pathname === "/api/herdr/tabs" && request.method === "POST") {
     if (!herdr) {
       sendJson(response, 404, { error: "Herdr integration is not configured on this host." });

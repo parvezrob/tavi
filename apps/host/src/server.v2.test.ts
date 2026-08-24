@@ -159,6 +159,10 @@ test("herdr agents are attachable terminal targets with honest failure modes", a
       herdrUp
         ? { available: true as const, workspaces: [] }
         : { available: false as const, reason: "The Herdr server is not running." },
+    closeTab: async () =>
+      herdrUp
+        ? { closed: true as const }
+        : { closed: false as const, reason: "The Herdr server is not running." },
     findAgent: async (paneId: string) =>
       herdrUp
         ? paneId === "wB:p1"
