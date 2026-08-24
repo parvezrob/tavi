@@ -3,6 +3,12 @@ import { randomUUID } from "node:crypto";
 export const RESUME_BUFFER_BYTES = 1024 * 1024;
 export const DETACHED_RETENTION_MS = 120_000;
 const MAX_BUFFER_CHUNK_BYTES = 64 * 1024;
+// While a phone is attached, the shared terminal clamps to its small grid.
+// The moment it detaches, claim a desktop-scale size so the pane on the Mac
+// snaps back immediately instead of staying phone-sized for the whole
+// retention window (the multiplexer clamps to the smallest live client).
+export const DETACHED_COLUMNS = 250;
+export const DETACHED_ROWS = 80;
 
 export interface TerminalProcessLike {
   write(data: string): void;
@@ -111,7 +117,13 @@ export class TerminalAttachment {
   release(client: AttachmentClient): void {
     if (this.client !== client) return;
     this.client = undefined;
-    if (!this.disposed) this.scheduleRetention();
+    if (this.disposed) return;
+    this.scheduleRetention();
+    try {
+      this.terminal.resize(DETACHED_COLUMNS, DETACHED_ROWS);
+    } catch {
+      // The pty may already be gone; releasing must not throw.
+    }
   }
 
   write(data: string): void {

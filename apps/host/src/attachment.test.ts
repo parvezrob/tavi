@@ -99,6 +99,9 @@ test("claim delivers live output, supersedes the previous client, and release re
   assert.ok(!attachment.isDisposed);
 
   attachment.release(second);
+  // Releasing the live client immediately reclaims a desktop-scale grid so
+  // the pane on the Mac is not stuck phone-sized for the retention window.
+  assert.deepEqual(process.resizes.at(-1), { cols: 250, rows: 80 });
   await new Promise((resolve) => setTimeout(resolve, 60));
   assert.ok(attachment.isDisposed);
   assert.ok(process.killed);
