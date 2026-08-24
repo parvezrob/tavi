@@ -9,7 +9,7 @@ import type { IPty } from "node-pty";
 import WebSocket from "ws";
 import type { HostConfig } from "./config.js";
 import { OUTPUT_FRAME_HEADER_BYTES, OUTPUT_FRAME_TYPE, TERMINAL_PROTOCOL_V2 } from "./protocol.js";
-import { createMochaServer } from "./server.js";
+import { createMochaServer, type MochaServerOptions } from "./server.js";
 import type { ServerTerminalMessage, SessionBackend } from "./types.js";
 
 const config: HostConfig = {
@@ -146,6 +146,59 @@ test("v2 exit reaches the connected client and frees the attachment", async () =
   }
 });
 
+test("herdr agents are attachable terminal targets with honest failure modes", async () => {
+  const harness = new TerminalHarness();
+  const spawnedCommands: Array<{ bin: string; args: string[] }> = [];
+  harness.recordSpawn = (bin, args) => spawnedCommands.push({ bin, args });
+  let herdrUp = true;
+  harness.herdr = {
+    listAgents: async () => ({ provider: "herdr", available: true, protocol: 17, agents: [] }),
+    findAgent: async (paneId: string) =>
+      herdrUp
+        ? paneId === "wB:p1"
+          ? {
+              available: true as const,
+              agent: {
+                id: "wB:p1",
+                agent: "claude",
+                status: "idle" as const,
+                cwd: "/",
+                title: "Claude Code",
+                workspaceId: "wB",
+                tabId: "wB:t1",
+                focused: true,
+                revision: 1,
+                authority: "herdr" as const,
+              },
+            }
+          : { available: true as const }
+        : { available: false as const, reason: "The Herdr server is not running." },
+    attachCommand: (paneId: string) => ({ bin: "herdr", args: ["agent", "attach", paneId] }),
+  };
+  const server = await harness.startServer();
+
+  try {
+    const socket = await harness.openSocket(server, "", "/api/agents/wB:p1/terminal");
+    const ready = await socket.nextControl();
+    assert.equal(ready.type, "ready");
+    assert.deepEqual(spawnedCommands, [{ bin: "herdr", args: ["agent", "attach", "wB:p1"] }]);
+
+    harness.terminals[0]?.emitData("agent pane output");
+    assert.equal((await socket.nextOutput()).data, "agent pane output");
+
+    socket.websocket.send(JSON.stringify({ type: "input", data: "continue\r" }));
+    await waitUntil(() => harness.terminals[0]?.writes.length === 1);
+    assert.deepEqual(harness.terminals[0]?.writes, ["continue\r"]);
+    await socket.close();
+
+    assert.equal(await harness.upgradeStatus(server, "/api/agents/wB:p9/terminal"), 404);
+    herdrUp = false;
+    assert.equal(await harness.upgradeStatus(server, "/api/agents/wB:p1/terminal"), 503);
+  } finally {
+    await close(server);
+  }
+});
+
 class FakeTerminal {
   readonly resizes: Array<{ columns: number; rows: number }> = [];
   readonly writes: string[] = [];
@@ -193,6 +246,8 @@ class FakeTerminal {
 
 class TerminalHarness {
   readonly terminals: FakeTerminal[] = [];
+  herdr: MochaServerOptions["herdr"];
+  recordSpawn: ((bin: string, args: string[]) => void) | undefined;
 
   get spawnCount(): number {
     return this.terminals.length;
@@ -206,7 +261,9 @@ class TerminalHarness {
     const server = await createMochaServer({
       config,
       tmux,
-      spawnTerminal: () => {
+      ...(this.herdr ? { herdr: this.herdr } : {}),
+      spawnTerminal: (bin, args) => {
+        this.recordSpawn?.(bin as string, args as string[]);
         const terminal = new FakeTerminal();
         this.terminals.push(terminal);
         return terminal.pty;
@@ -220,11 +277,15 @@ class TerminalHarness {
     return server;
   }
 
-  async openSocket(server: Server, query = ""): Promise<V2Socket> {
+  async openSocket(
+    server: Server,
+    query = "",
+    path = "/api/sessions/fixture/terminal",
+  ): Promise<V2Socket> {
     const address = server.address() as AddressInfo;
     const suffix = query ? `?${query}` : "";
     const websocket = new WebSocket(
-      `ws://127.0.0.1:${address.port}/api/sessions/fixture/terminal${suffix}`,
+      `ws://127.0.0.1:${address.port}${path}${suffix}`,
       [TERMINAL_PROTOCOL_V2],
       { headers: { Authorization: `Bearer ${config.token}` } },
     );
@@ -232,6 +293,20 @@ class TerminalHarness {
     await once(websocket, "open");
     assert.equal(websocket.protocol, TERMINAL_PROTOCOL_V2);
     return socket;
+  }
+
+  upgradeStatus(server: Server, path: string): Promise<number | undefined> {
+    const address = server.address() as AddressInfo;
+    return new Promise((resolve, reject) => {
+      const websocket = new WebSocket(`ws://127.0.0.1:${address.port}${path}`, [TERMINAL_PROTOCOL_V2], {
+        headers: { Authorization: `Bearer ${config.token}` },
+      });
+      websocket.once("unexpected-response", (_request, response) => {
+        response.resume();
+        resolve(response.statusCode);
+      });
+      websocket.once("error", reject);
+    });
   }
 }
 

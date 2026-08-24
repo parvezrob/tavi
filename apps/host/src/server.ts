@@ -16,7 +16,7 @@ import {
   TERMINAL_PROTOCOL_V2,
 } from "./protocol.js";
 import type { HerdrAgentSource } from "./herdr.js";
-import type { HostInfo, ServerTerminalMessage, SessionBackend } from "./types.js";
+import type { AttachCommand, HostInfo, ServerTerminalMessage, SessionBackend } from "./types.js";
 import { InputError, parseCreateSession, safeSessionId } from "./validation.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -40,6 +40,11 @@ export interface MochaServerOptions {
 interface TerminalResumeRequest {
   stream: string;
   offset: number;
+}
+
+interface TerminalTarget {
+  key: string;
+  spawn: () => pty.IPty;
 }
 
 export async function createMochaServer(options: MochaServerOptions) {
@@ -76,8 +81,9 @@ export async function createMochaServer(options: MochaServerOptions) {
   server.on("upgrade", async (request, socket, head) => {
     try {
       const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
-      const match = url.pathname.match(/^\/api\/sessions\/([^/]+)\/terminal$/);
-      if (!match || !isAuthorized(bearerToken(request), config.token)) {
+      const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/terminal$/);
+      const agentMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/terminal$/);
+      if ((!sessionMatch && !agentMatch) || !isAuthorized(bearerToken(request), config.token)) {
         socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
         socket.destroy();
         return;
@@ -88,16 +94,47 @@ export async function createMochaServer(options: MochaServerOptions) {
         return;
       }
 
-      const id = safeSessionId(match[1] || "");
-      if (!(await tmux.getSession(id))) {
-        socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
-        socket.destroy();
-        return;
+      let target: TerminalTarget;
+      if (sessionMatch) {
+        const id = safeSessionId(sessionMatch[1] || "");
+        if (!(await tmux.getSession(id))) {
+          socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+        target = {
+          key: id,
+          spawn: () => spawnAttachmentTerminal(tmux.attachCommand(id), config, spawnTerminal),
+        };
+      } else {
+        // Herdr agents are terminal targets only when Herdr itself confirms
+        // them; a down Herdr degrades honestly instead of guessing.
+        const paneId = safeSessionId(agentMatch?.[1] || "");
+        if (!herdr) {
+          socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+        const lookup = await herdr.findAgent(paneId);
+        if (!lookup.available) {
+          socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+        if (!lookup.agent) {
+          socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+        target = {
+          key: `agent:${paneId}`,
+          spawn: () => spawnAttachmentTerminal(herdr.attachCommand(paneId), config, spawnTerminal),
+        };
       }
 
       const resume = parseResumeRequest(url);
       wss.handleUpgrade(request, socket, head, (websocket) => {
-        wss.emit("connection", websocket, request, id, resume);
+        wss.emit("connection", websocket, request, target, resume);
       });
     } catch {
       socket.destroy();
@@ -106,12 +143,12 @@ export async function createMochaServer(options: MochaServerOptions) {
 
   wss.on(
     "connection",
-    (websocket: WebSocket, _request: IncomingMessage, id: string, resume?: TerminalResumeRequest) => {
+    (websocket: WebSocket, _request: IncomingMessage, target: TerminalTarget, resume?: TerminalResumeRequest) => {
       try {
         if (websocket.protocol === TERMINAL_PROTOCOL_V2) {
-          bridgeTerminalV2(websocket, id, config, tmux, spawnTerminal, attachments, resume);
+          bridgeTerminalV2(websocket, target, attachments, resume);
         } else {
-          bridgeTerminal(websocket, id, config, tmux, spawnTerminal);
+          bridgeTerminal(websocket, target);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Could not open the terminal.";
@@ -214,16 +251,14 @@ async function routeRequest(
   sendJson(response, 404, { error: "Not found." });
 }
 
-function spawnSessionTerminal(
-  id: string,
+function spawnAttachmentTerminal(
+  attach: AttachCommand,
   config: HostConfig,
-  tmux: SessionBackend,
   spawnTerminal: typeof pty.spawn,
 ): pty.IPty {
   const env = { ...process.env };
   delete env.npm_config_prefix;
   delete env.NPM_CONFIG_PREFIX;
-  const attach = tmux.attachCommand(id);
   // Flow control stays off so a stray XOFF (Ctrl-S) can never freeze output.
   return spawnTerminal(attach.bin, attach.args, {
     name: "xterm-256color",
@@ -240,14 +275,11 @@ function spawnSessionTerminal(
 
 function bridgeTerminalV2(
   websocket: WebSocket,
-  id: string,
-  config: HostConfig,
-  tmux: SessionBackend,
-  spawnTerminal: typeof pty.spawn,
+  target: TerminalTarget,
   attachments: AttachmentStore,
   resume?: TerminalResumeRequest,
 ): void {
-  let attachment = attachments.get(id);
+  let attachment = attachments.get(target.key);
   let cursor: number;
   let resumed = false;
 
@@ -265,7 +297,7 @@ function bridgeTerminalV2(
     // trimmed out of the ring) gets a fresh attach: tmux repaints the whole
     // screen, so the client is complete again without replay.
     attachment?.dispose();
-    attachment = attachments.create(id, spawnSessionTerminal(id, config, tmux, spawnTerminal));
+    attachment = attachments.create(target.key, target.spawn());
     cursor = attachment.endOffset;
   }
   const active = attachment;
@@ -375,14 +407,8 @@ function bridgeTerminalV2(
   websocket.once("error", releaseClient);
 }
 
-function bridgeTerminal(
-  websocket: WebSocket,
-  id: string,
-  config: HostConfig,
-  tmux: SessionBackend,
-  spawnTerminal: typeof pty.spawn,
-): void {
-  const terminal = spawnSessionTerminal(id, config, tmux, spawnTerminal);
+function bridgeTerminal(websocket: WebSocket, target: TerminalTarget): void {
+  const terminal = target.spawn();
 
   let attachmentClosed = false;
   let terminalPaused = false;

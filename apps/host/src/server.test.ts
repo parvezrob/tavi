@@ -50,6 +50,8 @@ test("agents endpoint serves herdr state and degrades honestly without it", asyn
       protocol: 17,
       agents: [],
     }),
+    findAgent: async () => ({ available: true as const }),
+    attachCommand: (paneId: string) => ({ bin: "herdr", args: ["agent", "attach", paneId] }),
   };
   const server = await createMochaServer({ config, tmux: {} as SessionBackend, herdr });
   await listen(server);

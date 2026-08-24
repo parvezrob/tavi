@@ -1,5 +1,5 @@
 import { createConnection } from "node:net";
-import type { AgentStatus, HerdrAgentInfo, HerdrAgentsResult } from "./types.js";
+import type { AgentStatus, AttachCommand, HerdrAgentInfo, HerdrAgentsResult } from "./types.js";
 
 // Verified against herdr 0.7.5. The socket speaks newline-delimited JSON:
 // {id, method, params} -> {id, result}. Gate on the protocol number so an
@@ -10,11 +10,18 @@ const AGENT_STATUSES: readonly AgentStatus[] = ["idle", "working", "blocked", "d
 
 export interface HerdrOptions {
   socketPath: string;
+  bin?: string;
   requestTimeoutMilliseconds?: number;
 }
 
+export type HerdrAgentLookup =
+  | { available: true; agent?: HerdrAgentInfo }
+  | { available: false; reason: string };
+
 export interface HerdrAgentSource {
   listAgents(): Promise<HerdrAgentsResult>;
+  findAgent(paneId: string): Promise<HerdrAgentLookup>;
+  attachCommand(paneId: string): AttachCommand;
 }
 
 export class HerdrService implements HerdrAgentSource {
@@ -46,6 +53,19 @@ export class HerdrService implements HerdrAgentSource {
     } catch (error) {
       return unavailable(describeConnectionFailure(error));
     }
+  }
+
+  async findAgent(paneId: string): Promise<HerdrAgentLookup> {
+    const result = await this.listAgents();
+    if (!result.available) {
+      return { available: false, reason: result.reason ?? "Herdr is unavailable." };
+    }
+    const agent = result.agents.find((candidate) => candidate.id === paneId);
+    return agent ? { available: true, agent } : { available: true };
+  }
+
+  attachCommand(paneId: string): AttachCommand {
+    return { bin: this.options.bin ?? "herdr", args: ["agent", "attach", paneId] };
   }
 
   private request(method: string, params: Record<string, unknown>): Promise<unknown> {
