@@ -1,0 +1,145 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { TerminalAttachment, AttachmentStore, type TerminalProcessLike } from "./attachment.js";
+
+class FakeProcess implements TerminalProcessLike {
+  readonly writes: string[] = [];
+  readonly resizes: Array<{ cols: number; rows: number }> = [];
+  killed = false;
+  private dataListener: (data: string) => void = () => {};
+  private exitListener: (event: { exitCode: number; signal?: number }) => void = () => {};
+
+  write(data: string): void {
+    this.writes.push(data);
+  }
+
+  resize(cols: number, rows: number): void {
+    this.resizes.push({ cols, rows });
+  }
+
+  kill(): void {
+    this.killed = true;
+  }
+
+  onData(callback: (data: string) => void): void {
+    this.dataListener = callback;
+  }
+
+  onExit(callback: (event: { exitCode: number; signal?: number }) => void): void {
+    this.exitListener = callback;
+  }
+
+  emitData(data: string): void {
+    this.dataListener(data);
+  }
+
+  emitExit(exitCode: number, signal?: number): void {
+    this.exitListener({ exitCode, ...(signal === undefined ? {} : { signal }) });
+  }
+}
+
+function makeClient() {
+  return {
+    outputs: 0,
+    exits: [] as Array<{ code: number; signal?: number }>,
+    superseded: 0,
+    onOutput() {
+      this.outputs += 1;
+    },
+    onExit(exit: { code: number; signal?: number }) {
+      this.exits.push(exit);
+    },
+    onSuperseded() {
+      this.superseded += 1;
+    },
+  };
+}
+
+test("ring buffer tracks absolute offsets across trimming", () => {
+  const process = new FakeProcess();
+  const attachment = new TerminalAttachment(process, { maxBufferBytes: 10, retentionMs: 60_000 });
+
+  process.emitData("abcde");
+  process.emitData("fghij");
+  assert.equal(attachment.startOffset, 0);
+  assert.equal(attachment.endOffset, 10);
+  assert.equal(attachment.read(2, 100)?.toString(), "cdefghij");
+  assert.equal(attachment.read(3, 4)?.toString(), "defg");
+
+  process.emitData("klmno");
+  assert.equal(attachment.endOffset, 15);
+  assert.equal(attachment.startOffset, 5);
+  assert.ok(attachment.contains(5));
+  assert.ok(!attachment.contains(4));
+  assert.equal(attachment.read(4, 100), undefined);
+  assert.equal(attachment.read(5, 100)?.toString(), "fghijklmno");
+  assert.equal(attachment.read(15, 100)?.length, 0);
+
+  attachment.dispose();
+});
+
+test("claim delivers live output, supersedes the previous client, and release restarts retention", async () => {
+  const process = new FakeProcess();
+  const attachment = new TerminalAttachment(process, { retentionMs: 30 });
+
+  const first = makeClient();
+  attachment.claim(first);
+  process.emitData("one");
+  assert.equal(first.outputs, 1);
+
+  const second = makeClient();
+  attachment.claim(second);
+  assert.equal(first.superseded, 1);
+  process.emitData("two");
+  assert.equal(first.outputs, 1);
+  assert.equal(second.outputs, 1);
+
+  // A claimed attachment must survive well past the retention window.
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.ok(!attachment.isDisposed);
+
+  attachment.release(second);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.ok(attachment.isDisposed);
+  assert.ok(process.killed);
+});
+
+test("unclaimed attachment disposes after retention", async () => {
+  const process = new FakeProcess();
+  const attachment = new TerminalAttachment(process, { retentionMs: 20 });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.ok(attachment.isDisposed);
+  assert.ok(process.killed);
+});
+
+test("terminal exit notifies the client and removes the attachment from the store", () => {
+  const store = new AttachmentStore({ retentionMs: 60_000 });
+  const process = new FakeProcess();
+  const attachment = store.create("fixture", process);
+  const client = makeClient();
+  attachment.claim(client);
+
+  process.emitExit(0, 15);
+
+  assert.deepEqual(client.exits, [{ code: 0, signal: 15 }]);
+  assert.ok(attachment.isDisposed);
+  assert.equal(store.get("fixture"), undefined);
+  assert.ok(!process.killed);
+});
+
+test("store create replaces an existing attachment", () => {
+  const store = new AttachmentStore({ retentionMs: 60_000 });
+  const first = new FakeProcess();
+  const second = new FakeProcess();
+  const original = store.create("fixture", first);
+  const replacement = store.create("fixture", second);
+
+  assert.ok(original.isDisposed);
+  assert.ok(first.killed);
+  assert.ok(!replacement.isDisposed);
+  assert.equal(store.get("fixture"), replacement);
+  assert.notEqual(original.stream, replacement.stream);
+
+  store.disposeAll();
+  assert.ok(second.killed);
+});

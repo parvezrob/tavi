@@ -186,6 +186,40 @@ Connection liveness probe:
 
 The shared compatibility fixtures live in [`fixtures/terminal-v1/`](./fixtures/terminal-v1/). They are synthetic and contain no captured prompts, terminal contents, credentials, or private paths.
 
+## Terminal WebSocket v2 (`mocha.v2`)
+
+Clients should offer the `mocha.v2` subprotocol; the server prefers it and falls back to `mocha.v1` when only that is offered. v2 changes output delivery and reconnect semantics; client messages (`input`, `resize`, `ping`) and the `pong`/`exit`/`error` server messages are unchanged and remain JSON text frames.
+
+### Persistent attachment
+
+The host keeps one PTY attachment per session that survives WebSocket drops. After the last client disconnects the attachment is retained for a bounded window (default 120 s) and its output accumulates in a ring buffer (default 1 MiB) tagged with absolute byte offsets. Each attachment has a random `stream` epoch token; offsets are meaningful only within one epoch. Only one client owns an attachment at a time — a new connection to the same session supersedes the previous one, which receives an `error` and close code `1000` (`superseded`).
+
+### Ready and resume
+
+The v2 `ready` message carries the stream epoch and the client's starting offset:
+
+```json
+{ "type": "ready", "stream": "0d5f…", "offset": 0, "resumed": false }
+```
+
+To resume after a drop, reconnect with query parameters:
+
+```text
+wss://<host>/api/sessions/{id}/terminal?stream=<epoch>&resume=<offset>
+```
+
+where `offset` is the absolute offset one past the last byte the client has rendered. On a hit (`resumed: true`) the host replays exactly the missed bytes — no gap, no duplication. On any miss (attachment gone or exited, epoch mismatch, offset trimmed out of the ring) the host discards the old attachment, spawns a fresh attach (tmux repaints the full screen), and answers `resumed: false` with a new `stream` and `offset` — the client must reset its offset counter to `offset`.
+
+### Binary output frames
+
+Output travels as binary WebSocket frames:
+
+```text
+[0x01][8-byte big-endian start offset][raw PTY bytes]
+```
+
+The client's next resume offset is `start offset + payload length`. Frames are bounded by the 64 KiB frame limit. A client that falls further behind than the ring buffer receives an `error` and close code `1011` (`resume buffer overrun`); it should reconnect without resume parameters for a fresh attach.
+
 ## Client invariants
 
 - Send the current dimensions immediately after WebSocket open and whenever the rendered grid changes.

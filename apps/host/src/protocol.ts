@@ -1,5 +1,19 @@
 export const TERMINAL_PROTOCOL = "mocha.v1";
+export const TERMINAL_PROTOCOL_V2 = "mocha.v2";
 export const MAX_TERMINAL_FRAME_BYTES = 64 * 1024;
+
+// v2 output frame: [0x01][8-byte BE start offset][raw output bytes].
+export const OUTPUT_FRAME_TYPE = 0x01;
+export const OUTPUT_FRAME_HEADER_BYTES = 9;
+export const MAX_OUTPUT_PAYLOAD_BYTES = MAX_TERMINAL_FRAME_BYTES - OUTPUT_FRAME_HEADER_BYTES;
+
+export function encodeOutputFrame(startOffset: number, payload: Buffer): Buffer {
+  const frame = Buffer.allocUnsafe(OUTPUT_FRAME_HEADER_BYTES + payload.length);
+  frame[0] = OUTPUT_FRAME_TYPE;
+  frame.writeBigUInt64BE(BigInt(startOffset), 1);
+  payload.copy(frame, OUTPUT_FRAME_HEADER_BYTES);
+  return frame;
+}
 
 import type { ClientTerminalMessage } from "./types.js";
 

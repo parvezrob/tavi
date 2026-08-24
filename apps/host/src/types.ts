@@ -80,7 +80,7 @@ export type ClientTerminalMessage =
   | { type: "ping"; id: string };
 
 export type ServerTerminalMessage =
-  | { type: "ready" }
+  | { type: "ready"; stream?: string; offset?: number; resumed?: boolean }
   | { type: "output"; data: string }
   | { type: "pong"; id: string }
   | { type: "exit"; code: number; signal?: number }
