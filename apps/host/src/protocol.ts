@@ -1,5 +1,6 @@
 export const TERMINAL_PROTOCOL = "mocha.v1";
 export const TERMINAL_PROTOCOL_V2 = "mocha.v2";
+export const EVENTS_PROTOCOL = "mocha.events.v1";
 export const MAX_TERMINAL_FRAME_BYTES = 64 * 1024;
 
 // v2 output frame: [0x01][8-byte BE start offset][raw output bytes].

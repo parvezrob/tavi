@@ -199,6 +199,51 @@ test("herdr agents are attachable terminal targets with honest failure modes", a
   }
 });
 
+test("events endpoint pushes agent snapshots and degrades honestly when unconfigured", async () => {
+  const harness = new TerminalHarness();
+  let publish: ((snapshot: { available: boolean; reason?: string; agents: unknown[] }) => void) | undefined;
+  harness.agentEvents = {
+    latest: undefined,
+    start() {},
+    stop() {},
+    subscribe(listener) {
+      publish = listener as typeof publish;
+      return () => {
+        publish = undefined;
+      };
+    },
+  };
+  const server = await harness.startServer();
+
+  try {
+    const address = server.address() as AddressInfo;
+    const websocket = new WebSocket(`ws://127.0.0.1:${address.port}/api/events`, ["mocha.events.v1"], {
+      headers: { Authorization: `Bearer ${config.token}` },
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    websocket.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
+    await once(websocket, "open");
+
+    await waitUntil(() => messages.length === 1);
+    assert.equal(messages[0]?.available, false);
+
+    publish?.({
+      available: true,
+      agents: [{ id: "wB:p1", agent: "claude", status: "blocked" }],
+    });
+    await waitUntil(() => messages.length === 2);
+    assert.equal(messages[1]?.type, "agents");
+    assert.equal(messages[1]?.available, true);
+    assert.equal((messages[1]?.agents as Array<{ status: string }>)[0]?.status, "blocked");
+
+    websocket.close();
+    await once(websocket, "close");
+    await waitUntil(() => publish === undefined);
+  } finally {
+    await close(server);
+  }
+});
+
 class FakeTerminal {
   readonly resizes: Array<{ columns: number; rows: number }> = [];
   readonly writes: string[] = [];
@@ -246,6 +291,7 @@ class FakeTerminal {
 
 class TerminalHarness {
   readonly terminals: FakeTerminal[] = [];
+  agentEvents: MochaServerOptions["agentEvents"];
   herdr: MochaServerOptions["herdr"];
   recordSpawn: ((bin: string, args: string[]) => void) | undefined;
 
@@ -262,6 +308,7 @@ class TerminalHarness {
       config,
       tmux,
       ...(this.herdr ? { herdr: this.herdr } : {}),
+      ...(this.agentEvents ? { agentEvents: this.agentEvents } : {}),
       spawnTerminal: (bin, args) => {
         this.recordSpawn?.(bin as string, args as string[]);
         const terminal = new FakeTerminal();

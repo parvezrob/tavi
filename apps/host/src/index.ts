@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { loadConfig, VERSION } from "./config.js";
 import { HerdrService } from "./herdr.js";
+import { HerdrEventFeed } from "./herdr-events.js";
 import { createMochaServer } from "./server.js";
 import { installService, uninstallService } from "./service.js";
 import { TmuxService } from "./tmux.js";
@@ -34,7 +35,8 @@ try {
 }
 
 const herdr = new HerdrService({ socketPath: config.herdrSocket });
-const server = await createMochaServer({ config, tmux, herdr });
+const agentEvents = new HerdrEventFeed(herdr, { socketPath: config.herdrSocket });
+const server = await createMochaServer({ config, tmux, herdr, agentEvents });
 server.listen(config.port, config.bindHost, () => {
   console.log(`Mocha ${VERSION} is running on http://${config.bindHost}:${config.port}`);
   console.log(`Machine: ${config.machineName}`);

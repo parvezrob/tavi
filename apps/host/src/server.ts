@@ -6,7 +6,9 @@ import { bearerToken, isAuthorized } from "./auth.js";
 import type { HostConfig } from "./config.js";
 import { VERSION } from "./config.js";
 import { AttachmentStore, type TerminalAttachment, type AttachmentClient } from "./attachment.js";
+import type { AgentEventSource } from "./herdr-events.js";
 import {
+  EVENTS_PROTOCOL,
   MAX_OUTPUT_PAYLOAD_BYTES,
   MAX_TERMINAL_FRAME_BYTES,
   chunkTerminalOutput,
@@ -32,6 +34,7 @@ export interface MochaServerOptions {
   config: HostConfig;
   tmux: SessionBackend;
   herdr?: HerdrAgentSource;
+  agentEvents?: AgentEventSource;
   spawnTerminal?: typeof pty.spawn;
   attachmentRetentionMs?: number;
   attachmentBufferBytes?: number;
@@ -48,7 +51,14 @@ interface TerminalTarget {
 }
 
 export async function createMochaServer(options: MochaServerOptions) {
-  const { config, tmux, herdr, spawnTerminal = pty.spawn } = options;
+  const { config, tmux, herdr, agentEvents, spawnTerminal = pty.spawn } = options;
+  const eventsWss = new WebSocketServer({
+    noServer: true,
+    handleProtocols(protocols) {
+      return protocols.has(EVENTS_PROTOCOL) ? EVENTS_PROTOCOL : false;
+    },
+  });
+  agentEvents?.start();
   const attachments = new AttachmentStore({
     retentionMs: options.attachmentRetentionMs,
     maxBufferBytes: options.attachmentBufferBytes,
@@ -81,6 +91,23 @@ export async function createMochaServer(options: MochaServerOptions) {
   server.on("upgrade", async (request, socket, head) => {
     try {
       const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
+      if (url.pathname === "/api/events") {
+        if (!isAuthorized(bearerToken(request), config.token)) {
+          socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+        if (!offersEventsProtocol(request)) {
+          socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+        eventsWss.handleUpgrade(request, socket, head, (websocket) => {
+          serveAgentEvents(websocket, agentEvents);
+        });
+        return;
+      }
+
       const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/terminal$/);
       const agentMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/terminal$/);
       if ((!sessionMatch && !agentMatch) || !isAuthorized(bearerToken(request), config.token)) {
@@ -158,8 +185,42 @@ export async function createMochaServer(options: MochaServerOptions) {
     },
   );
 
-  server.on("close", () => attachments.disposeAll());
+  server.on("close", () => {
+    attachments.disposeAll();
+    agentEvents?.stop();
+  });
   return server;
+}
+
+// Snapshot-based push: the phone always receives the full agent list, so a
+// missed frame can never leave a stale agent on screen.
+function serveAgentEvents(websocket: WebSocket, agentEvents?: AgentEventSource): void {
+  const send = (snapshot: { available: boolean; reason?: string; agents: unknown[] }) => {
+    if (websocket.readyState !== websocket.OPEN) return;
+    websocket.send(JSON.stringify({ type: "agents", ...snapshot }));
+  };
+
+  if (!agentEvents) {
+    send({
+      available: false,
+      reason: "Herdr integration is not configured on this host.",
+      agents: [],
+    });
+    return;
+  }
+
+  const unsubscribe = agentEvents.subscribe(send);
+  if (!agentEvents.latest) {
+    send({ available: false, reason: "Waiting for the first Herdr snapshot.", agents: [] });
+  }
+  websocket.once("close", unsubscribe);
+  websocket.once("error", unsubscribe);
+}
+
+function offersEventsProtocol(request: IncomingMessage): boolean {
+  const value = request.headers["sec-websocket-protocol"];
+  const header = Array.isArray(value) ? value.join(",") : value;
+  return header?.split(",").some((protocol) => protocol.trim() === EVENTS_PROTOCOL) ?? false;
 }
 
 function parseResumeRequest(url: URL): TerminalResumeRequest | undefined {
