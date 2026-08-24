@@ -22,7 +22,9 @@ test("installs the Mocha service and removes the stopped legacy plist", async (c
   assert.equal(installed, fixture.plist(CURRENT_LABEL));
   assert.equal(existsSync(legacyPlist), false);
   assert.match(contents, new RegExp(`<string>${CURRENT_LABEL}</string>`));
-  assert.match(contents, /<key>MOCHA_TOKEN<\/key>/);
+  assert.match(contents, /<key>MOCHA_HERDR_SOCKET<\/key>/);
+  assert.match(contents, /<key>LANG<\/key>\s*<string>[^<]*UTF-8<\/string>/i);
+  assert.doesNotMatch(contents, /<key>MOCHA_TOKEN<\/key>/);
   assert.doesNotMatch(contents, /<key>DECK_/);
   if (process.platform === "darwin") {
     assert.match(execFileSync("plutil", ["-lint", installed], { encoding: "utf8" }), /OK/);

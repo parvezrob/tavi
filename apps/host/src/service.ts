@@ -128,16 +128,21 @@ function launchAgentXml(input: {
   entrypoint: string;
   logFile: string;
 }): string {
+  // MOCHA_TOKEN is intentionally absent: the service reads the persisted token
+  // from the state directory, so rotation never requires a reinstall.
   const environment: Record<string, string> = {
     MOCHA_HOST: input.config.bindHost,
     MOCHA_PORT: String(input.config.port),
-    MOCHA_TOKEN: input.config.token,
     MOCHA_STATE_DIR: input.config.stateDir,
     MOCHA_MACHINE_NAME: input.config.machineName,
     MOCHA_TMUX_BIN: input.config.tmuxBin,
     MOCHA_SHELL: input.config.shell,
+    MOCHA_HERDR_SOCKET: input.config.herdrSocket,
     MOCHA_ROOTS: input.config.roots.join(","),
     PATH: process.env.PATH || "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    // launchd provides no locale; without UTF-8, tmux sanitizes the 
+    // field separator in list-format output to "_" and parsing breaks.
+    LANG: utf8Locale(),
   };
   const envXml = Object.entries(environment)
     .map(([key, value]) => `      <key>${xml(key)}</key>\n      <string>${xml(value)}</string>`)
@@ -173,6 +178,11 @@ ${envXml}
   </dict>
 </plist>
 `;
+}
+
+function utf8Locale(): string {
+  const current = process.env.LC_ALL || process.env.LANG;
+  return current && /utf-?8/i.test(current) ? current : "en_US.UTF-8";
 }
 
 function xml(value: string): string {
