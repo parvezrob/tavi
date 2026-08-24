@@ -3,94 +3,93 @@ import UIKit
 
 struct TerminalSessionView: View {
     @Environment(\.scenePhase) private var scenePhase
-    @State private var controller = TerminalSessionController()
     @State private var credential = ""
-    @State private var draft = ""
     @State private var host = ""
     @State private var sessionID = ""
     @State private var showingConnection = true
     @State private var didApplyDevelopmentBootstrap = false
 
+    let controller: TerminalSessionController
     private let developmentBootstrap: TerminalDevelopmentBootstrap
 
-    init() {
-        let bootstrap = TerminalDevelopmentBootstrap.launchEnvironment()
-        developmentBootstrap = bootstrap
+    init(
+        controller: TerminalSessionController,
+        developmentBootstrap: TerminalDevelopmentBootstrap = .launchEnvironment()
+    ) {
+        let bootstrap = developmentBootstrap
+        self.developmentBootstrap = bootstrap
+        self.controller = controller
         _host = State(initialValue: bootstrap.host)
         _sessionID = State(initialValue: bootstrap.sessionID)
         _credential = State(initialValue: bootstrap.credential)
-        _showingConnection = State(initialValue: !bootstrap.isComplete)
+        _showingConnection = State(
+            initialValue: controller.needsConnectionConfiguration
+                && !bootstrap.isComplete
+                && bootstrap.rendererStressChunks == nil
+        )
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                connectionBanner
-                AgentTerminalView(
-                    bridge: controller.bridge,
-                    isActive: scenePhase == .active,
-                    onGridSizeChange: controller.terminalGridDidChange,
-                    onRendererFailure: controller.rendererDidFail
-                )
-                .background(.black)
-
-                quickKeys
-                composer
-            }
+        VStack(spacing: 0) {
+            connectionBanner
+            AgentTerminalView(
+                bridge: controller.bridge,
+                isActive: scenePhase == .active,
+                onGridSizeChange: controller.terminalGridDidChange,
+                onRendererReady: controller.terminalRendererDidAttach,
+                onRendererFailure: controller.rendererDidFail
+            )
             .background(.black)
-            .navigationTitle("Terminal")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Connection", systemImage: "network") {
-                        showingConnection = true
+            .overlay {
+                if controller.needsConnectionConfiguration,
+                   developmentBootstrap.rendererStressChunks == nil {
+                    disconnectedPrompt
+                }
+            }
+        }
+        .background(.black)
+        .preferredColorScheme(.dark)
+        .navigationTitle("Terminal")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Connection", systemImage: "network") {
+                    showingConnection = true
+                }
+                .accessibilityIdentifier("terminal.connection")
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            terminalControls
+        }
+        .sheet(isPresented: $showingConnection) {
+            connectionSheet
+                .presentationDetents([.medium, .large])
+        }
+        .task {
+            #if DEBUG
+            if let chunks = developmentBootstrap.rendererStressChunks {
+                while !Task.isCancelled {
+                    for chunk in chunks {
+                        guard !Task.isCancelled else { return }
+                        controller.renderDevelopmentOutput(chunk)
+                        await Task.yield()
                     }
-                    .accessibilityIdentifier("terminal.connection")
+                    try? await Task.sleep(for: .milliseconds(10))
                 }
+                return
             }
-            .sheet(isPresented: $showingConnection) {
-                connectionSheet
-                    .presentationDetents([.medium, .large])
-            }
-            .onChange(of: scenePhase) { _, phase in
-                switch phase {
-                case .active:
-                    controller.sceneDidBecomeActive()
-                case .background:
-                    controller.sceneWillResignActive()
-                case .inactive:
-                    break
-                @unknown default:
-                    controller.sceneWillResignActive()
-                }
-            }
-            .task {
-                #if DEBUG
-                if let chunks = developmentBootstrap.rendererStressChunks {
-                    while !Task.isCancelled {
-                        for chunk in chunks {
-                            guard !Task.isCancelled else { return }
-                            controller.renderDevelopmentOutput(chunk)
-                            await Task.yield()
-                        }
-                        try? await Task.sleep(for: .milliseconds(10))
-                    }
-                    return
-                }
-                #endif
-                guard developmentBootstrap.isComplete,
-                      !didApplyDevelopmentBootstrap else { return }
-                didApplyDevelopmentBootstrap = true
-                controller.connect(
-                    hostText: developmentBootstrap.host,
-                    sessionText: developmentBootstrap.sessionID,
-                    credential: developmentBootstrap.credential
-                )
-                credential = ""
-            }
-            .onDisappear {
-                controller.stop()
-            }
+            #endif
+            guard developmentBootstrap.isComplete,
+                  controller.needsConnectionConfiguration,
+                  !didApplyDevelopmentBootstrap else { return }
+            didApplyDevelopmentBootstrap = true
+            controller.connect(
+                hostText: developmentBootstrap.host,
+                sessionText: developmentBootstrap.sessionID,
+                credential: developmentBootstrap.credential
+            )
+            credential = ""
         }
     }
 
@@ -102,14 +101,9 @@ struct TerminalSessionView: View {
                     .frame(width: 8, height: 8)
                 Text(controller.connectionState.accessibilityDescription)
                     .font(.caption.weight(.semibold))
-                Spacer()
-                if let firstPaint = controller.firstPaintMilliseconds {
-                    Text("First paint \(firstPaint, format: .number.precision(.fractionLength(0))) ms")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
+                Spacer(minLength: 8)
                 if let latency = controller.inputToOutputMilliseconds {
-                    Text("I/O \(latency, format: .number.precision(.fractionLength(0))) ms")
+                    Text("\(latency, format: .number.precision(.fractionLength(0))) ms")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -128,53 +122,69 @@ struct TerminalSessionView: View {
         .accessibilityIdentifier("terminal.status")
     }
 
-    private var quickKeys: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(TerminalQuickKey.allCases) { key in
-                    Button(key.rawValue) {
-                        controller.sendQuickKey(key)
+    private var terminalControls: some View {
+        HStack(spacing: 8) {
+            Button("Keyboard", systemImage: "keyboard") {
+                controller.bridge.focusTerminal()
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!controller.connectionState.canSubmitInput)
+            .accessibilityIdentifier("terminal.keyboard")
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(TerminalQuickKey.allCases) { key in
+                        Button(key.rawValue) {
+                            controller.sendQuickKey(key)
+                            controller.bridge.focusTerminal()
+                        }
+                        .buttonStyle(.bordered)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .disabled(!controller.connectionState.canSubmitInput)
+                        .accessibilityLabel(quickKeyAccessibilityLabel(key))
+                    }
+
+                    Button("Paste", systemImage: "doc.on.clipboard") {
+                        if let pasted = UIPasteboard.general.string {
+                            controller.paste(pasted)
+                            controller.bridge.focusTerminal()
+                        }
                     }
                     .buttonStyle(.bordered)
                     .disabled(!controller.connectionState.canSubmitInput)
-                    .accessibilityLabel(quickKeyAccessibilityLabel(key))
+                    .accessibilityIdentifier("terminal.paste")
+                    .accessibilityHint("Reads the clipboard only after you tap")
                 }
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
+
+            Button("Hide keyboard", systemImage: "keyboard.chevron.compact.down") {
+                controller.bridge.dismissKeyboard()
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.bordered)
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityIdentifier("terminal.dismissKeyboard")
         }
-        .background(.bar)
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) { Divider() }
     }
 
-    private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Send to terminal", text: $draft, axis: .vertical)
-                .lineLimit(1...5)
-                .textFieldStyle(.roundedBorder)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .accessibilityIdentifier("terminal.composer")
-
-            Button("Paste", systemImage: "doc.on.clipboard") {
-                if let pasted = UIPasteboard.general.string {
-                    draft += pasted
-                }
+    private var disconnectedPrompt: some View {
+        ContentUnavailableView {
+            Label("Connect a terminal", systemImage: "terminal")
+        } description: {
+            Text("Attach to a tmux session on your computer to start typing.")
+        } actions: {
+            Button("Open Connection") {
+                showingConnection = true
             }
-            .labelStyle(.iconOnly)
-            .accessibilityHint("Reads the clipboard only after you tap")
-
-            Button("Send", systemImage: "arrow.up.circle.fill") {
-                let submitted = draft
-                draft = ""
-                controller.submit(text: submitted)
-            }
-            .labelStyle(.iconOnly)
-            .font(.title2)
-            .disabled(draft.isEmpty || !controller.connectionState.canSubmitInput)
-            .accessibilityIdentifier("terminal.send")
+            .buttonStyle(.borderedProminent)
         }
+        .foregroundStyle(.white)
         .padding()
-        .background(.bar)
+        .accessibilityIdentifier("terminal.disconnected")
     }
 
     private var connectionSheet: some View {
@@ -211,6 +221,7 @@ struct TerminalSessionView: View {
                     if controller.connectionState != .idle {
                         Button("Disconnect", role: .destructive) {
                             controller.stop()
+                            showingConnection = true
                         }
                     }
                 } footer: {
@@ -245,12 +256,16 @@ struct TerminalSessionView: View {
         case .escape: "Escape"
         case .tab: "Tab"
         case .interrupt: "Interrupt with Control C"
+        case .left: "Left arrow"
         case .up: "Up arrow"
         case .down: "Down arrow"
+        case .right: "Right arrow"
         }
     }
 }
 
 #Preview {
-    TerminalSessionView()
+    NavigationStack {
+        TerminalSessionView(controller: TerminalSessionController())
+    }
 }

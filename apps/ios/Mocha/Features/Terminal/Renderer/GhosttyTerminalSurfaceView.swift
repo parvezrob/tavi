@@ -115,10 +115,38 @@ private func ghosttySurfaceWrite(
 }
 
 @MainActor
-final class GhosttyTerminalSurfaceView: UIView {
+final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
     var onGridSizeChange: ((TerminalGridSize) -> Void)?
 
+    var hasText: Bool { true }
+    var autocapitalizationType: UITextAutocapitalizationType = .none
+    var autocorrectionType: UITextAutocorrectionType = .no
+    var spellCheckingType: UITextSpellCheckingType = .no
+    var smartQuotesType: UITextSmartQuotesType = .no
+    var smartDashesType: UITextSmartDashesType = .no
+    var smartInsertDeleteType: UITextSmartInsertDeleteType = .no
+    var keyboardType: UIKeyboardType = .asciiCapable
+    var keyboardAppearance: UIKeyboardAppearance = .dark
+    var returnKeyType: UIReturnKeyType = .default
+    var enablesReturnKeyAutomatically = false
+    var isSecureTextEntry = false
+
+    override var canBecomeFirstResponder: Bool { true }
+
+    override var keyCommands: [UIKeyCommand]? {
+        [
+            UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(sendEscape)),
+            UIKeyCommand(input: "\t", modifierFlags: [], action: #selector(sendTab)),
+            UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(sendUpArrow)),
+            UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(sendDownArrow)),
+            UIKeyCommand(input: UIKeyCommand.inputLeftArrow, modifierFlags: [], action: #selector(sendLeftArrow)),
+            UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: [], action: #selector(sendRightArrow)),
+            UIKeyCommand(input: "c", modifierFlags: .control, action: #selector(sendInterrupt)),
+        ]
+    }
+
     private let callback: GhosttyWriteCallback
+    private let inputHandler: @MainActor (Data) -> Void
     private var accessibleTranscript = TerminalAccessibleTranscript()
     private var lastGridSize: TerminalGridSize?
     private var surface: ghostty_surface_t?
@@ -129,16 +157,21 @@ final class GhosttyTerminalSurfaceView: UIView {
         onFailure: @escaping @MainActor (String) -> Void
     ) throws {
         callback = GhosttyWriteCallback(handler: onInput, failureHandler: onFailure)
+        inputHandler = onInput
         super.init(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
 
         isAccessibilityElement = true
         accessibilityIdentifier = "terminal.surface"
         accessibilityLabel = "Remote terminal"
-        accessibilityHint = "Terminal output from the selected computer"
+        accessibilityHint = "Double tap to type in the remote terminal"
         accessibilityValue = "No terminal output yet"
         accessibilityTraits.insert(.updatesFrequently)
         backgroundColor = .black
         isOpaque = true
+
+        let focusGesture = UITapGestureRecognizer(target: self, action: #selector(focusKeyboard))
+        focusGesture.cancelsTouchesInView = false
+        addGestureRecognizer(focusGesture)
 
         var configuration = ghostty_surface_config_new()
         configuration.platform_tag = GHOSTTY_PLATFORM_IOS
@@ -184,6 +217,25 @@ final class GhosttyTerminalSurfaceView: UIView {
         resizeSurface()
     }
 
+    func insertText(_ text: String) {
+        let terminalText = text
+            .replacingOccurrences(of: "\r\n", with: "\r")
+            .replacingOccurrences(of: "\n", with: "\r")
+        inputHandler(Data(terminalText.utf8))
+    }
+
+    func deleteBackward() {
+        inputHandler(Data([0x7F]))
+    }
+
+    @objc func focusKeyboard() {
+        becomeFirstResponder()
+    }
+
+    func dismissKeyboard() {
+        resignFirstResponder()
+    }
+
     func receive(_ data: Data) {
         guard let surface, !data.isEmpty else { return }
         accessibleTranscript.append(data)
@@ -214,6 +266,7 @@ final class GhosttyTerminalSurfaceView: UIView {
         guard let surface else { return }
         self.surface = nil
         onGridSizeChange = nil
+        resignFirstResponder()
         ghostty_surface_set_focus(surface, false)
         ghostty_surface_set_occlusion(surface, true)
         callback.cancel()
@@ -246,5 +299,37 @@ final class GhosttyTerminalSurfaceView: UIView {
         guard grid.columns > 0, grid.rows > 0, grid != lastGridSize else { return }
         lastGridSize = grid
         onGridSizeChange?(grid)
+    }
+
+    @objc private func sendEscape() {
+        sendKey(.escape)
+    }
+
+    @objc private func sendTab() {
+        sendKey(.tab)
+    }
+
+    @objc private func sendUpArrow() {
+        sendKey(.up)
+    }
+
+    @objc private func sendDownArrow() {
+        sendKey(.down)
+    }
+
+    @objc private func sendLeftArrow() {
+        sendKey(.left)
+    }
+
+    @objc private func sendRightArrow() {
+        sendKey(.right)
+    }
+
+    @objc private func sendInterrupt() {
+        sendKey(.interrupt)
+    }
+
+    private func sendKey(_ key: TerminalQuickKey) {
+        inputHandler(Data(key.sequence.utf8))
     }
 }

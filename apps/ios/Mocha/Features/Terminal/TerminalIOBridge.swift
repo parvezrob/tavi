@@ -3,11 +3,14 @@ import Foundation
 @MainActor
 final class TerminalIOBridge {
     typealias DataConsumer = @MainActor (Data) -> Void
+    typealias ActionConsumer = @MainActor () -> Void
 
     private static let maximumPendingOutputBytes = 1_048_576
 
     private var inputConsumer: DataConsumer?
     private var outputConsumer: DataConsumer?
+    private var focusConsumer: ActionConsumer?
+    private var dismissKeyboardConsumer: ActionConsumer?
     private var pendingOutput = Data()
 
     func installInputConsumer(_ consumer: @escaping DataConsumer) {
@@ -18,8 +21,14 @@ final class TerminalIOBridge {
         inputConsumer = nil
     }
 
-    func installTerminal(outputConsumer: @escaping DataConsumer) {
+    func installTerminal(
+        outputConsumer: @escaping DataConsumer,
+        focusConsumer: @escaping ActionConsumer,
+        dismissKeyboardConsumer: @escaping ActionConsumer
+    ) {
         self.outputConsumer = outputConsumer
+        self.focusConsumer = focusConsumer
+        self.dismissKeyboardConsumer = dismissKeyboardConsumer
 
         guard !pendingOutput.isEmpty else { return }
         let output = pendingOutput
@@ -29,6 +38,16 @@ final class TerminalIOBridge {
 
     func removeTerminal() {
         outputConsumer = nil
+        focusConsumer = nil
+        dismissKeyboardConsumer = nil
+    }
+
+    func focusTerminal() {
+        focusConsumer?()
+    }
+
+    func dismissKeyboard() {
+        dismissKeyboardConsumer?()
     }
 
     func receiveRemoteOutput(_ data: Data) {

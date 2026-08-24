@@ -4,6 +4,7 @@ struct AgentTerminalView: UIViewRepresentable {
     let bridge: TerminalIOBridge
     let isActive: Bool
     let onGridSizeChange: @MainActor (TerminalGridSize) -> Void
+    let onRendererReady: @MainActor () -> Void
     let onRendererFailure: @MainActor (String) -> Void
 
     func makeUIView(context: Context) -> TerminalContainerView {
@@ -17,13 +18,22 @@ struct AgentTerminalView: UIViewRepresentable {
             )
             terminal.onGridSizeChange = onGridSizeChange
             container.install(terminal)
-            bridge.installTerminal { [weak terminal] data in
-                terminal?.receive(data)
-            }
+            bridge.installTerminal(
+                outputConsumer: { [weak terminal] data in
+                    terminal?.receive(data)
+                },
+                focusConsumer: { [weak terminal] in
+                    terminal?.focusKeyboard()
+                },
+                dismissKeyboardConsumer: { [weak terminal] in
+                    terminal?.dismissKeyboard()
+                }
+            )
             container.bridgeCleanup = { [weak bridge] in
                 bridge?.removeTerminal()
             }
             terminal.setActive(isActive)
+            onRendererReady()
         } catch {
             onRendererFailure("The terminal renderer could not start.")
         }

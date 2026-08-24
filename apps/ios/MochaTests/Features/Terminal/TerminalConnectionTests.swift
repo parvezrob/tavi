@@ -58,6 +58,80 @@ struct TerminalConnectionTests {
 
     @Test
     @MainActor
+    func terminalKeyboardInputIsForwardedWithoutBufferingOrRewriting() async throws {
+        let transport = ScriptedTerminalTransport()
+        let controller = TerminalSessionController(client: transport)
+
+        controller.connect(
+            hostText: "https://mac.tailnet.ts.net",
+            sessionText: "fixture",
+            credential: "valid-token"
+        )
+        try await transport.emit(.message(.ready))
+        try await waitUntil { controller.connectionState == .connected }
+
+        controller.bridge.receiveTerminalInput(Data("ls -la\r".utf8))
+        try await waitUntil {
+            await transport.sentMessages.contains(.input("ls -la\r"))
+        }
+
+        #expect(await transport.sentMessages.filter { $0 == .input("ls -la\r") }.count == 1)
+        controller.stop()
+    }
+
+    @Test
+    @MainActor
+    func pasteUsesBracketedPasteWithoutExecutingTheCommand() async throws {
+        let transport = ScriptedTerminalTransport()
+        let controller = TerminalSessionController(client: transport)
+
+        controller.connect(
+            hostText: "https://mac.tailnet.ts.net",
+            sessionText: "fixture",
+            credential: "valid-token"
+        )
+        try await transport.emit(.message(.ready))
+        try await waitUntil { controller.connectionState == .connected }
+
+        controller.paste("echo safe")
+        let expected = TerminalClientMessage.input("\u{1B}[200~echo safe\u{1B}[201~")
+        try await waitUntil {
+            await transport.sentMessages.contains(expected)
+        }
+
+        #expect(await transport.sentMessages.filter { $0 == expected }.count == 1)
+        controller.stop()
+    }
+
+    @Test
+    @MainActor
+    func reattachingTheRendererRequestsATmuxRedraw() async throws {
+        let transport = ScriptedTerminalTransport()
+        let controller = TerminalSessionController(client: transport)
+        let resize = TerminalClientMessage.resize(columns: 80, rows: 24)
+
+        controller.connect(
+            hostText: "https://mac.tailnet.ts.net",
+            sessionText: "fixture",
+            credential: "valid-token"
+        )
+        controller.terminalGridDidChange(TerminalGridSize(columns: 80, rows: 24))
+        try await transport.emit(.message(.ready))
+        try await waitUntil {
+            await transport.sentMessages.filter { $0 == resize }.count == 1
+        }
+
+        controller.terminalRendererDidAttach()
+        try await waitUntil {
+            await transport.sentMessages.filter { $0 == resize }.count == 2
+        }
+
+        #expect(await transport.sentMessages.filter { $0 == resize }.count == 2)
+        controller.stop()
+    }
+
+    @Test
+    @MainActor
     func permanentHandshakeFailureStopsRetriesAndStaysFailed() async throws {
         let transport = ScriptedTerminalTransport(connectError: .authenticationRejected)
         let controller = TerminalSessionController(

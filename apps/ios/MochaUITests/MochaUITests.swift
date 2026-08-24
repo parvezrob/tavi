@@ -19,9 +19,12 @@ final class MochaUITests: XCTestCase {
         XCTAssertTrue(app.secureTextFields["connection.token"].exists)
         app.buttons["Done"].tap()
 
-        XCTAssertTrue(app.otherElements["terminal.surface"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.textFields["terminal.composer"].exists)
-        XCTAssertFalse(app.buttons["terminal.send"].isEnabled)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["terminal.surface"].waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(app.descendants(matching: .any)["terminal.disconnected"].exists)
+        XCTAssertTrue(app.buttons["terminal.keyboard"].exists)
+        XCTAssertFalse(app.buttons["terminal.keyboard"].isEnabled)
         XCTAssertTrue(app.staticTexts["Not connected"].exists)
     }
 
@@ -38,19 +41,21 @@ final class MochaUITests: XCTestCase {
         for iteration in 0..<8 {
             XCTAssertTrue(app.buttons["sessions.openTerminal"].waitForExistence(timeout: 5))
             app.buttons["sessions.openTerminal"].tap()
-            XCTAssertTrue(
-                app.descendants(matching: .any)["connection.sheet"].waitForExistence(timeout: 10)
-            )
-            app.buttons["Done"].tap()
-            let surface = app.otherElements["terminal.surface"]
+            let surface = app.descendants(matching: .any)["terminal.surface"]
             XCTAssertTrue(surface.waitForExistence(timeout: 5))
             Thread.sleep(forTimeInterval: 0.75)
             XCTAssertTrue((surface.value as? String)?.contains("streamed output line") == true)
 
+            surface.tap()
+            surface.typeText("echo mocha\n")
+            app.buttons["terminal.dismissKeyboard"].tap()
+
             if iteration == 3 {
                 XCUIDevice.shared.press(.home)
                 app.activate()
-                XCTAssertTrue(app.otherElements["terminal.surface"].waitForExistence(timeout: 5))
+                XCTAssertTrue(
+                    app.descendants(matching: .any)["terminal.surface"].waitForExistence(timeout: 5)
+                )
             }
 
             let backButton = app.navigationBars["Terminal"].buttons.element(boundBy: 0)
@@ -59,6 +64,37 @@ final class MochaUITests: XCTestCase {
         }
 
         XCTAssertTrue(app.staticTexts["No Paired Computers"].exists)
+    }
+
+    @MainActor
+    func testTerminalKeyboardLayout() throws {
+        let app = XCUIApplication()
+        let corpusData = try JSONEncoder().encode(try rendererStressChunks())
+        app.launchEnvironment["MOCHA_DEV_RENDERER_STRESS_CHUNKS"] = String(
+            decoding: corpusData,
+            as: UTF8.self
+        )
+        app.launch()
+
+        XCTAssertTrue(app.buttons["sessions.openTerminal"].waitForExistence(timeout: 5))
+        app.buttons["sessions.openTerminal"].tap()
+        let surface = app.descendants(matching: .any)["terminal.surface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 5))
+
+        surface.tap()
+        surface.typeText("echo mocha")
+        keepScreenshot(named: "Terminal with keyboard")
+
+        app.buttons["terminal.dismissKeyboard"].tap()
+        keepScreenshot(named: "Terminal without keyboard")
+    }
+
+    @MainActor
+    private func keepScreenshot(named name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func rendererStressChunks() throws -> [String] {

@@ -101,20 +101,18 @@ final class TerminalSessionController {
         transition(.suspend)
     }
 
-    func submit(text: String) {
+    func paste(_ text: String) {
         guard connectionState.canSubmitInput else {
-            errorMessage = "Wait for the terminal to reconnect before sending input."
+            errorMessage = "Wait for the terminal to reconnect before pasting."
             return
         }
         guard !text.isEmpty else { return }
+        let bracketedPaste = "\u{1B}[200~\(text)\u{1B}[201~"
+        deliverTerminalInput(Data(bracketedPaste.utf8))
+    }
 
-        let payload: String
-        if text.contains("\n") {
-            payload = "\u{1B}[200~\(text)\u{1B}[201~\r"
-        } else {
-            payload = text + "\r"
-        }
-        deliverTerminalInput(Data(payload.utf8))
+    var needsConnectionConfiguration: Bool {
+        configuration == nil
     }
 
     func sendQuickKey(_ key: TerminalQuickKey) {
@@ -127,6 +125,11 @@ final class TerminalSessionController {
         latestGridSize = grid
         guard connectionState.canSubmitInput else { return }
         sendOnce(.resize(columns: grid.columns, rows: grid.rows))
+    }
+
+    func terminalRendererDidAttach() {
+        guard connectionState.canSubmitInput, let latestGridSize else { return }
+        sendOnce(.resize(columns: latestGridSize.columns, rows: latestGridSize.rows))
     }
 
     func rendererDidFail(_ message: String) {
@@ -431,8 +434,10 @@ enum TerminalQuickKey: String, CaseIterable, Identifiable, Sendable {
     case escape = "Esc"
     case tab = "Tab"
     case interrupt = "Ctrl-C"
+    case left = "←"
     case up = "↑"
     case down = "↓"
+    case right = "→"
 
     var id: Self { self }
 
@@ -441,8 +446,10 @@ enum TerminalQuickKey: String, CaseIterable, Identifiable, Sendable {
         case .escape: "\u{1B}"
         case .tab: "\t"
         case .interrupt: "\u{03}"
+        case .left: "\u{1B}[D"
         case .up: "\u{1B}[A"
         case .down: "\u{1B}[B"
+        case .right: "\u{1B}[C"
         }
     }
 }
