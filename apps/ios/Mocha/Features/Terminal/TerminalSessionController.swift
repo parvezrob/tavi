@@ -1,9 +1,11 @@
 import Foundation
 import Observation
+import os
 
 @MainActor
 @Observable
 final class TerminalSessionController {
+    private static let logger = Logger(subsystem: "com.parvezrob.mocha", category: "terminal.connection")
     private static let maximumCoalescedInputBytes = 4 * 1_024
     private static let maximumPendingInputBytes = 64 * 1_024
 
@@ -30,6 +32,7 @@ final class TerminalSessionController {
     private var heartbeatDeadlineTask: Task<Void, Never>?
     private var heartbeatTask: Task<Void, Never>?
     private var inputSentAt: ContinuousClock.Instant?
+    private var lastSentGrid: TerminalGridSize?
     private var outboundTaskID: UUID?
     private var outboundTask: Task<Void, Never>?
     private var pendingInputChunks: [PendingTerminalInput] = []
@@ -128,7 +131,11 @@ final class TerminalSessionController {
     func terminalGridDidChange(_ grid: TerminalGridSize) {
         guard grid != latestGridSize else { return }
         latestGridSize = grid
-        guard connectionState.canSubmitInput else { return }
+        guard connectionState.canSubmitInput else {
+            Self.logger.info("grid change \(grid.columns)x\(grid.rows) deferred: cannot submit input in \(String(describing: self.connectionState))")
+            return
+        }
+        Self.logger.info("grid change \(grid.columns)x\(grid.rows) queued for send")
         sendOnce(.resize(columns: grid.columns, rows: grid.rows))
     }
 
@@ -223,6 +230,7 @@ final class TerminalSessionController {
             reconnectAttempt = 0
             errorMessage = nil
             outstandingHeartbeatID = nil
+            lastSentGrid = nil
             transition(.ready)
             if let grid = latestGridSize {
                 sendOnce(.resize(columns: grid.columns, rows: grid.rows))
@@ -255,6 +263,9 @@ final class TerminalSessionController {
     private func deliverTerminalInput(_ data: Data, canCoalesce: Bool = true) {
         guard connectionState.canSubmitInput else { return }
         guard !data.isEmpty else { return }
+        if data.first == 0x1B {
+            Self.logger.info("terminal-originated control sequence, \(data.count) bytes")
+        }
         inputSentAt = clock.now
 
         guard outboundTask == nil, pendingInputChunks.isEmpty else {
@@ -306,6 +317,10 @@ final class TerminalSessionController {
                     try await inputDelivery.submitOnce(Data(data.utf8))
                 } else {
                     try await client.send(message)
+                    if case let .resize(columns, rows) = message {
+                        lastSentGrid = TerminalGridSize(columns: columns, rows: rows)
+                        Self.logger.info("resize \(columns)x\(rows) sent to host")
+                    }
                 }
             } catch let error as TerminalTransportError {
                 guard isCurrentConnection(generation) else { return }
@@ -395,6 +410,8 @@ final class TerminalSessionController {
                 heartbeatDeadlineTask = deadlineTask
                 let sendTask = sendOnce(.ping(identifier: identifier))
                 await sendTask.value
+                guard isCurrentConnection(generation) else { return }
+                reconcileGridIfNeeded()
                 await deadlineTask.value
                 guard isCurrentConnection(generation) else { return }
             }
@@ -421,6 +438,7 @@ final class TerminalSessionController {
         pendingInputByteCount = 0
         reconnectTask = nil
         inputSentAt = nil
+        lastSentGrid = nil
         outstandingHeartbeatID = nil
     }
 
@@ -441,10 +459,26 @@ final class TerminalSessionController {
         guard outboundTaskID == taskID else { return }
         outboundTask = nil
         outboundTaskID = nil
-        guard !pendingInputChunks.isEmpty else { return }
-        let pending = pendingInputChunks.removeFirst()
-        pendingInputByteCount -= pending.data.count
-        sendInput(pending.data)
+        guard pendingInputChunks.isEmpty else {
+            let pending = pendingInputChunks.removeFirst()
+            pendingInputByteCount -= pending.data.count
+            sendInput(pending.data)
+            return
+        }
+        reconcileGridIfNeeded()
+    }
+
+    // The grid the host believes in must converge on the latest rendered
+    // grid even when an individual resize send is lost, raced by a layout
+    // transition, or deferred while reconnecting. Reconciliation runs after
+    // the outbound queue drains and on every heartbeat.
+    private func reconcileGridIfNeeded() {
+        guard connectionState.canSubmitInput,
+              outboundTask == nil,
+              let latestGridSize,
+              latestGridSize != lastSentGrid else { return }
+        Self.logger.info("reconciling grid to \(latestGridSize.columns)x\(latestGridSize.rows)")
+        sendOnce(.resize(columns: latestGridSize.columns, rows: latestGridSize.rows))
     }
 
     private func failPermanently(_ error: TerminalTransportError) {

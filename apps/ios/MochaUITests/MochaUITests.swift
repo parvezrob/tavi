@@ -153,6 +153,84 @@ final class MochaUITests: XCTestCase {
         )
     }
 
+    // Issue #9: keyboard show/hide during continuous output must not leave
+    // stale rows or mis-scaled frames. The test drives the keyboard toggles
+    // with long settle windows; visual verification happens through simulator
+    // screenshots taken by the harness while it runs, and the transcript
+    // assertion proves streaming survived both transitions.
+    @MainActor
+    func testKeyboardToggleDuringLiveStreamingKeepsReceivingOutput() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let session = environment["MOCHA_DEV_SESSION"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/SESSION/TOKEN to run the live resize test.")
+        }
+
+        let app = XCUIApplication()
+        app.launchEnvironment["MOCHA_DEV_HOST"] = host
+        app.launchEnvironment["MOCHA_DEV_SESSION"] = session
+        app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
+        app.launchEnvironment["MOCHA_DEV_AUTO_OPEN_TERMINAL"] = "1"
+        app.launch()
+
+        let surface = app.descendants(matching: .any)["terminal.surface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForTranscript(of: surface, timeout: 10) { !$0.isEmpty })
+
+        surface.tap()
+        Thread.sleep(forTimeInterval: 10)
+
+        app.buttons["terminal.dismissKeyboard"].tap()
+        Thread.sleep(forTimeInterval: 8)
+
+        let before = (surface.value as? String) ?? ""
+        XCTAssertTrue(
+            waitForTranscript(of: surface, timeout: 8) { $0 != before },
+            "Streaming output stopped reaching the screen after keyboard toggles."
+        )
+    }
+
+    // Issue #10: dragging on the terminal scrolls scrollback and never breaks
+    // the live stream. Scrollback position is verified visually via harness
+    // screenshots during the settle windows; the assertions prove the
+    // gesture leaves the surface healthy and still receiving output.
+    @MainActor
+    func testTouchScrollLeavesStreamingHealthy() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let session = environment["MOCHA_DEV_SESSION"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/SESSION/TOKEN to run the live scroll test.")
+        }
+
+        let app = XCUIApplication()
+        app.launchEnvironment["MOCHA_DEV_HOST"] = host
+        app.launchEnvironment["MOCHA_DEV_SESSION"] = session
+        app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
+        app.launchEnvironment["MOCHA_DEV_AUTO_OPEN_TERMINAL"] = "1"
+        app.launch()
+
+        let surface = app.descendants(matching: .any)["terminal.surface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForTranscript(of: surface, timeout: 10) { !$0.isEmpty })
+
+        surface.swipeDown()
+        surface.swipeDown()
+        Thread.sleep(forTimeInterval: 6)
+
+        surface.swipeUp()
+        surface.swipeUp()
+        surface.swipeUp()
+        Thread.sleep(forTimeInterval: 4)
+
+        let before = (surface.value as? String) ?? ""
+        XCTAssertTrue(
+            waitForTranscript(of: surface, timeout: 8) { $0 != before },
+            "Streaming output stopped reaching the screen after scroll gestures."
+        )
+    }
+
     @MainActor
     private func waitForTranscript(
         of surface: XCUIElement,

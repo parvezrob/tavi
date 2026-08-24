@@ -1,5 +1,6 @@
 import Foundation
 import GhosttyKit
+import os
 import UIKit
 
 struct TerminalGridSize: Sendable, Equatable {
@@ -247,6 +248,8 @@ private func ghosttySurfaceWrite(
 
 @MainActor
 final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
+    private static let logger = Logger(subsystem: "com.parvezrob.mocha", category: "terminal.surface")
+
     var onGridSizeChange: ((TerminalGridSize) -> Void)?
 
     var hasText: Bool { true }
@@ -280,8 +283,11 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
 
     private let callback: GhosttyWriteCallback
     private let inputHandler: @MainActor (Data) -> Void
+    private var keyboardObservers: [NSObjectProtocol] = []
     private var lastGridSize: TerminalGridSize?
     private var outputPump: GhosttyOutputPump?
+    private var scrollMomentumLink: CADisplayLink?
+    private var scrollMomentumVelocity: CGFloat = 0
     private var surface: ghostty_surface_t?
 
     init(
@@ -306,6 +312,10 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         focusGesture.cancelsTouchesInView = false
         addGestureRecognizer(focusGesture)
 
+        let scrollGesture = UIPanGestureRecognizer(target: self, action: #selector(handleScrollPan(_:)))
+        scrollGesture.maximumNumberOfTouches = 1
+        addGestureRecognizer(scrollGesture)
+
         var configuration = ghostty_surface_config_new()
         configuration.platform_tag = GHOSTTY_PLATFORM_IOS
         configuration.platform = ghostty_platform_u(
@@ -329,6 +339,30 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
             ghosttySurfaceWrite,
             Unmanaged.passUnretained(callback).toOpaque()
         )
+
+        // Keyboard show/hide changes the usable terminal area, but the
+        // resulting SwiftUI layout pass does not reliably reach
+        // layoutSubviews on every transition. An explicit resize pass after
+        // each keyboard settle guarantees the grid is recomputed on both
+        // edges; the grid guard in resizeSurface dedupes no-op passes.
+        for name in [UIResponder.keyboardDidShowNotification, UIResponder.keyboardDidHideNotification] {
+            keyboardObservers.append(NotificationCenter.default.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.keyboardDidSettle()
+                }
+            })
+        }
+    }
+
+    private func keyboardDidSettle() {
+        guard surface != nil else { return }
+        superview?.setNeedsLayout()
+        superview?.layoutIfNeeded()
+        resizeSurface()
     }
 
     required init?(coder: NSCoder) {
@@ -368,6 +402,69 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         becomeFirstResponder()
     }
 
+    // Touch scrolling maps finger drags to Ghostty's precision scroll input
+    // (mods bit 0), with display-link momentum after release. Like terminal
+    // output, scrolling must drive refresh + draw itself because the
+    // embedded surface never presents frames on its own.
+    @objc private func handleScrollPan(_ gesture: UIPanGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            stopScrollMomentum()
+            updateMousePosition(gesture.location(in: self))
+        case .changed:
+            updateMousePosition(gesture.location(in: self))
+            let translation = gesture.translation(in: self)
+            gesture.setTranslation(.zero, in: self)
+            applyScroll(deltaY: translation.y)
+        case .ended:
+            startScrollMomentum(velocity: gesture.velocity(in: self).y)
+        case .cancelled, .failed:
+            stopScrollMomentum()
+        default:
+            break
+        }
+    }
+
+    // Ghostty drops mouse reports whose cursor position was never set (the
+    // embedded default is off-viewport), so the position must be fed before
+    // scroll events for tmux mouse-wheel reporting to work.
+    private func updateMousePosition(_ location: CGPoint) {
+        guard let surface else { return }
+        ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)
+    }
+
+    private func applyScroll(deltaY: CGFloat) {
+        guard let surface, deltaY != 0 else { return }
+        ghostty_surface_mouse_scroll(surface, 0, Double(deltaY), 1)
+        ghostty_surface_refresh(surface)
+        ghostty_surface_draw(surface)
+    }
+
+    private func startScrollMomentum(velocity: CGFloat) {
+        stopScrollMomentum()
+        guard abs(velocity) > 80 else { return }
+        scrollMomentumVelocity = velocity
+        let link = CADisplayLink(target: self, selector: #selector(stepScrollMomentum(_:)))
+        link.add(to: .main, forMode: .common)
+        scrollMomentumLink = link
+    }
+
+    @objc private func stepScrollMomentum(_ link: CADisplayLink) {
+        scrollMomentumVelocity *= 0.94
+        guard abs(scrollMomentumVelocity) > 30 else {
+            stopScrollMomentum()
+            return
+        }
+        let frameDuration = link.targetTimestamp - link.timestamp
+        applyScroll(deltaY: scrollMomentumVelocity * CGFloat(frameDuration))
+    }
+
+    private func stopScrollMomentum() {
+        scrollMomentumLink?.invalidate()
+        scrollMomentumLink = nil
+        scrollMomentumVelocity = 0
+    }
+
     func dismissKeyboard() {
         resignFirstResponder()
     }
@@ -392,6 +489,9 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         guard let surface else { return }
         self.surface = nil
         onGridSizeChange = nil
+        stopScrollMomentum()
+        keyboardObservers.forEach(NotificationCenter.default.removeObserver)
+        keyboardObservers.removeAll()
         resignFirstResponder()
         ghostty_surface_set_focus(surface, false)
         ghostty_surface_set_occlusion(surface, true)
@@ -424,6 +524,9 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
 
         let size = ghostty_surface_size(surface)
         let grid = TerminalGridSize(columns: Int(size.columns), rows: Int(size.rows))
+        Self.logger.info(
+            "resizeSurface bounds=\(self.bounds.width, format: .fixed(precision: 0))x\(self.bounds.height, format: .fixed(precision: 0)) scale=\(scale) grid=\(grid.columns)x\(grid.rows) last=\(String(describing: self.lastGridSize))"
+        )
         guard grid.columns > 0, grid.rows > 0, grid != lastGridSize else { return }
         lastGridSize = grid
         onGridSizeChange?(grid)
