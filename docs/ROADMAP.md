@@ -1,0 +1,64 @@
+# Mocha build roadmap
+
+**Status:** Active build plan — this is the execution order
+**Updated:** 2026-08-25
+**Owner decision:** Mocha builds its intelligent layer on Herdr (verified: herdr 0.7.5, socket API protocol 17). tmux remains the universal durable fallback lane. This roadmap supersedes the phase ordering in [`IMPLEMENTATION_PLAN.md`](./IMPLEMENTATION_PLAN.md); the PRD, screen map, and development principles remain the product and quality authority.
+
+Each phase has an exit gate. Do not start the next phase's feature work before the gate passes, except for trivial fixes. Every item becomes a GitHub issue when work starts.
+
+## Already shipped (not part of the plan)
+
+Real-time terminal rendering (embedder-driven draws), off-main-thread output pump, keyboard/resize grid self-healing, touch scrollback scrolling (MVP feel), default iOS keyboard, dedicated low-latency tmux socket (`-L mocha`, escape-time 10, mouse on, no chrome), Ctrl-S flow-control fix, tight backpressure buffers, `SessionBackend` seam, read-only Herdr provider (`GET /api/agents` with status + provenance), live simulator UI-test harness (typing echo, keyboard-toggle streaming, scroll health).
+
+## Phase A — Always-on and reconnect (reliability is the product)
+
+1. Host runs as the installed launchd service with auto-restart; dev watch mode becomes optional. *(the dev host silently dying has already cost us debugging time)*
+2. Fast reconnect: network-path-change detection on the phone, sub-second retry, honest connection states; reconnect restores the exact session.
+3. Transport v2 on `mocha.v2` protocol: binary output frames, sequence numbers with resume, so reconnects continue mid-stream instead of replaying or gapping.
+4. Release-blocking device gates: Ghostty surface teardown stress (issue #5) and the physical-device checklist (issue #4) — create/destroy, lock/unlock, background/foreground, session switching.
+
+**Exit gate:** Wi-Fi ↔ cellular flip reconnects to live output in under 1 second; repeated lifecycle stress passes on the physical iPhone with no crash and no lost/duplicated input.
+
+## Phase B — Herdr control plane (host + protocol)
+
+1. Attach to a specific Herdr agent (`herdr agent attach <target>`) through the existing pty bridge; agents in `/api/agents` become attachable terminal targets.
+2. Live attention events: host subscribes to `events.subscribe` (agent status changes) and pushes them to the phone over the WebSocket; no polling, no scraping.
+3. Bounded safe previews via `agent.read` for session cards.
+4. Structured prompt submission via `agent.prompt` (used by the composer in Phase C).
+5. tmux lane remains fully functional as the fallback for non-Herdr sessions; Herdr being down degrades to terminals with `Unknown` state, never an error wall.
+
+**Exit gate:** From the phone: agent list with live status; tapping an agent lands in its exact pane; a status change (working → blocked) appears on the phone within 2 seconds.
+
+## Phase C — The real app (iOS product surface)
+
+Target visuals: [`assets/agent-deck-v1-home-terminal.png`](./assets/agent-deck-v1-home-terminal.png).
+
+1. Sessions home: `Needs you` / `Active` / `Recent` cards with agent identity, host, state colors, freshness, and safe preview — driven by Phase B data with provenance labels.
+2. Focused terminal screen: header with session/host/provider identity, `Jump to` sheet over the Herdr workspace → tab hierarchy.
+3. Multiline composer with deliberate send (the PRD's primary input mode) plus completed quick-key row (Shift-Tab, Ctrl modifier, Enter).
+4. Terminal ergonomics: font-size setting, selection + copy/paste, scroll feel tuning, hardware-keyboard pass.
+
+**Exit gate:** Founder dogfood entirely from the phone: median under 5 seconds from app open to the correct session; 20 real interventions without opening the laptop (PRD MVP criteria).
+
+## Phase D — Pairing and trust (replace the dev connection flow)
+
+1. `mocha pair` on the host: QR with endpoint + fingerprint + single-use secret; scan-first flow per [`assets/agent-deck-v1-pairing-flow.png`](./assets/agent-deck-v1-pairing-flow.png).
+2. Per-device revocable credentials in Keychain; paired-device list and revoke on the host.
+3. Multi-host home with connection health, path, and latency.
+
+**Exit gate:** A fresh phone pairs in under 2 minutes without documentation; revoking a device immediately cuts its access; the dev token flow is deleted.
+
+## Phase E — Ambient attention and release
+
+1. Push notifications for blocked/done transitions (requires the one deliberate cloud carve-out — APNs relay or equivalent — decided and documented at the start of this phase).
+2. Live Activities / Dynamic Island for waiting sessions.
+3. Beta hardening: crash-free ≥ 99.5%, chaos/network-flap suite in CI, demo mode, App Store review package per PRD.
+
+**Exit gate:** External testers on TestFlight complete a week of interventions; notification-to-unblock loop works with the app closed.
+
+## Working rules
+
+- Reliability regressions block feature work in any phase.
+- Herdr integration is capability-gated and kill-switchable; the terminal fallback is never allowed to break.
+- Physical-device verification is required for anything touching rendering, input, lifecycle, or networking.
+- When this roadmap and reality disagree, update the roadmap in the same change.
