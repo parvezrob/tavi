@@ -5,6 +5,8 @@ This folder is the planning and research baseline for Mocha. It supersedes the e
 ## Start here
 
 - [`ROADMAP.md`](./ROADMAP.md) — the active phase-by-phase build plan and execution order; supersedes the implementation plan's phase ordering.
+- [`DEVELOPMENT.md`](./DEVELOPMENT.md) — the practical build/deploy/verification loop (host service, simulator harness, device installs, test gotchas).
+- [`HERDR_INTEGRATION.md`](./HERDR_INTEGRATION.md) — the verified Herdr socket API contract and its traps.
 - [`DEVELOPMENT_PRINCIPLES.md`](./DEVELOPMENT_PRINCIPLES.md) — non-negotiable engineering policy for code quality, architecture, state, security, concurrency, reliability, testing, privacy, accessibility, dependencies, performance, and releases.
 - [`../protocol/README.md`](../protocol/README.md) — platform-neutral HTTP/WebSocket contract and compatibility home for native clients.
 - [`agent-deck-product-plan.html`](./agent-deck-product-plan.html) — polished visual review document.

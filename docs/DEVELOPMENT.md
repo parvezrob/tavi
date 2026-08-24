@@ -1,0 +1,34 @@
+# Development and verification loop
+
+Practical knowledge for building, deploying, and verifying Mocha end-to-end. Policy lives in [`DEVELOPMENT_PRINCIPLES.md`](./DEVELOPMENT_PRINCIPLES.md); this file is the how.
+
+## Host
+
+- The host runs as a launchd LaunchAgent `com.parvezrob.mocha.host` (KeepAlive auto-restart). Logs: `~/.mocha/host.log`.
+- **Deploying host changes:** the service runs `dist/`, not watch mode. From `apps/host`: `npm run build && npm run service:install` (install boots the old instance out and kickstarts the new one). `npm run dev` remains available for iteration but is not how the phone connects.
+- Reveal the pairing token: `npm run token` in `apps/host`.
+- The launchd plist sets a UTF-8 `LANG` deliberately: without a locale, tmux sanitizes the `\x1f` list-format field separator to `_` and session parsing breaks.
+- Host tests: `npm test` in `apps/host`. `herdr-events.test.ts` has a rare timing flake — rerun before trusting a failure.
+
+## iOS
+
+- Simulator verification loop (no taps needed):
+  1. `xcodebuild -scheme Mocha -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build`
+  2. Launch with the DEBUG bootstrap: `SIMCTL_CHILD_MOCHA_DEV_HOST=<https tailscale url> SIMCTL_CHILD_MOCHA_DEV_SESSION=<tmux session> SIMCTL_CHILD_MOCHA_DEV_TOKEN=$(npm run -s token) SIMCTL_CHILD_MOCHA_DEV_AUTO_OPEN_TERMINAL=1 xcrun simctl launch <sim udid> com.parvezrob.mocha`
+  3. Inject from outside via `tmux -L mocha send-keys`, verify with `xcrun simctl io <udid> screenshot` and `log show --info --predicate 'subsystem == "com.parvezrob.mocha"'`.
+- **`MOCHA_DEV_HOST` must be the Tailscale Serve HTTPS URL.** The app enforces HTTPS + `.ts.net`; `http://127.0.0.1` fails as "Connection failed" and makes every live UI test fail with a misleading "output did not reach the screen".
+- Live UI tests need `TEST_RUNNER_MOCHA_DEV_HOST/SESSION/TOKEN` **exported** (CLI assignments to xcodebuild do not reach the runner). `testTouchScrollLeavesStreamingHealthy` needs an ambient output loop running in the target session; it generates none itself.
+- UI-test failure details: `xcrun xcresulttool get test-results tests --path <latest .xcresult under DerivedData/.../Logs/Test>`.
+- Physical device install: `xcrun devicectl device install app --device <udid> <DerivedData>/Build/Products/Debug-iphoneos/Mocha.app` — the phone must be unlocked and plugged in; "unavailable" resolves by unlocking and retrying.
+- Device connection settings on the phone live behind the Host button (AppStorage `mocha.dev.host` / `mocha.dev.token`) until Phase D replaces them with QR pairing + Keychain.
+
+## tmux lane
+
+- Everything runs on the dedicated socket `tmux -L mocha`. Managed sessions get `escape-time 10`, `focus-events on`, `status off`, `mouse on`.
+- Test sessions in use: `mocha-phone` (owner's), `mocha-sim`, `mocha-uitest` (kill leftover streaming loops with `C-c` before reuse).
+
+## Transport quick reference
+
+- Terminal WS: `/api/sessions/{id}/terminal` or `/api/agents/{pane}/terminal`, subprotocol `mocha.v2` (v1 legacy), Bearer token auth. Resume: `?stream=<epoch>&resume=<offset>`. Full spec: [`../protocol/README.md`](../protocol/README.md).
+- Agent events WS: `/api/events`, subprotocol `mocha.events.v1` — full agent snapshot on connect and on every change.
+- Herdr contract and traps: [`HERDR_INTEGRATION.md`](./HERDR_INTEGRATION.md).
