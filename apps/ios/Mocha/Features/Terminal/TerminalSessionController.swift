@@ -67,7 +67,12 @@ final class TerminalSessionController {
         }
     }
 
-    func connect(hostText: String, sessionText: String, credential: String) {
+    func connect(
+        hostText: String,
+        sessionText: String,
+        credential: String,
+        target: TerminalTargetKind = .tmuxSession
+    ) {
         do {
             guard let url = URL(string: hostText) else {
                 throw HostEndpointError.invalidURL
@@ -77,7 +82,8 @@ final class TerminalSessionController {
             let configuration = try TerminalConnectionConfiguration(
                 host: host,
                 sessionID: sessionID,
-                credential: credential
+                credential: credential,
+                target: target
             )
             self.configuration = configuration
             errorMessage = nil

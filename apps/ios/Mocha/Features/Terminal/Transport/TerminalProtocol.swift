@@ -16,15 +16,28 @@ struct TerminalResumePoint: Sendable, Equatable {
     let offset: UInt64
 }
 
+enum TerminalTargetKind: Sendable, Equatable {
+    case tmuxSession
+    case herdrAgent
+}
+
 struct TerminalConnectionConfiguration: Sendable {
     let endpoint: URL
     let credential: String
 
-    init(host: HostEndpoint, sessionID: SessionIdentifier, credential: String) throws {
+    init(
+        host: HostEndpoint,
+        sessionID: SessionIdentifier,
+        credential: String,
+        target: TerminalTargetKind = .tmuxSession
+    ) throws {
         guard !credential.isEmpty else {
             throw TerminalTransportError.missingCredential
         }
-        self.endpoint = try host.terminalURL(for: sessionID)
+        self.endpoint = switch target {
+        case .tmuxSession: try host.terminalURL(for: sessionID)
+        case .herdrAgent: try host.agentTerminalURL(for: sessionID)
+        }
         self.credential = credential
     }
 }

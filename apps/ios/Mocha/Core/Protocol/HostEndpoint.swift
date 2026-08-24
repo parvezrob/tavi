@@ -30,11 +30,23 @@ struct HostEndpoint: Equatable, Hashable, Sendable {
     }
 
     func terminalURL(for session: SessionIdentifier) throws -> URL {
+        try websocketURL(path: "/api/sessions/\(session.rawValue)/terminal")
+    }
+
+    func agentTerminalURL(for pane: SessionIdentifier) throws -> URL {
+        try websocketURL(path: "/api/agents/\(pane.rawValue)/terminal")
+    }
+
+    func eventsURL() throws -> URL {
+        try websocketURL(path: "/api/events")
+    }
+
+    private func websocketURL(path: String) throws -> URL {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw HostEndpointError.invalidURL
         }
         components.scheme = "wss"
-        components.path = "/api/sessions/\(session.rawValue)/terminal"
+        components.path = path
         guard let url = components.url else {
             throw HostEndpointError.invalidURL
         }
