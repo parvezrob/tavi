@@ -170,13 +170,11 @@ function parseAgent(agent: Record<string, unknown>): HerdrAgentInfo {
   };
 }
 
+// Verified live shape: { type: "pane_read", read: { text, truncated, ... } }.
 function extractPreviewText(result: Record<string, unknown>): string {
+  const read = asRecord(result.read);
+  if (typeof read.text === "string") return read.text;
   if (typeof result.text === "string") return result.text;
-  if (typeof result.output === "string") return result.output;
-  if (typeof result.content === "string") return result.content;
-  if (Array.isArray(result.lines)) {
-    return result.lines.filter((line): line is string => typeof line === "string").join("\n");
-  }
   return "";
 }
 
