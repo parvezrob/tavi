@@ -80,6 +80,11 @@ final class AgentDirectory {
     private var host: HostEndpoint?
     private var streamTask: Task<Void, Never>?
     private var previewTask: Task<Void, Never>?
+    private let smoother = AgentStatusSmoother()
+    // Raw agents from the latest snapshot, re-presented when a pending
+    // status de-escalation matures without a new snapshot arriving.
+    private var lastRawAgents: [AgentSummary] = []
+    private var reviewTask: Task<Void, Never>?
 
     func configure(hostText: String, credential: String) {
         stop()
@@ -92,6 +97,8 @@ final class AgentDirectory {
         reason = nil
         hasLoaded = false
         isStale = false
+        lastRawAgents = []
+        smoother.reset()
         guard let url = URL(string: hostText),
               let endpoint = try? HostEndpoint(baseURL: url),
               !credential.isEmpty else {
@@ -123,6 +130,8 @@ final class AgentDirectory {
         streamTask = nil
         previewTask?.cancel()
         previewTask = nil
+        reviewTask?.cancel()
+        reviewTask = nil
         isRunning = false
         // Whatever we show next launch/foreground is last-known until the
         // stream confirms otherwise.
@@ -231,22 +240,40 @@ final class AgentDirectory {
     }
 
     private func apply(_ snapshot: AgentsSnapshotMessage) {
+        available = snapshot.available
+        reason = snapshot.reason
+        hasLoaded = true
+        isStale = false
+        lastRawAgents = snapshot.agents
+        present(lastRawAgents)
+    }
+
+    private func present(_ rawAgents: [AgentSummary]) {
         let now = Date()
+        let (smoothed, nextReview) = smoother.apply(rawAgents, now: now)
+
         let previousStatus = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0.status) })
         var observed: [String: Date] = [:]
-        for agent in snapshot.agents {
+        for agent in smoothed {
             observed[agent.id] = previousStatus[agent.id] == agent.status
                 ? statusObservedAt[agent.id] ?? now
                 : now
         }
         statusObservedAt = observed
-        agents = snapshot.agents
-        available = snapshot.available
-        reason = snapshot.reason
-        hasLoaded = true
-        isStale = false
+        agents = smoothed
         previews = previews.filter { key, _ in observed[key] != nil }
         schedulePreviewRefresh()
+
+        reviewTask?.cancel()
+        reviewTask = nil
+        if let nextReview {
+            let delay = max(0.1, nextReview.timeIntervalSince(now))
+            reviewTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled, let self else { return }
+                self.present(self.lastRawAgents)
+            }
+        }
     }
 
     // Previews are fetched only for the agents the home shows in full cards

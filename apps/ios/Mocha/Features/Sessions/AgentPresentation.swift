@@ -54,6 +54,89 @@ struct AgentStatusStyle: Equatable {
     }
 }
 
+// Presentation-level hysteresis over Herdr's detected status. Live sessions
+// flap (done↔blocked↔working within a second) as the TUI redraws, which made
+// "Needs you" blink on the home. Escalations (→ blocked, → working) show
+// immediately; a de-escalation only commits after the calmer status has been
+// continuously observed for `hold` seconds. A waiting agent therefore stays
+// "Needs you" until its resolution is real. Raw provenance is untouched —
+// this smooths what the phone *shows*, not what the host reports.
+@MainActor
+final class AgentStatusSmoother {
+    private var presented: [String: String] = [:]
+    private var deescalationSince: [String: Date] = [:]
+    private let hold: TimeInterval
+
+    init(hold: TimeInterval = 5) {
+        self.hold = hold
+    }
+
+    func reset() {
+        presented = [:]
+        deescalationSince = [:]
+    }
+
+    // Returns the agents with presentation statuses, plus the earliest
+    // moment a pending de-escalation matures — callers re-run at that time
+    // since no snapshot may arrive to trigger it.
+    func apply(_ agents: [AgentSummary], now: Date = Date()) -> (agents: [AgentSummary], nextReview: Date?) {
+        var result: [AgentSummary] = []
+        var nextReview: Date?
+        var nextPresented: [String: String] = [:]
+        var nextSince: [String: Date] = [:]
+
+        for agent in agents {
+            let raw = agent.status
+            let current = presented[agent.id] ?? raw
+            var shown = raw
+            if Self.rank(raw) < Self.rank(current) {
+                let since = deescalationSince[agent.id] ?? now
+                if now.timeIntervalSince(since) >= hold {
+                    shown = raw
+                } else {
+                    shown = current
+                    nextSince[agent.id] = since
+                    let review = since.addingTimeInterval(hold)
+                    nextReview = nextReview.map { min($0, review) } ?? review
+                }
+            }
+            nextPresented[agent.id] = shown
+            result.append(agent.withStatus(shown))
+        }
+
+        presented = nextPresented
+        deescalationSince = nextSince
+        return (result, nextReview)
+    }
+
+    private static func rank(_ status: String) -> Int {
+        switch status {
+        case "blocked": 3
+        case "working": 2
+        default: 1
+        }
+    }
+}
+
+extension AgentSummary {
+    // View identity for home cards: a status change must rebuild the card,
+    // never let a container reuse one cached under the bare pane id.
+    var cardIdentity: String { "\(id)|\(status)" }
+
+    func withStatus(_ status: String) -> AgentSummary {
+        AgentSummary(
+            id: id,
+            agent: agent,
+            status: status,
+            cwd: cwd,
+            title: title,
+            workspaceId: workspaceId,
+            tabId: tabId,
+            focused: focused
+        )
+    }
+}
+
 // Herdr previews arrive as raw terminal text. Stripping escape sequences
 // and control characters here means a preview can never restyle, scroll,
 // or spoof the surrounding UI — it is quoted text, nothing more.

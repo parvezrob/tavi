@@ -24,7 +24,10 @@ struct SessionsView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
+                // Deliberately not lazy: the home holds a handful of rows,
+                // and LazyVStack's subview caching served a stale card (old
+                // status pill) after a row moved between sections.
+                VStack(alignment: .leading, spacing: 12) {
                     homeContent
                     terminalFallbackCard
                 }
@@ -128,12 +131,14 @@ struct SessionsView: View {
                     if let first = blocked.first { openAgent(first) }
                 }
                 SectionEyebrow(title: "Needs you")
-                ForEach(blocked) { agentCard($0) }
+                // Identity includes the status so a section move always
+                // rebuilds the card instead of reusing a cached one.
+                ForEach(blocked, id: \.cardIdentity) { agentCard($0) }
             }
 
             if !active.isEmpty {
                 SectionEyebrow(title: "Active")
-                ForEach(active) { agentCard($0) }
+                ForEach(active, id: \.cardIdentity) { agentCard($0) }
             }
 
             if !recent.isEmpty {
