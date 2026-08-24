@@ -20,6 +20,8 @@ Host-side implementation: `apps/host/src/herdr.ts` (request/response) and `apps/
 | `agent.prompt` | `{target, text}` | ack; **text appends to whatever is already typed in the agent's composer** |
 | `agent.start` | `{name, kind, pane_id}` | `{type: "agent_started", agent, argv}` — see traps below |
 | `tab.create` | `{cwd?, label?, workspace_id?, focus?, env?}` | `{type: "tab_created", tab: {tab_id, ...}, root_pane: {pane_id, ...}}` |
+| `workspace.list` | `{}` | `{type: "workspace_list", workspaces: [{workspace_id, number, label, focused, pane_count, tab_count, active_tab_id, agent_status}]}` |
+| `tab.list` | `{}` | `{type: "tab_list", tabs: [{tab_id, workspace_id, number, label, focused, pane_count, agent_status}]}` — all tabs across workspaces; group client-side |
 | `tab.close` | `{tab_id}` | `{type: "ok"}` |
 | `events.subscribe` | `{subscriptions: [...]}` | `{type: "subscription_started"}`, then a stream of `{data, event}` lines on the same connection |
 

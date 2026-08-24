@@ -233,6 +233,52 @@ final class MochaUITests: XCTestCase {
         )
     }
 
+    // Phase C: tapping an agent on the home lands in its pane with an
+    // identity header, and the Jump-to sheet lists the hierarchy with the
+    // current pane badged. Needs a live host with at least one Herdr agent
+    // running; skips otherwise.
+    @MainActor
+    func testAgentTerminalShowsIdentityAndJumpSheet() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live jump test.")
+        }
+
+        let app = XCUIApplication()
+        app.launchEnvironment["MOCHA_DEV_HOST"] = host
+        app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
+        app.launch()
+
+        let agentRow = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'sessions.agent.'")
+        ).firstMatch
+        guard agentRow.waitForExistence(timeout: 8) else {
+            throw XCTSkip("No live Herdr agent is running on the host.")
+        }
+        agentRow.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["terminal.identity"].waitForExistence(timeout: 8),
+            "The agent terminal never showed its identity header."
+        )
+
+        let jump = app.buttons["terminal.jump"]
+        XCTAssertTrue(jump.waitForExistence(timeout: 3))
+        jump.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["terminal.jumpSheet"].waitForExistence(timeout: 5)
+        )
+        let currentBadge = app.staticTexts["Current"]
+        XCTAssertTrue(
+            currentBadge.waitForExistence(timeout: 5),
+            "The Jump sheet never badged the current pane."
+        )
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["terminal.surface"].waitForExistence(timeout: 3))
+    }
+
     @MainActor
     private func waitForTranscript(
         of surface: XCUIElement,

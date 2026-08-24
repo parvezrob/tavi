@@ -7,18 +7,28 @@ struct TerminalSessionView: View {
     @State private var host = ""
     @State private var sessionID = ""
     @State private var showingConnection = true
+    @State private var showingJump = false
     @State private var didApplyDevelopmentBootstrap = false
 
     let controller: TerminalSessionController
+    // Present only when the terminal was opened from the agent home; drives
+    // the identity header and the Jump-to sheet. tmux and development
+    // terminals keep the generic chrome.
+    private let agentDirectory: AgentDirectory?
+    private let onSelectAgent: ((AgentSummary) -> Void)?
     private let developmentBootstrap: TerminalDevelopmentBootstrap
 
     init(
         controller: TerminalSessionController,
+        agentDirectory: AgentDirectory? = nil,
+        onSelectAgent: ((AgentSummary) -> Void)? = nil,
         developmentBootstrap: TerminalDevelopmentBootstrap = .launchEnvironment()
     ) {
         let bootstrap = developmentBootstrap
         self.developmentBootstrap = bootstrap
         self.controller = controller
+        self.agentDirectory = agentDirectory
+        self.onSelectAgent = onSelectAgent
         _host = State(initialValue: bootstrap.host)
         _sessionID = State(initialValue: bootstrap.sessionID)
         _credential = State(initialValue: bootstrap.credential)
@@ -27,6 +37,20 @@ struct TerminalSessionView: View {
                 && !bootstrap.isComplete
                 && bootstrap.rendererStressChunks == nil
         )
+    }
+
+    // The connected agent's live identity from the events mirror; nil for
+    // tmux targets or when the directory is not available.
+    private var activeAgent: AgentSummary? {
+        guard controller.currentTargetKind == .herdrAgent,
+              let paneID = controller.currentSessionID else { return nil }
+        return agentDirectory?.agents.first { $0.id == paneID }
+    }
+
+    private var canJump: Bool {
+        agentDirectory != nil
+            && onSelectAgent != nil
+            && controller.currentTargetKind == .herdrAgent
     }
 
     var body: some View {
@@ -49,9 +73,22 @@ struct TerminalSessionView: View {
         }
         .background(.black)
         .preferredColorScheme(.dark)
-        .navigationTitle("Terminal")
+        .navigationTitle(activeAgent == nil ? "Terminal" : "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if let agent = activeAgent {
+                ToolbarItem(placement: .principal) {
+                    identityHeader(agent)
+                }
+            }
+            if canJump {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Jump", systemImage: "arrow.triangle.branch") {
+                        showingJump = true
+                    }
+                    .accessibilityIdentifier("terminal.jump")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Connection", systemImage: "network") {
                     showingConnection = true
@@ -65,6 +102,16 @@ struct TerminalSessionView: View {
         .sheet(isPresented: $showingConnection) {
             connectionSheet
                 .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showingJump) {
+            if let agentDirectory, let onSelectAgent {
+                JumpToSheet(
+                    agentDirectory: agentDirectory,
+                    currentPaneID: controller.currentSessionID,
+                    onSelect: onSelectAgent
+                )
+                .presentationDetents([.medium, .large])
+            }
         }
         .task {
             #if DEBUG
@@ -91,6 +138,26 @@ struct TerminalSessionView: View {
             )
             credential = ""
         }
+    }
+
+    private func identityHeader(_ agent: AgentSummary) -> some View {
+        let status = AgentStatusStyle.of(agent.status)
+        return VStack(spacing: 1) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(status.color)
+                    .frame(width: 7, height: 7)
+                Text(agent.displayName)
+                    .font(.subheadline.weight(.semibold))
+            }
+            Text(agent.projectName)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(agent.displayName), \(agent.projectName), \(status.label)")
+        .accessibilityIdentifier("terminal.identity")
     }
 
     private var connectionBanner: some View {

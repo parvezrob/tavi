@@ -340,6 +340,20 @@ async function routeRequest(
     return;
   }
 
+  if (url.pathname === "/api/herdr/tree" && request.method === "GET") {
+    if (!herdr) {
+      sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
+      return;
+    }
+    const tree = await herdr.listTree();
+    if (!tree.available) {
+      sendJson(response, 503, { error: tree.reason });
+      return;
+    }
+    sendJson(response, 200, { workspaces: tree.workspaces });
+    return;
+  }
+
   if (url.pathname === "/api/herdr/tabs" && request.method === "POST") {
     if (!herdr) {
       sendJson(response, 404, { error: "Herdr integration is not configured on this host." });

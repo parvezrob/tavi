@@ -67,6 +67,63 @@ test("maps live herdr agents with provenance", async (context) => {
   );
 });
 
+test("composes the workspace → tab → agent tree", async (context) => {
+  const socketPath = temporarySocketPath(context);
+  await startFakeHerdr(context, socketPath, {
+    protocol: 17,
+    agents: [
+      {
+        agent: "claude",
+        agent_status: "working",
+        pane_id: "wB:p1",
+        tab_id: "wB:t1",
+        workspace_id: "wB",
+      },
+    ],
+    workspaces: [
+      { workspace_id: "wB", number: 1, label: "~", focused: true },
+      { workspace_id: "wC", number: 2, label: "side", focused: false },
+    ],
+    tabs: [
+      { tab_id: "wB:t1", workspace_id: "wB", label: "mocha", focused: true },
+      { tab_id: "wB:t2", workspace_id: "wB", label: "shell", focused: false },
+      { tab_id: "wC:t1", workspace_id: "wC", label: "notes", focused: false },
+    ],
+  });
+
+  const result = await new HerdrService({ socketPath }).listTree();
+
+  assert.equal(result.available, true);
+  assert.equal(result.available && result.workspaces.length, 2);
+  if (!result.available) return;
+  const [first, second] = result.workspaces;
+  assert.deepEqual(
+    { workspaceId: first?.workspaceId, label: first?.label, focused: first?.focused },
+    { workspaceId: "wB", label: "~", focused: true },
+  );
+  assert.deepEqual(
+    first?.tabs.map((tab) => ({ tabId: tab.tabId, label: tab.label, agents: tab.agents.length })),
+    [
+      { tabId: "wB:t1", label: "mocha", agents: 1 },
+      { tabId: "wB:t2", label: "shell", agents: 0 },
+    ],
+  );
+  assert.equal(first?.tabs[0]?.agents[0]?.id, "wB:p1");
+  assert.deepEqual(
+    second?.tabs.map((tab) => tab.tabId),
+    ["wC:t1"],
+  );
+});
+
+test("tree degrades to unavailable when herdr is down", async (context) => {
+  const socketPath = temporarySocketPath(context);
+
+  const result = await new HerdrService({ socketPath }).listTree();
+
+  assert.equal(result.available, false);
+  assert.equal(!result.available && result.reason, "The Herdr server is not running.");
+});
+
 test("reports unavailable when the herdr server is not running", async (context) => {
   const socketPath = temporarySocketPath(context);
 
@@ -113,7 +170,7 @@ function temporarySocketPath(context: TestContext): string {
 async function startFakeHerdr(
   context: TestContext,
   socketPath: string,
-  behavior: { protocol: number; agents: unknown[] },
+  behavior: { protocol: number; agents: unknown[]; workspaces?: unknown[]; tabs?: unknown[] },
 ): Promise<void> {
   const server = createServer((socket) => {
     let buffered = "";
@@ -126,7 +183,11 @@ async function startFakeHerdr(
       const result =
         request.method === "ping"
           ? { type: "pong", version: "0.7.5", protocol: behavior.protocol }
-          : { type: "agent_list", agents: behavior.agents };
+          : request.method === "workspace.list"
+            ? { type: "workspace_list", workspaces: behavior.workspaces ?? [] }
+            : request.method === "tab.list"
+              ? { type: "tab_list", tabs: behavior.tabs ?? [] }
+              : { type: "agent_list", agents: behavior.agents };
       socket.write(`${JSON.stringify({ id: request.id, result })}\n`);
     });
   });

@@ -24,6 +24,8 @@ enum TerminalTargetKind: Sendable, Equatable {
 struct TerminalConnectionConfiguration: Sendable {
     let endpoint: URL
     let credential: String
+    let sessionID: SessionIdentifier
+    let target: TerminalTargetKind
 
     init(
         host: HostEndpoint,
@@ -39,6 +41,8 @@ struct TerminalConnectionConfiguration: Sendable {
         case .herdrAgent: try host.agentTerminalURL(for: sessionID)
         }
         self.credential = credential
+        self.sessionID = sessionID
+        self.target = target
     }
 }
 

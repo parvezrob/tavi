@@ -155,6 +155,10 @@ test("herdr agents are attachable terminal targets with honest failure modes", a
   let herdrUp = true;
   harness.herdr = {
     listAgents: async () => ({ provider: "herdr", available: true, protocol: 17, agents: [] }),
+    listTree: async () =>
+      herdrUp
+        ? { available: true as const, workspaces: [] }
+        : { available: false as const, reason: "The Herdr server is not running." },
     findAgent: async (paneId: string) =>
       herdrUp
         ? paneId === "wB:p1"

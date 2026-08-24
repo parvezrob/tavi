@@ -13,6 +13,32 @@ struct AgentSummary: Identifiable, Equatable, Sendable, Decodable {
     let focused: Bool
 }
 
+// Workspace → tab → agents hierarchy from GET /api/herdr/tree, shown in
+// the terminal's Jump-to sheet. Agents reuse AgentSummary so the sheet
+// speaks the same identity language as the home.
+struct HerdrTreeTab: Identifiable, Equatable, Decodable {
+    let tabId: String
+    let label: String
+    let focused: Bool
+    let agents: [AgentSummary]
+
+    var id: String { tabId }
+}
+
+struct HerdrTreeWorkspace: Identifiable, Equatable, Decodable {
+    let workspaceId: String
+    let label: String
+    let focused: Bool
+    let tabs: [HerdrTreeTab]
+
+    var id: String { workspaceId }
+}
+
+enum HerdrTreeFetch: Equatable {
+    case tree([HerdrTreeWorkspace])
+    case failure(String)
+}
+
 private struct AgentsSnapshotMessage: Decodable {
     let type: String
     let available: Bool
@@ -117,6 +143,38 @@ final class AgentDirectory {
         } catch {
             return error.localizedDescription
         }
+    }
+
+    func fetchTree() async -> HerdrTreeFetch {
+        guard let host, !credential.isEmpty else {
+            return .failure("Connect a host first.")
+        }
+        guard var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else {
+            return .failure("The host address is invalid.")
+        }
+        components.path = "/api/herdr/tree"
+        guard let url = components.url else { return .failure("The host address is invalid.") }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let status = (response as? HTTPURLResponse)?.statusCode else {
+                return .failure("The host did not answer.")
+            }
+            guard status == 200 else {
+                let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
+                return .failure(message ?? "The host could not list the workspaces (HTTP \(status)).")
+            }
+            let payload = try JSONDecoder().decode(TreeResponse.self, from: data)
+            return .tree(payload.workspaces)
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+    }
+
+    private struct TreeResponse: Decodable {
+        let workspaces: [HerdrTreeWorkspace]
     }
 
     private func apply(_ snapshot: AgentsSnapshotMessage) {

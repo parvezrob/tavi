@@ -58,7 +58,11 @@ struct SessionsView: View {
                 Button("Cancel", role: .cancel) {}
             }
             .navigationDestination(isPresented: $terminalIsPresented) {
-                TerminalSessionView(controller: terminalController)
+                TerminalSessionView(
+                    controller: terminalController,
+                    agentDirectory: agentDirectory,
+                    onSelectAgent: { agent in openAgent(agent) }
+                )
             }
             .sheet(isPresented: $showingHostForm) {
                 hostForm

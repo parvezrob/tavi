@@ -35,8 +35,27 @@ export type HerdrTabResult =
   | { created: true; paneId: string; tabId: string }
   | { created: false; reason: string };
 
+export interface HerdrTreeTab {
+  tabId: string;
+  label: string;
+  focused: boolean;
+  agents: HerdrAgentInfo[];
+}
+
+export interface HerdrTreeWorkspace {
+  workspaceId: string;
+  label: string;
+  focused: boolean;
+  tabs: HerdrTreeTab[];
+}
+
+export type HerdrTreeResult =
+  | { available: true; workspaces: HerdrTreeWorkspace[] }
+  | { available: false; reason: string };
+
 export interface HerdrAgentSource {
   listAgents(): Promise<HerdrAgentsResult>;
+  listTree(): Promise<HerdrTreeResult>;
   findAgent(paneId: string): Promise<HerdrAgentLookup>;
   attachCommand(paneId: string): AttachCommand;
   readAgent(paneId: string, lines: number): Promise<HerdrPreviewResult>;
@@ -72,6 +91,63 @@ export class HerdrService implements HerdrAgentSource {
       };
     } catch (error) {
       return unavailable(describeConnectionFailure(error));
+    }
+  }
+
+  // Workspace → tab → agents hierarchy for the Jump-to sheet. Composed from
+  // workspace.list + tab.list (verified shapes: {workspaces: [{workspace_id,
+  // label, focused, ...}]} and {tabs: [{tab_id, workspace_id, label, focused,
+  // ...}]}) plus the protocol-gated agent list, so every displayed agent
+  // carries the same identity the events feed uses.
+  async listTree(): Promise<HerdrTreeResult> {
+    const agentsResult = await this.listAgents();
+    if (!agentsResult.available) {
+      return { available: false, reason: agentsResult.reason ?? "Herdr is unavailable." };
+    }
+
+    try {
+      const [workspacesRaw, tabsRaw] = await Promise.all([
+        this.request("workspace.list", {}),
+        this.request("tab.list", {}),
+      ]);
+      const workspaces = asArray(asRecord(workspacesRaw).workspaces).map(asRecord);
+      const tabs = asArray(asRecord(tabsRaw).tabs).map(asRecord);
+
+      const agentsByTab = new Map<string, HerdrAgentInfo[]>();
+      for (const agent of agentsResult.agents) {
+        const existing = agentsByTab.get(agent.tabId) ?? [];
+        existing.push(agent);
+        agentsByTab.set(agent.tabId, existing);
+      }
+
+      const tabsByWorkspace = new Map<string, HerdrTreeTab[]>();
+      for (const tab of tabs) {
+        const workspaceId = asString(tab.workspace_id);
+        const tabId = asString(tab.tab_id);
+        if (!workspaceId || !tabId) continue;
+        const existing = tabsByWorkspace.get(workspaceId) ?? [];
+        existing.push({
+          tabId,
+          label: asString(tab.label),
+          focused: tab.focused === true,
+          agents: agentsByTab.get(tabId) ?? [],
+        });
+        tabsByWorkspace.set(workspaceId, existing);
+      }
+
+      return {
+        available: true,
+        workspaces: workspaces
+          .filter((workspace) => asString(workspace.workspace_id) !== "")
+          .map((workspace) => ({
+            workspaceId: asString(workspace.workspace_id),
+            label: asString(workspace.label),
+            focused: workspace.focused === true,
+            tabs: tabsByWorkspace.get(asString(workspace.workspace_id)) ?? [],
+          })),
+      };
+    } catch (error) {
+      return { available: false, reason: describeConnectionFailure(error) };
     }
   }
 
@@ -266,4 +342,8 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }

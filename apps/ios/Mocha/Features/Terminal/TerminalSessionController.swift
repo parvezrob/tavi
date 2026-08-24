@@ -146,6 +146,16 @@ final class TerminalSessionController {
         configuration == nil
     }
 
+    // Identity of the connected target, for the terminal header and the
+    // Jump-to sheet's "Current" badge.
+    var currentSessionID: String? {
+        configuration?.sessionID.rawValue
+    }
+
+    var currentTargetKind: TerminalTargetKind? {
+        configuration?.target
+    }
+
     func sendQuickKey(_ key: TerminalQuickKey) {
         guard connectionState.canSubmitInput else { return }
         deliverTerminalInput(Data(key.sequence.utf8))
