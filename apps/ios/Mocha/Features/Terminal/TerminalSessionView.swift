@@ -166,37 +166,46 @@ struct TerminalSessionView: View {
 
     private var connectionBanner: some View {
         VStack(spacing: 4) {
-            HStack(spacing: 8) {
+            HStack(spacing: 7) {
                 Circle()
                     .fill(connectionColor)
-                    .frame(width: 8, height: 8)
+                    .frame(width: 7, height: 7)
                 Text(controller.connectionState.accessibilityDescription)
-                    .font(.caption.weight(.semibold))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(MochaTheme.textSecondary)
                 Spacer(minLength: 8)
             }
             if let error = controller.errorMessage {
                 Text(error)
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(MochaTheme.statusBlocked)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(.bar)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(MochaTheme.card)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(MochaTheme.hairline).frame(height: 1)
+        }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("terminal.status")
     }
 
+    // Opaque charcoal input bar in the terminal's own visual world: a key
+    // row styled as key caps, then the composer nearest the keyboard.
     private var terminalControls: some View {
-        VStack(spacing: 8) {
-            composerBar
+        VStack(spacing: 10) {
             quickKeyRow
+            composerBar
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .top) { Divider() }
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .background(MochaTheme.card)
+        .overlay(alignment: .top) {
+            Rectangle().fill(MochaTheme.hairline).frame(height: 1)
+        }
     }
 
     // Deliberate send is the PRD's primary input mode: text stays local
@@ -214,9 +223,16 @@ struct TerminalSessionView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused($composerFocused)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    MochaTheme.well,
+                    in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
                 .accessibilityIdentifier("terminal.composer")
 
                 Button {
@@ -243,22 +259,23 @@ struct TerminalSessionView: View {
 
     private var quickKeyRow: some View {
         HStack(spacing: 8) {
-            Button("Keyboard", systemImage: "keyboard") {
+            Button {
                 controller.bridge.focusTerminal()
+            } label: {
+                Image(systemName: "keyboard")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(TerminalKeyStyle())
             .disabled(!controller.connectionState.canSubmitInput)
+            .accessibilityLabel("Keyboard")
             .accessibilityIdentifier("terminal.keyboard")
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    Button("Ctrl") {
+                HStack(spacing: 6) {
+                    Button("ctrl") {
                         controller.toggleControlLatch()
                         controller.bridge.focusTerminal()
                     }
-                    .buttonStyle(.bordered)
-                    .tint(controller.controlLatchActive ? Color.accentColor : nil)
-                    .frame(minWidth: 44, minHeight: 44)
+                    .buttonStyle(TerminalKeyStyle(armed: controller.controlLatchActive))
                     .disabled(!controller.connectionState.canSubmitInput)
                     .accessibilityLabel(
                         controller.controlLatchActive
@@ -268,36 +285,58 @@ struct TerminalSessionView: View {
                     .accessibilityIdentifier("terminal.ctrl")
 
                     ForEach(TerminalQuickKey.allCases) { key in
-                        Button(key.rawValue) {
+                        Button {
                             controller.sendQuickKey(key)
                             controller.bridge.focusTerminal()
+                        } label: {
+                            keyCapLabel(key)
                         }
-                        .buttonStyle(.bordered)
-                        .frame(minWidth: 44, minHeight: 44)
+                        .buttonStyle(TerminalKeyStyle())
                         .disabled(!controller.connectionState.canSubmitInput)
                         .accessibilityLabel(quickKeyAccessibilityLabel(key))
                     }
 
-                    Button("Paste", systemImage: "doc.on.clipboard") {
+                    Button {
                         if let pasted = UIPasteboard.general.string {
                             controller.paste(pasted)
                             controller.bridge.focusTerminal()
                         }
+                    } label: {
+                        Image(systemName: "doc.on.clipboard")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(TerminalKeyStyle())
                     .disabled(!controller.connectionState.canSubmitInput)
+                    .accessibilityLabel("Paste")
                     .accessibilityIdentifier("terminal.paste")
                     .accessibilityHint("Reads the clipboard only after you tap")
                 }
             }
 
-            Button("Hide keyboard", systemImage: "keyboard.chevron.compact.down") {
+            Button {
                 controller.bridge.dismissKeyboard()
+            } label: {
+                Image(systemName: "keyboard.chevron.compact.down")
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.bordered)
-            .frame(minWidth: 44, minHeight: 44)
+            .buttonStyle(TerminalKeyStyle())
+            .accessibilityLabel("Hide keyboard")
             .accessibilityIdentifier("terminal.dismissKeyboard")
+        }
+    }
+
+    // Key-cap faces: lowercase words like a hardware keyboard, crisp SF
+    // arrows instead of text glyphs.
+    @ViewBuilder
+    private func keyCapLabel(_ key: TerminalQuickKey) -> some View {
+        switch key {
+        case .escape: Text("esc")
+        case .tab: Text("tab")
+        case .shiftTab: Text("⇧tab")
+        case .enter: Image(systemName: "return")
+        case .interrupt: Text("^C")
+        case .left: Image(systemName: "arrow.left")
+        case .up: Image(systemName: "arrow.up")
+        case .down: Image(systemName: "arrow.down")
+        case .right: Image(systemName: "arrow.right")
         }
     }
 
@@ -416,6 +455,48 @@ struct TerminalSessionView: View {
         case .down: "Down arrow"
         case .right: "Right arrow"
         }
+    }
+}
+
+// Key-cap treatment for the terminal control bar: quiet charcoal caps
+// with hairline strokes, a soft press state, and an unmistakable amber
+// "armed" face for the Ctrl latch.
+private struct TerminalKeyStyle: ButtonStyle {
+    var armed = false
+
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 14, weight: .medium, design: .rounded))
+            .foregroundStyle(faceColor)
+            .frame(minWidth: 36, minHeight: 38)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(fillColor(pressed: configuration.isPressed))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(
+                        armed ? Color.clear : Color.white.opacity(isEnabled ? 0.09 : 0.05),
+                        lineWidth: 1
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.15), value: armed)
+    }
+
+    private var faceColor: Color {
+        if armed { return Color.black.opacity(0.85) }
+        return isEnabled ? MochaTheme.textPrimary : MochaTheme.textPrimary.opacity(0.3)
+    }
+
+    private func fillColor(pressed: Bool) -> Color {
+        if armed { return MochaTheme.statusBlocked }
+        if pressed { return Color.white.opacity(0.18) }
+        return Color.white.opacity(isEnabled ? 0.07 : 0.03)
     }
 }
 
