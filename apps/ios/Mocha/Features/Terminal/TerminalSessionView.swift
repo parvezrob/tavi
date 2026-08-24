@@ -1,6 +1,14 @@
 import SwiftUI
 import UIKit
 
+// Exactly one typing target exists at any moment: the composer drafts a
+// deliberate message locally, live mode sends every keystroke straight to
+// the pty. The Keyboard key (or tapping the terminal) switches modes.
+private enum TerminalInputMode {
+    case compose
+    case live
+}
+
 struct TerminalSessionView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var credential = ""
@@ -12,6 +20,7 @@ struct TerminalSessionView: View {
     @State private var composerText = ""
     @State private var composerError: String?
     @State private var composerSending = false
+    @State private var inputMode: TerminalInputMode = .compose
     @FocusState private var composerFocused: Bool
 
     let controller: TerminalSessionController
@@ -68,6 +77,15 @@ struct TerminalSessionView: View {
                 onRendererFailure: controller.rendererDidFail
             )
             .background(.black)
+            // Tapping the terminal is an implicit switch to live typing, so
+            // the composer never lingers as a second empty text target.
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    if inputMode == .compose, controller.connectionState.canSubmitInput {
+                        withAnimation(.easeInOut(duration: 0.2)) { inputMode = .live }
+                    }
+                }
+            )
             .overlay {
                 if controller.needsConnectionConfiguration,
                    developmentBootstrap.rendererStressChunks == nil {
@@ -193,11 +211,18 @@ struct TerminalSessionView: View {
     }
 
     // Opaque charcoal input bar in the terminal's own visual world: a key
-    // row styled as key caps, then the composer nearest the keyboard.
+    // row styled as key caps, then a single input surface — the composer
+    // or the live-typing hint, never both.
     private var terminalControls: some View {
         VStack(spacing: 10) {
             quickKeyRow
-            composerBar
+            if inputMode == .compose {
+                composerBar
+                    .transition(.opacity)
+            } else {
+                liveTypingRow
+                    .transition(.opacity)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.top, 10)
@@ -206,6 +231,38 @@ struct TerminalSessionView: View {
         .overlay(alignment: .top) {
             Rectangle().fill(MochaTheme.hairline).frame(height: 1)
         }
+    }
+
+    private var liveTypingRow: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(MochaTheme.statusDone)
+                .frame(width: 6, height: 6)
+            Text("Live typing — keys go straight to the terminal")
+                .font(.caption)
+                .foregroundStyle(MochaTheme.textSecondary)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Button("Compose") {
+                switchToCompose()
+            }
+            .buttonStyle(TerminalKeyStyle())
+            .accessibilityIdentifier("terminal.composeMode")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("terminal.liveHint")
+    }
+
+    private func switchToLive() {
+        withAnimation(.easeInOut(duration: 0.2)) { inputMode = .live }
+        composerFocused = false
+        controller.bridge.focusTerminal()
+    }
+
+    private func switchToCompose() {
+        controller.bridge.dismissKeyboard()
+        withAnimation(.easeInOut(duration: 0.2)) { inputMode = .compose }
+        composerFocused = true
     }
 
     // Deliberate send is the PRD's primary input mode: text stays local
@@ -260,20 +317,26 @@ struct TerminalSessionView: View {
     private var quickKeyRow: some View {
         HStack(spacing: 8) {
             Button {
-                controller.bridge.focusTerminal()
+                if inputMode == .live {
+                    switchToCompose()
+                } else {
+                    switchToLive()
+                }
             } label: {
                 Image(systemName: "keyboard")
             }
-            .buttonStyle(TerminalKeyStyle())
+            .buttonStyle(TerminalKeyStyle(armed: inputMode == .live))
             .disabled(!controller.connectionState.canSubmitInput)
-            .accessibilityLabel("Keyboard")
+            .accessibilityLabel(
+                inputMode == .live ? "Live typing on, switch to composer" : "Live typing"
+            )
             .accessibilityIdentifier("terminal.keyboard")
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     Button("ctrl") {
                         controller.toggleControlLatch()
-                        controller.bridge.focusTerminal()
+                        refocusAfterKey()
                     }
                     .buttonStyle(TerminalKeyStyle(armed: controller.controlLatchActive))
                     .disabled(!controller.connectionState.canSubmitInput)
@@ -287,7 +350,7 @@ struct TerminalSessionView: View {
                     ForEach(TerminalQuickKey.allCases) { key in
                         Button {
                             controller.sendQuickKey(key)
-                            controller.bridge.focusTerminal()
+                            refocusAfterKey()
                         } label: {
                             keyCapLabel(key)
                         }
@@ -299,7 +362,7 @@ struct TerminalSessionView: View {
                     Button {
                         if let pasted = UIPasteboard.general.string {
                             controller.paste(pasted)
-                            controller.bridge.focusTerminal()
+                            refocusAfterKey()
                         }
                     } label: {
                         Image(systemName: "doc.on.clipboard")
@@ -314,12 +377,21 @@ struct TerminalSessionView: View {
 
             Button {
                 controller.bridge.dismissKeyboard()
+                composerFocused = false
             } label: {
                 Image(systemName: "keyboard.chevron.compact.down")
             }
             .buttonStyle(TerminalKeyStyle())
             .accessibilityLabel("Hide keyboard")
             .accessibilityIdentifier("terminal.dismissKeyboard")
+        }
+    }
+
+    // Quick keys never steal the typing target: they refocus the terminal
+    // only while live typing is the active mode.
+    private func refocusAfterKey() {
+        if inputMode == .live {
+            controller.bridge.focusTerminal()
         }
     }
 
