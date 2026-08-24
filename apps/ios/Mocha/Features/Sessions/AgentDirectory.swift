@@ -60,6 +60,14 @@ final class AgentDirectory {
     private(set) var available = false
     private(set) var reason: String?
     private(set) var isRunning = false
+    // True after the first snapshot ever arrives; before that an empty list
+    // means "still loading", not "no agents".
+    private(set) var hasLoaded = false
+    // The stream is down and `agents` is the last known state (PRD §7.8:
+    // resume with an explicit stale indicator, never a blank screen). A
+    // blocked agent therefore stays visible through reconnects until a live
+    // snapshot actually reports it resolved.
+    private(set) var isStale = false
     // Safe, sanitized terminal excerpts keyed by pane id, refreshed after
     // every snapshot for the agents the home actually previews.
     private(set) var previews: [String: String] = [:]
@@ -75,6 +83,15 @@ final class AgentDirectory {
 
     func configure(hostText: String, credential: String) {
         stop()
+        // A different host is a different world: never show one host's
+        // agents as another's "last known state".
+        agents = []
+        previews = [:]
+        statusObservedAt = [:]
+        available = false
+        reason = nil
+        hasLoaded = false
+        isStale = false
         guard let url = URL(string: hostText),
               let endpoint = try? HostEndpoint(baseURL: url),
               !credential.isEmpty else {
@@ -107,6 +124,9 @@ final class AgentDirectory {
         previewTask?.cancel()
         previewTask = nil
         isRunning = false
+        // Whatever we show next launch/foreground is last-known until the
+        // stream confirms otherwise.
+        if hasLoaded { isStale = true }
     }
 
     var isConfigured: Bool {
@@ -223,6 +243,8 @@ final class AgentDirectory {
         agents = snapshot.agents
         available = snapshot.available
         reason = snapshot.reason
+        hasLoaded = true
+        isStale = false
         previews = previews.filter { key, _ in observed[key] != nil }
         schedulePreviewRefresh()
     }
@@ -290,10 +312,10 @@ final class AgentDirectory {
         } catch {
             guard !Task.isCancelled else { return }
             Self.logger.info("events stream ended: \(error.localizedDescription)")
-            if available {
-                available = false
-                reason = "Reconnecting to the host."
-            }
+            // Keep the last known agents on screen, explicitly stale —
+            // dropping them here made "Needs you" blink away on every
+            // network blip while the agent was still waiting.
+            isStale = true
         }
     }
 }

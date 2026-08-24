@@ -111,9 +111,14 @@ struct SessionsView: View {
     private var homeContent: some View {
         if !agentDirectory.isConfigured {
             noHostCard
+        } else if !agentDirectory.hasLoaded {
+            loadingCard
         } else if !agentDirectory.available {
             degradedCard
         } else {
+            if agentDirectory.isStale {
+                staleBanner
+            }
             let blocked = agents(in: .needsYou)
             let active = agents(in: .active)
             let recent = agents(in: .recent)
@@ -205,6 +210,36 @@ struct SessionsView: View {
         .padding(.vertical, 28)
         .padding(.horizontal, 16)
         .mochaCard()
+    }
+
+    private var loadingCard: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+            Text("Connecting to the host…")
+                .font(.callout)
+                .foregroundStyle(MochaTheme.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .mochaCard()
+        .accessibilityIdentifier("sessions.loading")
+    }
+
+    // The stream is down: everything below is the last known state and says
+    // so, instead of vanishing (PRD §7.8). A waiting agent stays visible.
+    private var staleBanner: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.mini)
+            Text("Reconnecting — showing the last known state")
+                .font(.caption)
+                .foregroundStyle(MochaTheme.textSecondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .mochaCard()
+        .accessibilityIdentifier("sessions.stale")
     }
 
     private var degradedCard: some View {
