@@ -30,6 +30,124 @@ struct TerminalConnectionTests {
     }
 
     @Test
+    func reducerModelsHonestNetworkLossStates() {
+        #expect(TerminalConnectionReducer.reduce(.connected, action: .networkLost) == .waitingForNetwork)
+        #expect(TerminalConnectionReducer.reduce(.connecting, action: .networkLost) == .waitingForNetwork)
+        #expect(
+            TerminalConnectionReducer.reduce(.reconnecting(attempt: 3), action: .networkLost)
+                == .waitingForNetwork
+        )
+        #expect(TerminalConnectionReducer.reduce(.suspended, action: .networkLost) == .suspended)
+        #expect(TerminalConnectionReducer.reduce(.failed, action: .networkLost) == .failed)
+        #expect(
+            TerminalConnectionReducer.reduce(.waitingForNetwork, action: .connectionLost(nextAttempt: 4))
+                == .waitingForNetwork
+        )
+        #expect(TerminalConnectionReducer.reduce(.waitingForNetwork, action: .connect) == .connecting)
+        #expect(TerminalConnectionReducer.reduce(.waitingForNetwork, action: .ready) == .connected)
+    }
+
+    @Test
+    @MainActor
+    func restoredNetworkPathReconnectsImmediatelyWithoutBackoff() async throws {
+        let paths = ScriptedPathObserver()
+        let transport = ScriptedTerminalTransport()
+        let controller = TerminalSessionController(
+            client: transport,
+            reconnectPolicy: ReconnectPolicy(
+                initialDelay: .seconds(60),
+                maximumDelay: .seconds(60),
+                multiplier: 1,
+                connectDeadline: .seconds(60)
+            ),
+            pathObserver: paths
+        )
+
+        controller.connect(
+            hostText: "https://mac.tailnet.ts.net",
+            sessionText: "fixture",
+            credential: "valid-token"
+        )
+        try await transport.emit(.message(.ready))
+        try await waitUntil { controller.connectionState == .connected }
+
+        paths.emit(NetworkPathSnapshot(isSatisfied: false, interfaceIdentity: "none"))
+        try await waitUntil { controller.connectionState == .waitingForNetwork }
+
+        paths.emit(NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "en0"))
+        try await waitUntil { await transport.connectCount >= 2 }
+        try await transport.emit(.message(.ready))
+        try await waitUntil { controller.connectionState == .connected }
+        controller.stop()
+    }
+
+    @Test
+    @MainActor
+    func interfaceFlipWhileConnectedCyclesTheConnection() async throws {
+        let paths = ScriptedPathObserver()
+        let transport = ScriptedTerminalTransport()
+        let controller = TerminalSessionController(
+            client: transport,
+            reconnectPolicy: ReconnectPolicy(
+                initialDelay: .seconds(60),
+                maximumDelay: .seconds(60),
+                multiplier: 1,
+                connectDeadline: .seconds(60)
+            ),
+            pathObserver: paths
+        )
+
+        controller.connect(
+            hostText: "https://mac.tailnet.ts.net",
+            sessionText: "fixture",
+            credential: "valid-token"
+        )
+        try await transport.emit(.message(.ready))
+        try await waitUntil { controller.connectionState == .connected }
+
+        paths.emit(NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "en0"))
+        await yieldExecution()
+        #expect(await transport.connectCount == 1)
+
+        paths.emit(NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "pdp_ip0"))
+        try await waitUntil { await transport.connectCount >= 2 }
+        try await transport.emit(.message(.ready))
+        try await waitUntil { controller.connectionState == .connected }
+        controller.stop()
+    }
+
+    @Test
+    @MainActor
+    func stalledConnectAttemptIsCycledAtTheDeadline() async throws {
+        let sleeper = ManualTerminalSleeper()
+        let transport = ScriptedTerminalTransport()
+        let controller = TerminalSessionController(
+            client: transport,
+            reconnectPolicy: ReconnectPolicy(
+                initialDelay: .seconds(60),
+                maximumDelay: .seconds(60),
+                multiplier: 1,
+                connectDeadline: .seconds(3)
+            ),
+            timing: sleeper.timing
+        )
+
+        controller.connect(
+            hostText: "https://mac.tailnet.ts.net",
+            sessionText: "fixture",
+            credential: "valid-token"
+        )
+        #expect(controller.connectionState == .connecting)
+        try await waitUntil { await sleeper.hasWaiter(for: .seconds(3)) }
+        try await sleeper.resumeFirst(for: .seconds(3))
+        try await waitUntil {
+            if case .reconnecting = controller.connectionState { return true }
+            return false
+        }
+        controller.stop()
+    }
+
+    @Test
     func reconnectDelayGrowsAndCaps() {
         let policy = ReconnectPolicy(
             initialDelay: .milliseconds(250),
@@ -335,6 +453,23 @@ struct TerminalConnectionTests {
 }
 
 private struct TestFailure: Error {}
+
+private final class ScriptedPathObserver: NetworkPathObserving {
+    private let stream: AsyncStream<NetworkPathSnapshot>
+    private let continuation: AsyncStream<NetworkPathSnapshot>.Continuation
+
+    init() {
+        (stream, continuation) = AsyncStream.makeStream()
+    }
+
+    func updates() -> AsyncStream<NetworkPathSnapshot> {
+        stream
+    }
+
+    func emit(_ snapshot: NetworkPathSnapshot) {
+        continuation.yield(snapshot)
+    }
+}
 
 private actor FailingTerminalSender: TerminalMessageSending {
     private(set) var calls = 0

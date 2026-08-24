@@ -29,10 +29,21 @@ actor TerminalWebSocketClient: TerminalTransporting {
     private var negotiatedProtocolValidated = false
     private var socket: (any TerminalWebSocketTasking)?
 
-    init(session: URLSession = .shared) {
+    init(session: URLSession? = nil) {
+        let resolved = session ?? Self.makeTerminalSession()
         makeSocket = { request in
-            session.webSocketTask(with: request)
+            resolved.webSocketTask(with: request)
         }
+    }
+
+    // waitsForConnectivity would silently park a handshake on a dead path;
+    // the controller owns retry timing, so failures must surface fast. The
+    // request timeout is idle-based and stays above the heartbeat cadence.
+    private static func makeTerminalSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.waitsForConnectivity = false
+        configuration.timeoutIntervalForRequest = 30
+        return URLSession(configuration: configuration)
     }
 
     init(

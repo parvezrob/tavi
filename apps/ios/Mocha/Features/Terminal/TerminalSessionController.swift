@@ -25,9 +25,12 @@ final class TerminalSessionController {
     private let timing: TerminalTiming
 
     private var configuration: TerminalConnectionConfiguration?
+    private var connectDeadlineTask: Task<Void, Never>?
     private var connectionGeneration = 0
     private var connectionStartedAt: ContinuousClock.Instant?
     private var disconnectTask: Task<Void, Never>?
+    private var lastPathSnapshot: NetworkPathSnapshot?
+    private var pathTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
     private var heartbeatDeadlineTask: Task<Void, Never>?
     private var heartbeatTask: Task<Void, Never>?
@@ -42,15 +45,19 @@ final class TerminalSessionController {
     private var reconnectAttempt = 0
     private var shouldReconnect = false
 
+    private let pathObserver: any NetworkPathObserving
+
     init(
         client: any TerminalTransporting = TerminalWebSocketClient(),
         reconnectPolicy: ReconnectPolicy = .terminalDefault,
         heartbeatPolicy: HeartbeatPolicy = .terminalDefault,
-        timing: TerminalTiming = .live
+        timing: TerminalTiming = .live,
+        pathObserver: any NetworkPathObserving = NetworkPathObserver()
     ) {
         self.client = client
         self.heartbeatPolicy = heartbeatPolicy
         inputDelivery = TerminalInputDelivery(sender: client)
+        self.pathObserver = pathObserver
         self.reconnectPolicy = reconnectPolicy
         self.timing = timing
         bridge.installInputConsumer { [weak self] data in
@@ -76,6 +83,7 @@ final class TerminalSessionController {
             reconnectAttempt = 0
             firstPaintMilliseconds = nil
             inputToOutputMilliseconds = nil
+            startPathMonitoringIfNeeded()
             beginConnection()
         } catch {
             errorMessage = error.localizedDescription
@@ -88,6 +96,9 @@ final class TerminalSessionController {
     func stop() {
         shouldReconnect = false
         configuration = nil
+        pathTask?.cancel()
+        pathTask = nil
+        lastPathSnapshot = nil
         invalidateConnectionTasks()
         scheduleDisconnect()
         transition(.stop)
@@ -171,6 +182,7 @@ final class TerminalSessionController {
         let pendingDisconnect = disconnectTask
         transition(.connect)
         connectionStartedAt = clock.now
+        startConnectDeadline(generation: generation)
 
         eventTask = Task { [weak self] in
             guard let self else { return }
@@ -227,6 +239,8 @@ final class TerminalSessionController {
     private func handle(_ message: TerminalServerMessage) {
         switch message {
         case .ready:
+            connectDeadlineTask?.cancel()
+            connectDeadlineTask = nil
             reconnectAttempt = 0
             errorMessage = nil
             outstandingHeartbeatID = nil
@@ -355,10 +369,16 @@ final class TerminalSessionController {
         }
         guard reconnectTask == nil else { return }
 
+        connectDeadlineTask?.cancel()
+        connectDeadlineTask = nil
         heartbeatTask?.cancel()
         heartbeatDeadlineTask?.cancel()
         reconnectAttempt += 1
-        transition(.connectionLost(nextAttempt: reconnectAttempt))
+        if lastPathSnapshot?.isSatisfied == false {
+            transition(.networkLost)
+        } else {
+            transition(.connectionLost(nextAttempt: reconnectAttempt))
+        }
         let delay = reconnectPolicy.delay(forAttempt: reconnectAttempt)
         let generation = connectionGeneration
         let timing = timing
@@ -373,6 +393,65 @@ final class TerminalSessionController {
             await client.disconnect()
             guard isCurrentConnection(generation) else { return }
             beginConnection()
+        }
+    }
+
+    private func startPathMonitoringIfNeeded() {
+        guard pathTask == nil else { return }
+        let observer = pathObserver
+        pathTask = Task { [weak self] in
+            for await snapshot in observer.updates() {
+                guard let self, !Task.isCancelled else { return }
+                handlePathUpdate(snapshot)
+            }
+        }
+    }
+
+    private func handlePathUpdate(_ snapshot: NetworkPathSnapshot) {
+        let previous = lastPathSnapshot
+        lastPathSnapshot = snapshot
+        guard configuration != nil, shouldReconnect, connectionState != .suspended else { return }
+        guard previous != snapshot else { return }
+
+        if !snapshot.isSatisfied {
+            Self.logger.info("network path lost")
+            transition(.networkLost)
+            // Keep the retry loop alive so recovery never depends on the
+            // monitor delivering a satisfied event later.
+            connectionEndedUnexpectedly()
+            return
+        }
+
+        // The first snapshot only records the baseline; churning a healthy
+        // startup connection would add latency for nothing.
+        guard let previous else { return }
+        Self.logger.info(
+            "network path restored or changed (\(previous.interfaceIdentity) -> \(snapshot.interfaceIdentity)); reconnecting now"
+        )
+        // A socket opened on the previous path is dead or stale even when it
+        // still looks connected, so cycle immediately instead of waiting for
+        // a heartbeat timeout or a scheduled backoff retry.
+        reconnectAttempt = 0
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        beginConnection()
+    }
+
+    private func startConnectDeadline(generation: Int) {
+        connectDeadlineTask?.cancel()
+        let deadline = reconnectPolicy.connectDeadline
+        let timing = timing
+        connectDeadlineTask = Task { [weak self] in
+            do {
+                try await timing.sleep(deadline)
+            } catch {
+                return
+            }
+            guard let self,
+                  isCurrentConnection(generation),
+                  connectionState == .connecting else { return }
+            Self.logger.info("connect attempt exceeded deadline; cycling")
+            connectionEndedUnexpectedly()
         }
     }
 
@@ -424,6 +503,8 @@ final class TerminalSessionController {
 
     private func invalidateConnectionTasks() {
         connectionGeneration += 1
+        connectDeadlineTask?.cancel()
+        connectDeadlineTask = nil
         eventTask?.cancel()
         heartbeatDeadlineTask?.cancel()
         heartbeatTask?.cancel()

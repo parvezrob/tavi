@@ -237,7 +237,7 @@ struct TerminalSessionView: View {
         switch controller.connectionState {
         case .connected:
             .green
-        case .connecting, .reconnecting:
+        case .connecting, .reconnecting, .waitingForNetwork:
             .orange
         case .failed, .ended:
             .red

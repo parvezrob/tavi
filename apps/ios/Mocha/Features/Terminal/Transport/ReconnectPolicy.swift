@@ -4,20 +4,31 @@ struct ReconnectPolicy: Sendable, Equatable {
     let initialDelay: Duration
     let maximumDelay: Duration
     let multiplier: Int
+    // An attempt that produces no ready message within this window is
+    // cycled instead of hanging on a dead path.
+    let connectDeadline: Duration
 
     static let terminalDefault = ReconnectPolicy(
-        initialDelay: .milliseconds(500),
+        initialDelay: .milliseconds(250),
         maximumDelay: .seconds(8),
-        multiplier: 2
+        multiplier: 2,
+        connectDeadline: .seconds(6)
     )
 
-    init(initialDelay: Duration, maximumDelay: Duration, multiplier: Int) {
+    init(
+        initialDelay: Duration,
+        maximumDelay: Duration,
+        multiplier: Int,
+        connectDeadline: Duration = .seconds(6)
+    ) {
         precondition(initialDelay > .zero)
         precondition(maximumDelay >= initialDelay)
         precondition(multiplier >= 1)
+        precondition(connectDeadline > .zero)
         self.initialDelay = initialDelay
         self.maximumDelay = maximumDelay
         self.multiplier = multiplier
+        self.connectDeadline = connectDeadline
     }
 
     func delay(

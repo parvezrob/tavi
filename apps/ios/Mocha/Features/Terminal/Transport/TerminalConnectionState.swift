@@ -5,6 +5,7 @@ enum TerminalConnectionState: Sendable, Equatable {
     case connecting
     case connected
     case reconnecting(attempt: Int)
+    case waitingForNetwork
     case suspended
     case ended
     case failed
@@ -23,6 +24,8 @@ enum TerminalConnectionState: Sendable, Equatable {
             "Connected"
         case let .reconnecting(attempt):
             "Reconnecting, attempt \(attempt)"
+        case .waitingForNetwork:
+            "Waiting for a network connection"
         case .suspended:
             "Paused in background"
         case .ended:
@@ -37,6 +40,7 @@ enum TerminalConnectionAction: Sendable, Equatable {
     case connect
     case ready
     case connectionLost(nextAttempt: Int)
+    case networkLost
     case suspend
     case resume
     case terminalExited
@@ -55,9 +59,18 @@ enum TerminalConnectionReducer {
         case .ready:
             .connected
         case let .connectionLost(nextAttempt):
-            state == .suspended || state == .ended
+            // While the network path is down, "reconnecting attempt N" would
+            // be dishonest — no attempt can succeed until the path returns.
+            state == .suspended || state == .ended || state == .waitingForNetwork
                 ? state
                 : .reconnecting(attempt: max(1, nextAttempt))
+        case .networkLost:
+            switch state {
+            case .connecting, .connected, .reconnecting:
+                .waitingForNetwork
+            case .idle, .waitingForNetwork, .suspended, .ended, .failed:
+                state
+            }
         case .suspend:
             state == .ended || state == .failed ? state : .suspended
         case .resume:

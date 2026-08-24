@@ -5,8 +5,8 @@ struct HeartbeatPolicy: Sendable, Equatable {
     let timeout: Duration
 
     static let terminalDefault = HeartbeatPolicy(
-        interval: .seconds(15),
-        timeout: .seconds(10)
+        interval: .seconds(10),
+        timeout: .seconds(5)
     )
 }
 
