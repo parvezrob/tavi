@@ -34,10 +34,18 @@ final class AgentDirectory {
     private(set) var available = false
     private(set) var reason: String?
     private(set) var isRunning = false
+    // Safe, sanitized terminal excerpts keyed by pane id, refreshed after
+    // every snapshot for the agents the home actually previews.
+    private(set) var previews: [String: String] = [:]
+    // When this phone last saw the agent's status change. Honest client-side
+    // freshness: after a reconnect the clock restarts at the replayed
+    // snapshot, so it never claims more history than the phone witnessed.
+    private(set) var statusObservedAt: [String: Date] = [:]
 
     private var credential = ""
     private var host: HostEndpoint?
     private var streamTask: Task<Void, Never>?
+    private var previewTask: Task<Void, Never>?
 
     func configure(hostText: String, credential: String) {
         stop()
@@ -70,6 +78,8 @@ final class AgentDirectory {
     func stop() {
         streamTask?.cancel()
         streamTask = nil
+        previewTask?.cancel()
+        previewTask = nil
         isRunning = false
     }
 
@@ -109,6 +119,67 @@ final class AgentDirectory {
         }
     }
 
+    private func apply(_ snapshot: AgentsSnapshotMessage) {
+        let now = Date()
+        let previousStatus = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0.status) })
+        var observed: [String: Date] = [:]
+        for agent in snapshot.agents {
+            observed[agent.id] = previousStatus[agent.id] == agent.status
+                ? statusObservedAt[agent.id] ?? now
+                : now
+        }
+        statusObservedAt = observed
+        agents = snapshot.agents
+        available = snapshot.available
+        reason = snapshot.reason
+        previews = previews.filter { key, _ in observed[key] != nil }
+        schedulePreviewRefresh()
+    }
+
+    // Previews are fetched only for the agents the home shows in full cards
+    // (needs-you and active); the short debounce coalesces snapshot bursts.
+    private func schedulePreviewRefresh() {
+        previewTask?.cancel()
+        let targets = agents.filter { $0.homeSection != .recent }.map(\.id)
+        guard !targets.isEmpty, host != nil, !credential.isEmpty else { return }
+        previewTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            await self?.refreshPreviews(paneIds: targets)
+        }
+    }
+
+    private func refreshPreviews(paneIds: [String]) async {
+        for paneId in paneIds {
+            guard !Task.isCancelled else { return }
+            guard let raw = await fetchPreview(paneId: paneId) else { continue }
+            previews[paneId] = AgentPreviewFormatter.sanitize(raw)
+        }
+    }
+
+    private func fetchPreview(paneId: String) async -> String? {
+        guard let host,
+              var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.path = "/api/agents/\(paneId)/preview"
+        components.queryItems = [URLQueryItem(name: "lines", value: "6")]
+        guard let url = components.url else { return nil }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let payload = try? JSONDecoder().decode(PreviewResponse.self, from: data) else {
+            return nil
+        }
+        return payload.preview
+    }
+
+    private struct PreviewResponse: Decodable {
+        let preview: String
+    }
+
     private func streamOnce(eventsURL: URL, credential: String) async {
         var request = URLRequest(url: eventsURL)
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
@@ -123,9 +194,7 @@ final class AgentDirectory {
                 guard case let .string(text) = frame else { continue }
                 let snapshot = try JSONDecoder().decode(AgentsSnapshotMessage.self, from: Data(text.utf8))
                 guard snapshot.type == "agents" else { continue }
-                agents = snapshot.agents
-                available = snapshot.available
-                reason = snapshot.reason
+                apply(snapshot)
             }
         } catch {
             guard !Task.isCancelled else { return }

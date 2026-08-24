@@ -6,7 +6,7 @@
 
 ## Next work
 
-**Phase C of [`docs/ROADMAP.md`](./docs/ROADMAP.md) — the real app surface.** File a GitHub issue per item before coding (AGENTS.md). Read `docs/PRD.md` §7 and `docs/V1_SCREEN_AND_NAVIGATION_MAP.md` before UI work; target visuals: `docs/assets/agent-deck-v1-home-terminal.png`.
+**Phase C of [`docs/ROADMAP.md`](./docs/ROADMAP.md) — the real app surface.** File a GitHub issue per item before coding (AGENTS.md). Read `docs/PRD.md` §7 and `docs/V1_SCREEN_AND_NAVIGATION_MAP.md` before UI work. **Owner decision (2026-08-25):** the mockups (`docs/assets/agent-deck-v1-home-terminal.png`) are *reference*, not spec — the implementing agent has design latitude to deliver a premium, performant, polished UI, bounded by PRD §7.1 (dark-first, Orca-clean) plus iOS HIG and App Store review readiness.
 
 1. Sessions home: `Needs you` / `Active` / `Recent` cards — identity, state colors, freshness, safe preview. Backing endpoints already live: `/api/events` feed (AgentDirectory on iOS mirrors it), `GET /api/agents/{pane}/preview`.
 2. Focused terminal screen: header identity + `Jump to` sheet over the Herdr workspace → tab hierarchy (needs a host endpoint over `workspace.list`/`tab.list`).

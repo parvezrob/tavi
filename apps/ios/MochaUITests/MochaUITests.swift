@@ -8,6 +8,7 @@ final class MochaUITests: XCTestCase {
     @MainActor
     func testPresentsTheHonestTerminalDevelopmentJourney() throws {
         let app = XCUIApplication()
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
         app.launch()
 
         XCTAssertTrue(app.staticTexts["No Paired Computers"].waitForExistence(timeout: 3))
@@ -36,6 +37,7 @@ final class MochaUITests: XCTestCase {
             decoding: corpusData,
             as: UTF8.self
         )
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
         app.launch()
 
         for iteration in 0..<8 {

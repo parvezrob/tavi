@@ -1,5 +1,10 @@
 import SwiftUI
 
+// Sessions home (ROADMAP Phase C): what needs the user leads, running work
+// follows, finished work drops to a quiet recent list. The mockups in
+// docs/assets are reference; the binding contract is PRD §7.1 and the
+// navigation map. Terminal access always stays reachable, even with no
+// host or Herdr down.
 struct SessionsView: View {
     @Environment(\.scenePhase) private var scenePhase
     // Development connection storage; Phase D replaces this with QR pairing
@@ -18,22 +23,26 @@ struct SessionsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                agentsSection
-
-                Section("Terminal") {
-                    Button {
-                        terminalIsPresented = true
-                    } label: {
-                        Label("Open terminal", systemImage: "terminal")
-                    }
-                    .foregroundStyle(.primary)
-                    .accessibilityIdentifier("sessions.openTerminal")
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    homeContent
+                    terminalFallbackCard
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 2)
+                .padding(.bottom, 28)
             }
+            .background(MochaTheme.canvas.ignoresSafeArea())
             .navigationTitle("Mocha")
             .accessibilityIdentifier("sessions.list")
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("New agent", systemImage: "plus") {
+                        showingNewTabPicker = true
+                    }
+                    .disabled(!agentDirectory.isConfigured || newTabInFlight)
+                    .accessibilityIdentifier("sessions.newAgentTab")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Host", systemImage: "desktopcomputer") {
                         draftHost = storedHost
@@ -43,6 +52,11 @@ struct SessionsView: View {
                     .accessibilityIdentifier("sessions.hostSettings")
                 }
             }
+            .confirmationDialog("New Herdr tab", isPresented: $showingNewTabPicker) {
+                Button("Claude") { createTab(agent: "claude") }
+                Button("Codex") { createTab(agent: "codex") }
+                Button("Cancel", role: .cancel) {}
+            }
             .navigationDestination(isPresented: $terminalIsPresented) {
                 TerminalSessionView(controller: terminalController)
             }
@@ -51,6 +65,14 @@ struct SessionsView: View {
                     .presentationDetents([.medium])
             }
             .task {
+                #if DEBUG
+                // UI tests must not inherit a connection persisted by an
+                // earlier run on the same simulator.
+                if ProcessInfo.processInfo.environment["MOCHA_DEV_RESET"] == "1" {
+                    storedHost = ""
+                    storedToken = ""
+                }
+                #endif
                 seedFromDevelopmentEnvironmentIfNeeded()
                 agentDirectory.configure(hostText: storedHost, credential: storedToken)
                 #if DEBUG
@@ -79,71 +101,165 @@ struct SessionsView: View {
         }
     }
 
-    private var agentsSection: some View {
-        Section("Agents") {
-            if !agentDirectory.isConfigured {
-                ContentUnavailableView {
-                    Label("No Host Connected", systemImage: "desktopcomputer")
-                } description: {
-                    Text("Add your Mac's Tailscale address and token to see live agents.")
-                } actions: {
-                    Button("Connect Host") {
-                        draftHost = storedHost
-                        draftToken = storedToken
-                        showingHostForm = true
-                    }
-                }
-                .listRowBackground(Color.clear)
-            } else if !agentDirectory.available {
-                Label {
-                    Text(agentDirectory.reason ?? "Waiting for the host.")
-                        .font(.callout)
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                }
-                .accessibilityIdentifier("sessions.agentsUnavailable")
-            } else {
-                if agentDirectory.agents.isEmpty {
-                    Text("No agents are running in Herdr right now.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(agentDirectory.agents) { agent in
-                        Button {
-                            openAgent(agent)
-                        } label: {
-                            agentRow(agent)
-                        }
-                        .foregroundStyle(.primary)
-                        .accessibilityIdentifier("sessions.agent.\(agent.id)")
-                    }
-                }
+    // MARK: - Home sections
 
-                Button {
-                    showingNewTabPicker = true
-                } label: {
-                    Label(newTabInFlight ? "Creating…" : "New Agent Tab", systemImage: "plus.circle")
-                }
-                .foregroundStyle(.tint)
-                .disabled(newTabInFlight)
-                .accessibilityIdentifier("sessions.newAgentTab")
-                // Empty tabs are omitted until plain panes are visible on the
-                // phone — an invisible tab reads as "nothing happened".
-                .confirmationDialog("New Herdr tab", isPresented: $showingNewTabPicker) {
-                    Button("Claude") { createTab(agent: "claude") }
-                    Button("Codex") { createTab(agent: "codex") }
-                    Button("Cancel", role: .cancel) {}
-                }
+    @ViewBuilder
+    private var homeContent: some View {
+        if !agentDirectory.isConfigured {
+            noHostCard
+        } else if !agentDirectory.available {
+            degradedCard
+        } else {
+            let blocked = agents(in: .needsYou)
+            let active = agents(in: .active)
+            let recent = agents(in: .recent)
 
-                if let newTabError {
-                    Text(newTabError)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+            if !blocked.isEmpty {
+                NeedsYouBanner(count: blocked.count) {
+                    if let first = blocked.first { openAgent(first) }
                 }
+                SectionEyebrow(title: "Needs you")
+                ForEach(blocked) { agentCard($0) }
+            }
+
+            if !active.isEmpty {
+                SectionEyebrow(title: "Active")
+                ForEach(active) { agentCard($0) }
+            }
+
+            if !recent.isEmpty {
+                SectionEyebrow(title: "Recent")
+                recentCard(recent)
+            }
+
+            if blocked.isEmpty, active.isEmpty, recent.isEmpty {
+                idleStateCard
+            }
+
+            if let newTabError {
+                Text(newTabError)
+                    .font(.caption)
+                    .foregroundStyle(MochaTheme.statusBlocked)
             }
         }
     }
+
+    private func agents(in section: AgentHomeSection) -> [AgentSummary] {
+        agentDirectory.agents.filter { $0.homeSection == section }
+    }
+
+    private func agentCard(_ agent: AgentSummary) -> some View {
+        AgentCard(
+            agent: agent,
+            preview: agentDirectory.previews[agent.id],
+            observedAt: agentDirectory.statusObservedAt[agent.id]
+        ) {
+            openAgent(agent)
+        }
+    }
+
+    private func recentCard(_ agents: [AgentSummary]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(agents) { agent in
+                RecentAgentRow(
+                    agent: agent,
+                    observedAt: agentDirectory.statusObservedAt[agent.id]
+                ) {
+                    openAgent(agent)
+                }
+                if agent.id != agents.last?.id {
+                    Divider().overlay(MochaTheme.hairline)
+                }
+            }
+        }
+        .mochaCard()
+    }
+
+    // MARK: - Empty and degraded states
+
+    private var noHostCard: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "desktopcomputer")
+                .font(.title2)
+                .foregroundStyle(MochaTheme.textSecondary)
+            Text("No Paired Computers")
+                .font(.headline)
+                .foregroundStyle(MochaTheme.textPrimary)
+            Text("Add your Mac's Tailscale address and token to see live agents.")
+                .font(.footnote)
+                .foregroundStyle(MochaTheme.textSecondary)
+                .multilineTextAlignment(.center)
+            Button("Connect Host") {
+                draftHost = storedHost
+                draftToken = storedToken
+                showingHostForm = true
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+        .padding(.horizontal, 16)
+        .mochaCard()
+    }
+
+    private var degradedCard: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(MochaTheme.statusBlocked)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(agentDirectory.reason ?? "Waiting for the host.")
+                    .font(.callout)
+                    .foregroundStyle(MochaTheme.textPrimary)
+                Text("The terminal below still works.")
+                    .font(.caption)
+                    .foregroundStyle(MochaTheme.textSecondary)
+            }
+        }
+        .padding(14)
+        .mochaCard(stripe: MochaTheme.statusBlocked)
+        .accessibilityIdentifier("sessions.agentsUnavailable")
+    }
+
+    private var idleStateCard: some View {
+        Text("No agents are running in Herdr right now.")
+            .font(.callout)
+            .foregroundStyle(MochaTheme.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .mochaCard()
+    }
+
+    private var terminalFallbackCard: some View {
+        Button {
+            terminalIsPresented = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "terminal")
+                    .foregroundStyle(MochaTheme.textSecondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Terminal")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(MochaTheme.textPrimary)
+                    Text("Open a tmux session directly")
+                        .font(.caption)
+                        .foregroundStyle(MochaTheme.textSecondary)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(MochaTheme.textSecondary)
+            }
+            .padding(14)
+            .contentShape(Rectangle())
+            .mochaCard()
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 8)
+        .accessibilityIdentifier("sessions.openTerminal")
+    }
+
+    // MARK: - Actions
 
     private func createTab(agent: String?) {
         newTabError = nil
@@ -152,31 +268,6 @@ struct SessionsView: View {
             let failure = await agentDirectory.createTab(agent: agent)
             newTabInFlight = false
             newTabError = failure
-        }
-    }
-
-    private func agentRow(_ agent: AgentSummary) -> some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(statusColor(agent.status))
-                .frame(width: 10, height: 10)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(agent.agent.capitalized)
-                        .font(.body.weight(.semibold))
-                    Text(agent.status)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(statusColor(agent.status))
-                }
-                Text(agent.title.isEmpty ? agent.cwd : agent.title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
         }
     }
 
@@ -221,16 +312,6 @@ struct SessionsView: View {
             target: .herdrAgent
         )
         terminalIsPresented = true
-    }
-
-    private func statusColor(_ status: String) -> Color {
-        switch status {
-        case "blocked": .orange
-        case "working": .blue
-        case "done": .green
-        case "idle": .secondary
-        default: .gray
-        }
     }
 
     private func seedFromDevelopmentEnvironmentIfNeeded() {
