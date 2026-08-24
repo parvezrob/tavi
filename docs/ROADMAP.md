@@ -10,7 +10,9 @@ Each phase has an exit gate. Do not start the next phase's feature work before t
 
 Real-time terminal rendering (embedder-driven draws), off-main-thread output pump, keyboard/resize grid self-healing, touch scrollback scrolling (MVP feel), default iOS keyboard, dedicated low-latency tmux socket (`-L mocha`, escape-time 10, mouse on, no chrome), Ctrl-S flow-control fix, tight backpressure buffers, `SessionBackend` seam, read-only Herdr provider (`GET /api/agents` with status + provenance), live simulator UI-test harness (typing echo, keyboard-toggle streaming, scroll health).
 
-## Phase A — Always-on and reconnect (reliability is the product)
+## Phase A — Always-on and reconnect (reliability is the product) ✅ COMPLETE 2026-08-25
+
+All four items shipped (issues #12, #13, #14, #4/#5): installed launchd host service with auto-restart; network-path-aware sub-second reconnect with honest states; `mocha.v2` transport with persistent attachments, binary frames, and exact-offset resume (verified: 0 lost / 0 duplicated bytes across a mid-stream hard drop). Exit gate passed on the physical iPhone 12 Pro: fast Wi-Fi ↔ cellular reconnect to live output; lock/unlock, app switching, and repeated surface create/destroy all crash-free.
 
 1. Host runs as the installed launchd service with auto-restart; dev watch mode becomes optional. *(the dev host silently dying has already cost us debugging time)*
 2. Fast reconnect: network-path-change detection on the phone, sub-second retry, honest connection states; reconnect restores the exact session.
