@@ -11,6 +11,7 @@ import {
   parseClientTerminalMessage,
   TERMINAL_PROTOCOL,
 } from "./protocol.js";
+import type { HerdrAgentSource } from "./herdr.js";
 import type { HostInfo, ServerTerminalMessage, SessionBackend } from "./types.js";
 import { InputError, parseCreateSession, safeSessionId } from "./validation.js";
 
@@ -26,11 +27,12 @@ const BACKPRESSURE_POLL_MILLISECONDS = 25;
 export interface MochaServerOptions {
   config: HostConfig;
   tmux: SessionBackend;
+  herdr?: HerdrAgentSource;
   spawnTerminal?: typeof pty.spawn;
 }
 
 export async function createMochaServer(options: MochaServerOptions) {
-  const { config, tmux, spawnTerminal = pty.spawn } = options;
+  const { config, tmux, herdr, spawnTerminal = pty.spawn } = options;
   const wss = new WebSocketServer({
     noServer: true,
     handleProtocols(protocols) {
@@ -46,7 +48,7 @@ export async function createMochaServer(options: MochaServerOptions) {
     }
 
     try {
-      await routeRequest(request, response, config, tmux);
+      await routeRequest(request, response, config, tmux, herdr);
     } catch (error) {
       const status = error instanceof InputError ? 400 : 500;
       const message = error instanceof Error ? error.message : "Unexpected server error.";
@@ -103,6 +105,7 @@ async function routeRequest(
   response: ServerResponse,
   config: HostConfig,
   tmux: SessionBackend,
+  herdr?: HerdrAgentSource,
 ): Promise<void> {
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
@@ -153,6 +156,20 @@ async function routeRequest(
 
   if (url.pathname === "/api/workspaces" && request.method === "GET") {
     sendJson(response, 200, { workspaces: await tmux.listWorkspaces() });
+    return;
+  }
+
+  if (url.pathname === "/api/agents" && request.method === "GET") {
+    if (!herdr) {
+      sendJson(response, 200, {
+        provider: "herdr",
+        available: false,
+        reason: "Herdr integration is not configured on this host.",
+        agents: [],
+      });
+      return;
+    }
+    sendJson(response, 200, await herdr.listAgents());
     return;
   }
 

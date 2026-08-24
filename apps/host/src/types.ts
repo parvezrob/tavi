@@ -51,6 +51,29 @@ export interface SessionBackend {
   attachCommand(id: string): AttachCommand;
 }
 
+export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
+
+export interface HerdrAgentInfo {
+  id: string;
+  agent: string;
+  status: AgentStatus;
+  cwd: string;
+  title: string;
+  workspaceId: string;
+  tabId: string;
+  focused: boolean;
+  revision: number;
+  authority: "herdr";
+}
+
+export interface HerdrAgentsResult {
+  provider: "herdr";
+  available: boolean;
+  protocol?: number;
+  reason?: string;
+  agents: HerdrAgentInfo[];
+}
+
 export type ClientTerminalMessage =
   | { type: "input"; data: string }
   | { type: "resize"; cols: number; rows: number }

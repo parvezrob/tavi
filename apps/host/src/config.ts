@@ -44,6 +44,7 @@ export interface HostConfig {
   token: string;
   shell: string;
   tmuxBin: string;
+  herdrSocket: string;
   roots: string[];
   stateDir: string;
   machineName: string;
@@ -84,6 +85,8 @@ export function loadConfig(options: LoadConfigOptions = {}): HostConfig {
     token: env.MOCHA_TOKEN || getOrCreateToken(stateDir, legacyStateDir),
     shell: env.MOCHA_SHELL || env.SHELL || (operatingSystem === "win32" ? "powershell.exe" : "/bin/sh"),
     tmuxBin: env.MOCHA_TMUX_BIN || "tmux",
+    herdrSocket:
+      env.MOCHA_HERDR_SOCKET || path.join(homeDirectory, ".config", "herdr", "herdr.sock"),
     roots: configuredRoots?.length ? configuredRoots : defaultRoots(homeDirectory),
     stateDir,
     machineName: env.MOCHA_MACHINE_NAME || machineHostname.split(".")[0] || machineHostname,

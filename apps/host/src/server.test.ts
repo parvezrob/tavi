@@ -16,6 +16,7 @@ const config: HostConfig = {
   token: "test-token-that-is-long-enough",
   shell: "/bin/sh",
   tmuxBin: "tmux",
+  herdrSocket: "/tmp/mocha-test-herdr.sock",
   roots: [],
   stateDir: "/tmp",
   machineName: "test-host",
@@ -39,6 +40,52 @@ test("the unauthenticated health endpoint remains available", async () => {
     assert.equal(body.ok, true);
     assert.match(body.version, /^\d+\.\d+\.\d+$/);
   });
+});
+
+test("agents endpoint serves herdr state and degrades honestly without it", async () => {
+  const herdr = {
+    listAgents: async () => ({
+      provider: "herdr" as const,
+      available: true,
+      protocol: 17,
+      agents: [],
+    }),
+  };
+  const server = await createMochaServer({ config, tmux: {} as SessionBackend, herdr });
+  await listen(server);
+
+  try {
+    const address = server.address() as AddressInfo;
+    const authorized = await fetch(`http://127.0.0.1:${address.port}/api/agents`, {
+      headers: { Authorization: `Bearer ${config.token}` },
+    });
+    assert.equal(authorized.status, 200);
+    assert.deepEqual(await authorized.json(), {
+      provider: "herdr",
+      available: true,
+      protocol: 17,
+      agents: [],
+    });
+
+    const unauthorized = await fetch(`http://127.0.0.1:${address.port}/api/agents`);
+    assert.equal(unauthorized.status, 401);
+  } finally {
+    await close(server);
+  }
+
+  const bareServer = await createMochaServer({ config, tmux: {} as SessionBackend });
+  await listen(bareServer);
+  try {
+    const address = bareServer.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/agents`, {
+      headers: { Authorization: `Bearer ${config.token}` },
+    });
+    const body = (await response.json()) as { available: boolean; agents: unknown[] };
+    assert.equal(body.available, false);
+    assert.deepEqual(body.agents, []);
+  } finally {
+    await close(bareServer);
+  }
 });
 
 test("terminal websocket authenticates and bridges typed protocol messages", async () => {
