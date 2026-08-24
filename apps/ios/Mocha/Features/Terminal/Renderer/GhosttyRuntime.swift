@@ -1,5 +1,6 @@
 import Foundation
 import GhosttyKit
+import os
 
 enum GhosttyRuntimeError: Error, LocalizedError {
     case appCreationFailed
@@ -57,8 +58,20 @@ final class GhosttyRuntime {
 
 }
 
+// Ghostty can request wakeups in rapid bursts from any thread. Coalescing to
+// one pending tick keeps redraw storms from flooding the main actor with
+// redundant tasks.
+private let ghosttyWakeupPending = OSAllocatedUnfairLock(initialState: false)
+
 private func ghosttyRuntimeWakeup(_ userdata: UnsafeMutableRawPointer?) {
+    let alreadyPending = ghosttyWakeupPending.withLock { pending in
+        if pending { return true }
+        pending = true
+        return false
+    }
+    guard !alreadyPending else { return }
     Task { @MainActor in
+        ghosttyWakeupPending.withLock { $0 = false }
         try? GhosttyRuntime.shared.get().tick()
     }
 }

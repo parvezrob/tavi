@@ -113,6 +113,62 @@ final class MochaUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Terminal"].exists)
     }
 
+    // Reproduces the live typing loop against a real host: keystrokes must
+    // echo to the screen and command output must appear while the keyboard
+    // stays up, with no layout change to force a draw. Requires a live
+    // connection, so it skips unless TEST_RUNNER_MOCHA_DEV_* variables are
+    // set on the xcodebuild invocation.
+    @MainActor
+    func testLiveTypingEchoesToTheScreenWhileKeyboardIsUp() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let session = environment["MOCHA_DEV_SESSION"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/SESSION/TOKEN to run the live echo test.")
+        }
+
+        let app = XCUIApplication()
+        app.launchEnvironment["MOCHA_DEV_HOST"] = host
+        app.launchEnvironment["MOCHA_DEV_SESSION"] = session
+        app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
+        app.launchEnvironment["MOCHA_DEV_AUTO_OPEN_TERMINAL"] = "1"
+        app.launch()
+
+        let surface = app.descendants(matching: .any)["terminal.surface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            waitForTranscript(of: surface, timeout: 10) { !$0.isEmpty },
+            "The connected terminal never rendered its prompt."
+        )
+
+        surface.tap()
+        let marker = "LIVE-TYPING-ECHO-OK"
+        surface.typeText("echo \(marker)\n")
+
+        XCTAssertTrue(
+            waitForTranscript(of: surface, timeout: 8) { value in
+                value.components(separatedBy: marker).count > 2
+            },
+            "Typed input and its output did not reach the screen while the keyboard was up."
+        )
+    }
+
+    @MainActor
+    private func waitForTranscript(
+        of surface: XCUIElement,
+        timeout: TimeInterval,
+        until condition: (String) -> Bool
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let value = surface.value as? String, condition(value) {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        return false
+    }
+
     @MainActor
     private func keepScreenshot(named name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())

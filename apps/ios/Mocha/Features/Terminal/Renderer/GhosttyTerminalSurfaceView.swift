@@ -102,6 +102,137 @@ private final class GhosttyWriteCallback: @unchecked Sendable {
     }
 }
 
+// Ghostty's feed path locks renderer state internally and upstream drives it
+// from a dedicated IO thread, never the UI thread. Feeding from a serial
+// background queue keeps VT parsing (and the accessibility transcript's
+// second pass over every byte) out of the main thread's way, so keyboard and
+// touch handling stay responsive during agent redraw storms.
+private final class GhosttyOutputPump: @unchecked Sendable {
+    // Ghostty's feed path and its render thread share one unfair lock, so
+    // feeding chunk-after-chunk with no gap can starve rendering entirely.
+    // Coalescing pending bytes and feeding at most once per interval keeps
+    // the lock free long enough for frames to draw during output storms,
+    // while a lone keystroke echo still feeds immediately.
+    private static let drainInterval: DispatchTimeInterval = .milliseconds(4)
+    // Ghostty's embedded surface does not present new frames on its own; the
+    // embedder must call ghostty_surface_draw after content changes (this is
+    // what every working draw path in the app already did via resize). The
+    // pump therefore drives presentation: refresh after each drain, then a
+    // draw paced near display rate, with a small lead so the render thread
+    // has ingested the refreshed frame first.
+    private static let drawDelay: DispatchTimeInterval = .milliseconds(8)
+    private static let drawInterval: DispatchTimeInterval = .milliseconds(16)
+    private static let transcriptPublishDelay: DispatchTimeInterval = .milliseconds(250)
+
+    private let queue = DispatchQueue(label: "mocha.terminal.output", qos: .userInitiated)
+    private let publishTranscript: @MainActor @Sendable (String) -> Void
+    private var surface: ghostty_surface_t?
+    private var transcript = TerminalAccessibleTranscript()
+    private var transcriptPublishScheduled = false
+    private var pendingData = Data()
+    private var drainScheduled = false
+    private var lastDrainAt = DispatchTime(uptimeNanoseconds: 0)
+    private var drawScheduled = false
+    private var drawSuspended = false
+    private var lastDrawAt = DispatchTime(uptimeNanoseconds: 0)
+
+    init(
+        surface: ghostty_surface_t,
+        publishTranscript: @escaping @MainActor @Sendable (String) -> Void
+    ) {
+        self.surface = surface
+        self.publishTranscript = publishTranscript
+    }
+
+    func feed(_ data: Data) {
+        queue.async { [self] in
+            guard surface != nil else { return }
+            pendingData.append(data)
+            scheduleDrainOnQueue()
+        }
+    }
+
+    private func scheduleDrainOnQueue() {
+        guard !drainScheduled else { return }
+        drainScheduled = true
+        let earliest = lastDrainAt + Self.drainInterval
+        if earliest < .now() {
+            drainOnQueue()
+        } else {
+            queue.asyncAfter(deadline: earliest) { [self] in
+                drainOnQueue()
+            }
+        }
+    }
+
+    private func drainOnQueue() {
+        drainScheduled = false
+        lastDrainAt = .now()
+        guard let surface, !pendingData.isEmpty else { return }
+        let data = pendingData
+        pendingData.removeAll(keepingCapacity: true)
+        data.withUnsafeBytes { rawBuffer in
+            guard let address = rawBuffer.baseAddress else { return }
+            ghostty_surface_feed_data(
+                surface,
+                address.assumingMemoryBound(to: UInt8.self),
+                rawBuffer.count
+            )
+        }
+        ghostty_surface_refresh(surface)
+        scheduleDrawOnQueue()
+        transcript.append(data)
+        schedulePublishOnQueue()
+    }
+
+    private func scheduleDrawOnQueue() {
+        guard !drawScheduled, !drawSuspended else { return }
+        drawScheduled = true
+        let earliest = max(lastDrawAt + Self.drawInterval, .now() + Self.drawDelay)
+        queue.asyncAfter(deadline: earliest) { [self] in
+            drawOnQueue()
+        }
+    }
+
+    private func drawOnQueue() {
+        drawScheduled = false
+        lastDrawAt = .now()
+        guard let surface, !drawSuspended else { return }
+        ghostty_surface_draw(surface)
+    }
+
+    // Blocks until any in-flight chunk finishes and drops the surface so the
+    // caller can free it safely afterwards. Chunks still queued become no-ops.
+    func shutdown() {
+        queue.sync { surface = nil }
+    }
+
+    // Draws from a background app get processes killed by iOS, so the surface
+    // view pauses pump-driven drawing while it is inactive.
+    func setDrawingSuspended(_ suspended: Bool) {
+        queue.async { [self] in
+            drawSuspended = suspended
+            if !suspended, surface != nil {
+                scheduleDrawOnQueue()
+            }
+        }
+    }
+
+    private func schedulePublishOnQueue() {
+        guard !transcriptPublishScheduled else { return }
+        transcriptPublishScheduled = true
+        queue.asyncAfter(deadline: .now() + Self.transcriptPublishDelay) { [self] in
+            transcriptPublishScheduled = false
+            guard surface != nil, !transcript.isEmpty else { return }
+            let value = transcript.value
+            let publish = publishTranscript
+            Task { @MainActor in
+                publish(value)
+            }
+        }
+    }
+}
+
 private func ghosttySurfaceWrite(
     _ userdata: UnsafeMutableRawPointer?,
     _ bytes: UnsafePointer<UInt8>?,
@@ -119,13 +250,15 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
     var onGridSizeChange: ((TerminalGridSize) -> Void)?
 
     var hasText: Bool { true }
+    // The standard iOS keyboard, with only the text-rewriting features off:
+    // autocorrect and smart punctuation silently corrupt shell commands.
     var autocapitalizationType: UITextAutocapitalizationType = .none
     var autocorrectionType: UITextAutocorrectionType = .no
     var spellCheckingType: UITextSpellCheckingType = .no
     var smartQuotesType: UITextSmartQuotesType = .no
     var smartDashesType: UITextSmartDashesType = .no
     var smartInsertDeleteType: UITextSmartInsertDeleteType = .no
-    var keyboardType: UIKeyboardType = .asciiCapable
+    var keyboardType: UIKeyboardType = .default
     var keyboardAppearance: UIKeyboardAppearance = .dark
     var returnKeyType: UIReturnKeyType = .default
     var enablesReturnKeyAutomatically = false
@@ -147,9 +280,8 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
 
     private let callback: GhosttyWriteCallback
     private let inputHandler: @MainActor (Data) -> Void
-    private var accessibleTranscript = TerminalAccessibleTranscript()
-    private var accessibilityUpdateTask: Task<Void, Never>?
     private var lastGridSize: TerminalGridSize?
+    private var outputPump: GhosttyOutputPump?
     private var surface: ghostty_surface_t?
 
     init(
@@ -189,6 +321,9 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
             throw GhosttyRuntimeError.appCreationFailed
         }
         self.surface = surface
+        outputPump = GhosttyOutputPump(surface: surface) { [weak self] transcriptValue in
+            self?.accessibilityValue = transcriptValue
+        }
         ghostty_surface_set_write_callback(
             surface,
             ghosttySurfaceWrite,
@@ -238,23 +373,15 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
     }
 
     func receive(_ data: Data) {
-        guard let surface, !data.isEmpty else { return }
-        data.withUnsafeBytes { rawBuffer in
-            guard let address = rawBuffer.baseAddress else { return }
-            ghostty_surface_feed_data(
-                surface,
-                address.assumingMemoryBound(to: UInt8.self),
-                rawBuffer.count
-            )
-        }
-        accessibleTranscript.append(data)
-        scheduleAccessibilityUpdate()
+        guard surface != nil, !data.isEmpty else { return }
+        outputPump?.feed(data)
     }
 
     func setActive(_ active: Bool) {
         guard let surface else { return }
         ghostty_surface_set_focus(surface, active)
         ghostty_surface_set_occlusion(surface, !active)
+        outputPump?.setDrawingSuspended(!active)
         if active {
             ghostty_surface_refresh(surface)
             ghostty_surface_draw(surface)
@@ -266,12 +393,12 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         self.surface = nil
         onGridSizeChange = nil
         resignFirstResponder()
-        accessibilityUpdateTask?.cancel()
-        accessibilityUpdateTask = nil
         ghostty_surface_set_focus(surface, false)
         ghostty_surface_set_occlusion(surface, true)
         callback.cancel()
         ghostty_surface_set_write_callback(surface, nil, nil)
+        outputPump?.shutdown()
+        outputPump = nil
         layer.sublayers?.forEach { $0.removeFromSuperlayer() }
         ghostty_surface_free(surface)
     }
@@ -300,18 +427,6 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         guard grid.columns > 0, grid.rows > 0, grid != lastGridSize else { return }
         lastGridSize = grid
         onGridSizeChange?(grid)
-    }
-
-    private func scheduleAccessibilityUpdate() {
-        guard accessibilityUpdateTask == nil else { return }
-        accessibilityUpdateTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(100))
-            guard !Task.isCancelled, let self else { return }
-            accessibilityValue = accessibleTranscript.isEmpty
-                ? "No terminal output yet"
-                : accessibleTranscript.value
-            accessibilityUpdateTask = nil
-        }
     }
 
     @objc private func sendEscape() {

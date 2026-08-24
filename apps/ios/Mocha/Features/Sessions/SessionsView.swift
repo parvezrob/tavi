@@ -3,16 +3,18 @@ import SwiftUI
 struct SessionsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var terminalController = TerminalSessionController()
+    @State private var terminalIsPresented = false
 
     var body: some View {
         NavigationStack {
             List {
                 Section("Phase 1 development") {
-                    NavigationLink {
-                        TerminalSessionView(controller: terminalController)
+                    Button {
+                        terminalIsPresented = true
                     } label: {
                         Label("Open terminal", systemImage: "terminal")
                     }
+                    .foregroundStyle(.primary)
                     .accessibilityIdentifier("sessions.openTerminal")
                 }
 
@@ -27,6 +29,18 @@ struct SessionsView: View {
             }
             .navigationTitle("Mocha")
             .accessibilityIdentifier("sessions.list")
+            .navigationDestination(isPresented: $terminalIsPresented) {
+                TerminalSessionView(controller: terminalController)
+            }
+            .task {
+                #if DEBUG
+                // Scripted development runs (simulator automation) jump
+                // straight to the terminal without a tap.
+                if ProcessInfo.processInfo.environment["MOCHA_DEV_AUTO_OPEN_TERMINAL"] == "1" {
+                    terminalIsPresented = true
+                }
+                #endif
+            }
             .onChange(of: scenePhase) { _, phase in
                 switch phase {
                 case .active:
