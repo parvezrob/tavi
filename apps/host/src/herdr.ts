@@ -13,6 +13,7 @@ export interface HerdrOptions {
   socketPath: string;
   bin?: string;
   requestTimeoutMilliseconds?: number;
+  promptSettleMilliseconds?: number;
 }
 
 export type HerdrAgentLookup =
@@ -188,11 +189,77 @@ export class HerdrService implements HerdrAgentSource {
   // Submits exactly once and never replays: an uncertain outcome is
   // reported as such, per the no-ambiguous-replay doctrine.
   async promptAgent(paneId: string, text: string): Promise<HerdrPromptResult> {
+    const settle = this.options.promptSettleMilliseconds ?? 900;
+    // Herdr answers "not an active named agent" while it still considers a
+    // started agent launch-pending. The rejection means nothing was
+    // delivered, so a short retry is safe and cannot double-submit; any
+    // other failure surfaces immediately. Observed live: launch_pending can
+    // stay stuck for minutes while the agent is in fact fully interactive,
+    // so after the retries we fall back to typing the prompt.
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await this.request("agent.prompt", { target: paneId, text });
+        await this.ensurePromptSubmitted(paneId, text);
+        return { submitted: true };
+      } catch (error) {
+        const launchPending =
+          error instanceof Error && /not an active named agent/i.test(error.message);
+        if (!launchPending) {
+          return { submitted: false, reason: describeConnectionFailure(error) };
+        }
+        if (attempt >= 3) {
+          return this.typePromptFallback(paneId, text, error);
+        }
+        await sleep(Math.min(settle, 500));
+      }
+    }
+  }
+
+  // Last-resort delivery when the structured prompt API refuses a visibly
+  // interactive agent: type the text and press Enter, exactly as a human
+  // would. Guarded to *idle* panes only — typing into a working pane or an
+  // open dialog could act on it. Newlines become spaces because send_keys
+  // has no bracketed paste; the submission still happens exactly once.
+  private async typePromptFallback(
+    paneId: string,
+    text: string,
+    cause: unknown,
+  ): Promise<HerdrPromptResult> {
+    const lookup = await this.findAgent(paneId);
+    if (!lookup.available || !lookup.agent || lookup.agent.status !== "idle") {
+      return { submitted: false, reason: describeConnectionFailure(cause) };
+    }
+    const keys = [...text.replace(/\s+/g, " ").trim()];
+    if (keys.length === 0) {
+      return { submitted: false, reason: "The prompt is empty." };
+    }
     try {
-      await this.request("agent.prompt", { target: paneId, text });
+      await this.request("agent.send_keys", { target: paneId, keys: [...keys, "Enter"] });
       return { submitted: true };
     } catch (error) {
       return { submitted: false, reason: describeConnectionFailure(error) };
+    }
+  }
+
+  // Observed live: a prompt delivered while the agent's UI is still booting
+  // lands in its composer without submitting — the text just sits there.
+  // Verify and nudge: only while the agent is still *idle* AND the composer
+  // visibly still holds the text do we press Enter to complete the send.
+  // Any other status means the prompt took (or a dialog may be up, where a
+  // blind Enter would answer it) — never touch the pane then.
+  private async ensurePromptSubmitted(paneId: string, text: string): Promise<void> {
+    const settle = this.options.promptSettleMilliseconds ?? 900;
+    const marker = normalizeForComparison(text).slice(-24);
+    if (!marker) return;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await sleep(settle);
+      const lookup = await this.findAgent(paneId);
+      if (!lookup.available || !lookup.agent) return;
+      if (lookup.agent.status !== "idle") return;
+      const read = await this.readAgent(paneId, 6);
+      if (!read.available) return;
+      if (!normalizeForComparison(read.preview).includes(marker)) return;
+      await this.request("agent.send_keys", { target: paneId, keys: ["Enter"] }).catch(() => undefined);
     }
   }
 
@@ -358,4 +425,13 @@ function asString(value: unknown): string {
 
 function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+// Terminal reads wrap and re-space text arbitrarily; compare content only.
+function normalizeForComparison(value: string): string {
+  return value.replace(/\s+/g, "");
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

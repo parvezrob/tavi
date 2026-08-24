@@ -305,6 +305,105 @@ final class MochaUITests: XCTestCase {
         )
     }
 
+    // Owner-reported bug: open a blocked agent, answer nothing, go back —
+    // "Needs you" must still be on the home. Reproduces the full flow
+    // against a live host with a real permission dialog.
+    @MainActor
+    func testNeedsYouSurvivesVisitingTheBlockedAgent() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live needs-you test.")
+        }
+
+        let (paneId, tabId) = try await createAgentTab(host: host, token: token)
+        addTeardownBlock {
+            try? await Self.closeAgentTab(host: host, token: token, tabId: tabId)
+        }
+
+        try await waitForAgentStatus(host: host, token: token, paneId: paneId, status: "idle", timeout: 60)
+        try await prompt(
+            host: host,
+            token: token,
+            paneId: paneId,
+            text: "Use the Bash tool to run exactly this command: touch /tmp/mocha-ui-needs-you"
+        )
+        try await waitForAgentStatus(host: host, token: token, paneId: paneId, status: "blocked", timeout: 150)
+
+        let app = XCUIApplication()
+        app.launchEnvironment["MOCHA_DEV_HOST"] = host
+        app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
+        app.launch()
+
+        let banner = app.buttons["sessions.needsYou"]
+        XCTAssertTrue(banner.waitForExistence(timeout: 15), "Blocked agent never reached Needs you.")
+
+        let agentRow = app.buttons["sessions.agent.\(paneId)"]
+        XCTAssertTrue(agentRow.waitForExistence(timeout: 5))
+        agentRow.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["terminal.surface"].waitForExistence(timeout: 10))
+
+        // Look at the dialog, answer nothing.
+        try await Task.sleep(for: .seconds(12))
+
+        let backButton = app.navigationBars.buttons.element(boundBy: 0)
+        XCTAssertTrue(backButton.waitForExistence(timeout: 5))
+        backButton.tap()
+
+        // The dialog is still unanswered: Needs you must be back and stay.
+        for checkpoint in [5.0, 10.0, 10.0] {
+            try await Task.sleep(for: .seconds(checkpoint))
+            if !banner.exists {
+                let raw = try await agentStatus(host: host, token: token, paneId: paneId)
+                XCTFail(
+                    raw == "blocked"
+                        ? "PHONE-SIDE: host still reports blocked but Needs you is gone."
+                        : "SOURCE FLIP: herdr now reports '\(raw ?? "gone")' while the dialog waits."
+                )
+                return
+            }
+        }
+    }
+
+    private func waitForAgentStatus(
+        host: String,
+        token: String,
+        paneId: String,
+        status target: String,
+        timeout: TimeInterval
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if try await agentStatus(host: host, token: token, paneId: paneId) == target { return }
+            try await Task.sleep(for: .seconds(2))
+        }
+        throw XCTSkip("Agent \(paneId) never reached \(target); cannot exercise the flow.")
+    }
+
+    private func agentStatus(host: String, token: String, paneId: String) async throws -> String? {
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/agents")))
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, _) = try await URLSession.shared.data(for: request)
+        struct AgentsBody: Decodable {
+            struct Agent: Decodable {
+                let id: String
+                let status: String
+            }
+            let agents: [Agent]
+        }
+        let body = try JSONDecoder().decode(AgentsBody.self, from: data)
+        return body.agents.first { $0.id == paneId }?.status
+    }
+
+    private func prompt(host: String, token: String, paneId: String, text: String) async throws {
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/agents/\(paneId)/prompt")))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["text": text])
+        _ = try await URLSession.shared.data(for: request)
+    }
+
     private func createAgentTab(host: String, token: String) async throws -> (paneId: String, tabId: String) {
         var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/herdr/tabs")))
         request.httpMethod = "POST"

@@ -50,6 +50,13 @@ struct AgentPresentationTests {
         #expect(summary(title: "").projectName == "mocha")
         #expect(summary(agent: "claude", title: "Claude").projectName == "mocha")
     }
+
+    @Test
+    func abbreviatesTheHomePrefix() {
+        #expect(summary(cwd: "/Users/dev/projects/mocha").abbreviatedPath == "~/projects/mocha")
+        #expect(summary(cwd: "/home/dev/work").abbreviatedPath == "~/work")
+        #expect(summary(cwd: "/opt/tools").abbreviatedPath == "/opt/tools")
+    }
 }
 
 @MainActor

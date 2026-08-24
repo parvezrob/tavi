@@ -123,6 +123,16 @@ extension AgentSummary {
     // never let a container reuse one cached under the bare pane id.
     var cardIdentity: String { "\(id)|\(status)" }
 
+    // The working directory with the home prefix folded to "~" — the phone
+    // doesn't know the host's home, so this is a display heuristic only.
+    var abbreviatedPath: String {
+        cwd.replacingOccurrences(
+            of: "^/(?:Users|home)/[^/]+",
+            with: "~",
+            options: .regularExpression
+        )
+    }
+
     func withStatus(_ status: String) -> AgentSummary {
         AgentSummary(
             id: id,

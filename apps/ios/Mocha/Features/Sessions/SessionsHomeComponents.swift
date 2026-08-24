@@ -87,6 +87,16 @@ struct AgentCard: View {
                     }
                 }
 
+                HStack(spacing: 5) {
+                    Image(systemName: "folder")
+                        .font(.caption2)
+                    Text(agent.abbreviatedPath)
+                        .font(.system(size: 11, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+                .foregroundStyle(MochaTheme.textSecondary.opacity(0.8))
+
                 if let preview, !preview.isEmpty {
                     Text(preview)
                         .font(.system(size: 11, weight: .regular, design: .monospaced))
@@ -133,6 +143,11 @@ struct RecentAgentRow: View {
                         .font(.caption)
                         .foregroundStyle(MochaTheme.textSecondary)
                         .lineLimit(1)
+                    Text(agent.abbreviatedPath)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(MochaTheme.textSecondary.opacity(0.7))
+                        .lineLimit(1)
+                        .truncationMode(.head)
                 }
                 Spacer(minLength: 8)
                 if let observedAt {
