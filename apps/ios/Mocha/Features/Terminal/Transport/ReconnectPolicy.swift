@@ -12,14 +12,14 @@ struct ReconnectPolicy: Sendable, Equatable {
         initialDelay: .milliseconds(250),
         maximumDelay: .seconds(8),
         multiplier: 2,
-        connectDeadline: .seconds(6)
+        connectDeadline: .seconds(3)
     )
 
     init(
         initialDelay: Duration,
         maximumDelay: Duration,
         multiplier: Int,
-        connectDeadline: Duration = .seconds(6)
+        connectDeadline: Duration = .seconds(3)
     ) {
         precondition(initialDelay > .zero)
         precondition(maximumDelay >= initialDelay)
