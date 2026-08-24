@@ -21,7 +21,9 @@ All four items shipped (issues #12, #13, #14, #4/#5): installed launchd host ser
 
 **Exit gate:** Wi-Fi ↔ cellular flip reconnects to live output in under 1 second; repeated lifecycle stress passes on the physical iPhone with no crash and no lost/duplicated input.
 
-## Phase B — Herdr control plane (host + protocol)
+## Phase B — Herdr control plane (host + protocol) ✅ COMPLETE 2026-08-25
+
+All five items shipped and live-verified (issues #15, #16): agents are attachable terminal targets via `herdr agent attach`; the events feed pushes full-status snapshots sub-second (idle→working→blocked→done timelines captured on the wire and rendered on the phone); bounded previews serve Herdr's own pane text; `agent.prompt` submitted to a live pane and the reply plus status transitions arrived within ~2s; the tmux lane stayed intact throughout, and Herdr restarts degraded honestly twice in live testing. Exit gate passed: tapping an agent on the phone lands in its exact pane. Bonus beyond plan (#17): new Herdr tabs (Claude/Codex/empty) can be created from the phone.
 
 1. Attach to a specific Herdr agent (`herdr agent attach <target>`) through the existing pty bridge; agents in `/api/agents` become attachable terminal targets.
 2. Live attention events: host subscribes to `events.subscribe` (agent status changes) and pushes them to the phone over the WebSocket; no polling, no scraping.
