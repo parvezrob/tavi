@@ -2,6 +2,20 @@
 
 > Append-only log of completed work sessions, newest first. Each entry is what the *next* agent needs to know about that session: what shipped, what was learned, what was left open. The live starting point is always [`current-session.md`](./current-session.md); prune entries older than a few sessions — git history keeps everything.
 
+## 2026-08-26 — Phase C items 1–3, needs-you fidelity, feature decisions
+
+**Shipped (commits `125fe22` → `2b1a827`):**
+- Sessions home (#18): dark-committed MochaTheme visual system, Needs-you/Active/Recent cards with sanitized previews, freshness, project directory rows; honest empty/degraded/loading/stale states.
+- Terminal identity + Jump-to (#19): `GET /api/herdr/tree`, live identity header, hierarchy sheet with Current badge.
+- Composer + quick keys (#20): deliberate-send composer (structured prompt for agents, bracketed paste + explicit return for terminals), key-cap control bar, Ctrl latch, compose/live single-typing-target mode toggle. `DELETE /api/herdr/tabs/{tabId}` added.
+- Needs-you fidelity (#22): Claude Code hook overlay on the host (`AttentionOverlay` + `AttentiveAgentEvents`, `POST /api/hooks/claude`, `npm run hooks:install`); phone-side `AgentStatusSmoother` hysteresis and stale-state retention. Live-verified full lifecycle: permission ask → `blocked·claude-hook` in seconds, persists unanswered, clears on approval.
+- Prompt delivery: launch-pending retry, typing fallback ("Space" key mapping, idle guard), Enter nudge — all against live-observed herdr behaviors, recorded in `docs/DEVELOPMENT.md`.
+- Feature decisions from competitor survey (t3code source-read, Happy, Omnara): adopted #23–#29 + rejected list, recorded in ROADMAP.
+
+**Learned:** herdr `agent_status` flaps and can mis-detect around dialogs (hence hooks); `agent.prompt` needs launch-pending handling; LazyVStack can serve a stale card when a row changes sections (home is a plain VStack with status-keyed identity now); UI tests must reset persisted AppStorage (`MOCHA_DEV_RESET`); live tests must target their own disposable agents, never `firstMatch` (an early test prompted an owner session by accident — twice).
+
+**Left open:** #23 next (approve/deny from the card — design notes in current-session.md), then #24/#26/#25, ergonomics (#10), dogfood gate. #21 installer flake persists — always verify `/api/health` after deploys.
+
 ## 2026-08-25 — Phases A and B, complete
 
 **Shipped (commits `b545fe4` → `73ce984`):**
