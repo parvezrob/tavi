@@ -2,6 +2,17 @@
 
 > Append-only log of completed work sessions, newest first. Each entry is what the *next* agent needs to know about that session: what shipped, what was learned, what was left open. The live starting point is always [`current-session.md`](./current-session.md); prune entries older than a few sessions — git history keeps everything.
 
+## 2026-08-25 — App Store readiness milestone, security hygiene, #23 approve/deny
+
+**Shipped (commits `8867740` → `3998b89`):**
+- App Store readiness gate: milestone "App Store review readiness" + epic #37 (the master checklist before any Apple submission). `codebase-scan.html` (#30, a Cursor-authored audit) treated as second-agent *input*, re-verified against the code — never the tracker.
+- Security hygiene #31–#36 (all closed): pairing token moved to the iOS Keychain (this-device-only) with a one-time migration off UserDefaults and truthful storage copy on both connect screens; Claude hook rewritten as `claude-hook-relay.js` so the token never appears in argv; dev-env credential seeding gated to DEBUG; browser CORS headers removed; `~/.mocha` log/dir forced to 0700/0600; `AgentDirectory` moved to an ephemeral (no-cache) URLSession. Verified live (Keychain migration on-device; hook reinstall on the owner Mac preserved foreign orca/moshi entries).
+- #23 approve/deny from the Needs-you card (closed): `PermissionDecisionSheet` answers a waiting permission without the terminal. Dialog detection is **structural** (numbered options + `❯` arrow), not footer-string based; reads the **visible viewport** not recent output; supports **per-option picking** (each choice a button that sends its digit), with "always allow" options flagged as granting standing access. Two-layer trust gate (an authority flags the wait; a visible re-read must still parse a real dialog before any key fires). Live UI test `testAnswerWaitingPermissionFromNeedsYouCard`.
+
+**Learned:** herdr `agent.read` has `recent` (rolling output) vs `visible` (viewport) — use `visible` for live-screen truth; Claude dialog footers differ by prompt type, so detect by the `❯`-highlighted numbered list; number keys are select-and-confirm in Claude dialogs; `shift+tab` is the accepted send_keys spelling to cycle modes. #21 installer flake hit repeatedly this session — `service:install` first attempt fails, a direct `node dist/index.js install-service` retry succeeds; always confirm `/api/health`.
+
+**Left open:** #24 next (project picker — `createTab` already takes a validated `cwd`, mostly needs the roots list on the phone + required selection), then #26/#25/#10, dogfood gate. The App Store epic (#37) items — demo mode, privacy packaging, icon, pairing, per-device revoke — remain for when a TestFlight push is actually targeted (also needs the paid Apple account).
+
 ## 2026-08-26 — Phase C items 1–3, needs-you fidelity, feature decisions
 
 **Shipped (commits `125fe22` → `2b1a827`):**
