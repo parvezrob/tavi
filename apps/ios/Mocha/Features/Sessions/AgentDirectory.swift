@@ -56,6 +56,17 @@ final class AgentDirectory {
     private static let eventsProtocol = "mocha.events.v1"
     private static let retryDelay: Duration = .seconds(2)
 
+    // Every request here carries the bearer token, so it uses the same
+    // no-disk-trace policy as the terminal transport (#36): ephemeral
+    // storage, no cache, and no silent parking on a dead network path.
+    private static let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.waitsForConnectivity = false
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: configuration)
+    }()
+
     private(set) var agents: [AgentSummary] = []
     private(set) var available = false
     private(set) var reason: String?
@@ -160,7 +171,7 @@ final class AgentDirectory {
         request.httpBody = try? JSONEncoder().encode(body)
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await Self.session.data(for: request)
             guard let status = (response as? HTTPURLResponse)?.statusCode else {
                 return "The host did not answer."
             }
@@ -193,7 +204,7 @@ final class AgentDirectory {
         request.httpBody = try? JSONEncoder().encode(["text": text])
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await Self.session.data(for: request)
             guard let status = (response as? HTTPURLResponse)?.statusCode else {
                 return "The host did not answer."
             }
@@ -220,7 +231,7 @@ final class AgentDirectory {
         var request = URLRequest(url: url)
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await Self.session.data(for: request)
             guard let status = (response as? HTTPURLResponse)?.statusCode else {
                 return .failure("The host did not answer.")
             }
@@ -308,7 +319,7 @@ final class AgentDirectory {
 
         var request = URLRequest(url: url)
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = try? await Self.session.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let payload = try? JSONDecoder().decode(PreviewResponse.self, from: data) else {
             return nil
@@ -324,7 +335,7 @@ final class AgentDirectory {
         var request = URLRequest(url: eventsURL)
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
         request.setValue(Self.eventsProtocol, forHTTPHeaderField: "Sec-WebSocket-Protocol")
-        let socket = URLSession.shared.webSocketTask(with: request)
+        let socket = Self.session.webSocketTask(with: request)
         socket.resume()
         defer { socket.cancel(with: .normalClosure, reason: nil) }
 

@@ -489,7 +489,7 @@ struct TerminalSessionView: View {
                         }
                     }
                 } footer: {
-                    Text("The token stays in memory for this connection and is never saved or logged. Only Tailscale Serve .ts.net addresses are accepted. Mocha cannot detect Funnel, so keep Funnel disabled.")
+                    Text("This sheet keeps the token in memory for this connection only. A host connected from the home screen stores its token in this iPhone's Keychain. Anyone with the token can run commands on that Mac. Only Tailscale Serve .ts.net addresses are accepted; keep Funnel disabled.")
                 }
             }
             .accessibilityIdentifier("connection.sheet")

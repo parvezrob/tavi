@@ -20,7 +20,8 @@ Practical knowledge for building, deploying, and verifying Mocha end-to-end. Pol
 - Live UI tests need `TEST_RUNNER_MOCHA_DEV_HOST/SESSION/TOKEN` **exported** (CLI assignments to xcodebuild do not reach the runner). `testTouchScrollLeavesStreamingHealthy` needs an ambient output loop running in the target session; it generates none itself.
 - UI-test failure details: `xcrun xcresulttool get test-results tests --path <latest .xcresult under DerivedData/.../Logs/Test>`.
 - Physical device install: `xcrun devicectl device install app --device <udid> <DerivedData>/Build/Products/Debug-iphoneos/Mocha.app` — the phone must be unlocked and plugged in; "unavailable" resolves by unlocking and retrying.
-- Device connection settings on the phone live behind the Host button (AppStorage `mocha.dev.host` / `mocha.dev.token`) until Phase D replaces them with QR pairing + Keychain.
+- Device connection settings on the phone live behind the Host button. The host address is AppStorage `mocha.dev.host`; the token lives in the Keychain (`HostCredentialStore`, this-device-only, #31 — a pre-Keychain AppStorage token migrates and is deleted on first launch). Phase D replaces this with QR pairing + per-device credentials.
+- Simulator gotcha: `simctl spawn <udid> defaults write com.parvezrob.mocha …` hits the *device-level* domain, which the app never reads. The app's real defaults are the plist under `simctl get_app_container <udid> com.parvezrob.mocha data` → `Library/Preferences/`.
 
 ## Claude Code hooks (needs-you fidelity, issue #22)
 

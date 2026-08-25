@@ -10,7 +10,9 @@ struct SessionsView: View {
     // Development connection storage; Phase D replaces this with QR pairing
     // and per-device Keychain credentials.
     @AppStorage("mocha.dev.host") private var storedHost = ""
-    @AppStorage("mocha.dev.token") private var storedToken = ""
+    // The token lives in the Keychain (#31); this mirrors it for the view.
+    // Write through persistToken so state and Keychain never disagree.
+    @State private var storedToken = ""
     @State private var agentDirectory = AgentDirectory()
     @State private var draftHost = ""
     @State private var draftToken = ""
@@ -72,12 +74,14 @@ struct SessionsView: View {
                     .presentationDetents([.medium])
             }
             .task {
+                HostCredentialStore.migrateFromDefaults()
+                storedToken = HostCredentialStore.load()
                 #if DEBUG
                 // UI tests must not inherit a connection persisted by an
                 // earlier run on the same simulator.
                 if ProcessInfo.processInfo.environment["MOCHA_DEV_RESET"] == "1" {
                     storedHost = ""
-                    storedToken = ""
+                    persistToken("")
                 }
                 #endif
                 seedFromDevelopmentEnvironmentIfNeeded()
@@ -325,8 +329,12 @@ struct SessionsView: View {
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                 }
-                Section("Access token") {
-                    SecureField("Paste the token from npm run token", text: $draftToken)
+                Section {
+                    SecureField("Access token", text: $draftToken)
+                } header: {
+                    Text("Access token")
+                } footer: {
+                    Text("Stored in this iPhone's Keychain, on this device only. Mocha never uploads it. Anyone with this token can run commands on your Mac.")
                 }
             }
             .navigationTitle("Connect Host")
@@ -338,7 +346,7 @@ struct SessionsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         storedHost = draftHost.trimmingCharacters(in: .whitespacesAndNewlines)
-                        storedToken = draftToken.trimmingCharacters(in: .whitespacesAndNewlines)
+                        persistToken(draftToken.trimmingCharacters(in: .whitespacesAndNewlines))
                         agentDirectory.configure(hostText: storedHost, credential: storedToken)
                         showingHostForm = false
                     }
@@ -359,13 +367,21 @@ struct SessionsView: View {
     }
 
     private func seedFromDevelopmentEnvironmentIfNeeded() {
+        // Release builds must never persist an injected credential (#33).
+        #if DEBUG
         let environment = ProcessInfo.processInfo.environment
         if storedHost.isEmpty, let host = environment["MOCHA_DEV_HOST"] {
             storedHost = host
         }
         if storedToken.isEmpty, let token = environment["MOCHA_DEV_TOKEN"] {
-            storedToken = token
+            persistToken(token)
         }
+        #endif
+    }
+
+    private func persistToken(_ token: String) {
+        storedToken = token
+        HostCredentialStore.save(token)
     }
 }
 
