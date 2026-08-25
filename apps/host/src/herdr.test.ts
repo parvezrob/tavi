@@ -196,6 +196,73 @@ test("typing fallback refuses non-idle panes", async (context) => {
   assert.equal(sentKeys.length, 0);
 });
 
+test("approves a live dialog by sending Enter after re-reading the pane", async (context) => {
+  const socketPath = temporarySocketPath(context);
+  const sentKeys: string[][] = [];
+  await startFakeHerdr(context, socketPath, {
+    protocol: 17,
+    agents: [{ agent: "claude", agent_status: "blocked", pane_id: "wB:p1", tab_id: "wB:t1", workspace_id: "wB" }],
+    readText: " Do you want to proceed?\n ❯ 1. Yes\n   2. No, exit\n\n Enter to confirm · Esc to cancel",
+    sentKeys,
+  });
+
+  const result = await new HerdrService({ socketPath }).decideAgent("wB:p1", "approve");
+
+  assert.deepEqual(result, { decided: true, sent: "Enter" });
+  assert.deepEqual(sentKeys, [["Enter"]]);
+});
+
+test("denies a live dialog with Escape", async (context) => {
+  const socketPath = temporarySocketPath(context);
+  const sentKeys: string[][] = [];
+  await startFakeHerdr(context, socketPath, {
+    protocol: 17,
+    agents: [{ agent: "claude", agent_status: "blocked", pane_id: "wB:p1", tab_id: "wB:t1", workspace_id: "wB" }],
+    readText: " ❯ 1. Yes\n   2. No\n\n Enter to confirm · Esc to cancel",
+    sentKeys,
+  });
+
+  const result = await new HerdrService({ socketPath }).decideAgent("wB:p1", "deny");
+
+  assert.deepEqual(result, { decided: true, sent: "Escape" });
+  assert.deepEqual(sentKeys, [["Escape"]]);
+});
+
+test("refuses to decide and fires no key when the dialog is already gone", async (context) => {
+  const socketPath = temporarySocketPath(context);
+  const sentKeys: string[][] = [];
+  await startFakeHerdr(context, socketPath, {
+    protocol: 17,
+    agents: [{ agent: "claude", agent_status: "idle", pane_id: "wB:p1", tab_id: "wB:t1", workspace_id: "wB" }],
+    // The pane moved on — no dialog footer to be found.
+    readText: "❯ ls -la\n  ctx 0/200k",
+    sentKeys,
+  });
+
+  const result = await new HerdrService({ socketPath }).decideAgent("wB:p1", "approve");
+
+  assert.equal(result.decided, false);
+  assert.equal(result.decided === false && result.stale, true);
+  assert.equal(sentKeys.length, 0);
+});
+
+test("reads and parses a live dialog", async (context) => {
+  const socketPath = temporarySocketPath(context);
+  await startFakeHerdr(context, socketPath, {
+    protocol: 17,
+    agents: [{ agent: "claude", agent_status: "blocked", pane_id: "wB:p1", tab_id: "wB:t1", workspace_id: "wB" }],
+    readText: " Bash: rm file\n ❯ 1. Yes\n   2. No\n\n Enter to confirm · Esc to cancel",
+  });
+
+  const result = await new HerdrService({ socketPath }).readDialog("wB:p1");
+
+  assert.equal("available" in result, false);
+  assert.equal("present" in result && result.present, true);
+  if (!("present" in result) || !result.present) return;
+  assert.equal(result.dialog.options.length, 2);
+  assert.equal(result.dialog.options[0]?.selected, true);
+});
+
 test("reports unavailable when the herdr server is not running", async (context) => {
   const socketPath = temporarySocketPath(context);
 

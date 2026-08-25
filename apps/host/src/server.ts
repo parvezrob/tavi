@@ -312,6 +312,77 @@ async function routeRequest(
     return;
   }
 
+  const dialogMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/dialog$/);
+  if (dialogMatch && request.method === "GET") {
+    if (!herdr) {
+      sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
+      return;
+    }
+    const paneId = safeSessionId(dialogMatch[1] || "");
+    const result = await herdr.readDialog(paneId);
+    if ("available" in result) {
+      sendJson(response, 503, { error: result.reason });
+      return;
+    }
+    sendJson(response, 200, {
+      paneId,
+      present: result.present,
+      ...(result.present ? { dialog: result.dialog } : {}),
+    });
+    return;
+  }
+
+  const decisionMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/decision$/);
+  if (decisionMatch && request.method === "POST") {
+    if (!herdr) {
+      sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
+      return;
+    }
+    const paneId = safeSessionId(decisionMatch[1] || "");
+    const body = await readJsonBody(request);
+    const decision =
+      typeof body === "object" && body !== null && "decision" in body
+        ? (body as Record<string, unknown>).decision
+        : undefined;
+    if (decision !== "approve" && decision !== "deny") {
+      sendJson(response, 400, { error: 'decision must be "approve" or "deny".' });
+      return;
+    }
+    // Trust gate, two layers. Outer (here): at least one authority must flag
+    // this agent as waiting — the Claude hook overlay (Claude's own fact) or
+    // herdr's live screen status. Inner (herdr.decideAgent): the pane is
+    // re-read immediately before any key is sent and a real permission dialog
+    // must still parse out of it, or nothing fires. The inner re-read is what
+    // actually guarantees we never answer a stale card, so the outer layer is
+    // a cheap "is this plausibly waiting" check, not the safety — which is why
+    // it accepts either authority (some dialogs, e.g. the trust-folder prompt,
+    // are herdr-blocked but never emit a PermissionRequest hook).
+    const lookup = await herdr.findAgent(paneId);
+    if (!lookup.available) {
+      sendJson(response, 503, { error: lookup.reason });
+      return;
+    }
+    const overlayBlocked = attention?.isBlocked(lookup.agent?.sessionRef) ?? false;
+    const herdrBlocked = lookup.agent?.status === "blocked";
+    if (!overlayBlocked && !herdrBlocked) {
+      sendJson(response, 409, {
+        error: "This agent is not waiting for a decision right now.",
+        stale: true,
+      });
+      return;
+    }
+    const result = await herdr.decideAgent(paneId, decision);
+    if (!result.decided) {
+      sendJson(response, result.stale ? 409 : 503, {
+        error: result.reason,
+        ...(result.stale ? { stale: true } : {}),
+      });
+      return;
+    }
+    sendJson(response, 200, { decided: true, decision, paneId });
+    return;
+  }
+
   const promptMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/prompt$/);
   if (promptMatch && request.method === "POST") {
     if (!herdr) {

@@ -56,6 +56,8 @@ test("agents endpoint serves herdr state and degrades honestly without it", asyn
     readAgent: async () => ({ available: true as const, preview: "$ npm test\nall green" }),
     promptAgent: async () => ({ submitted: true as const }),
     createTab: async () => ({ created: true as const, paneId: "wB:p9", tabId: "wB:t9" }),
+    readDialog: async () => ({ present: false as const }),
+    decideAgent: async () => ({ decided: true as const, sent: "Enter" }),
     closeTab: async () => ({ closed: true as const }),
     listTree: async () => ({
       available: true as const,
@@ -150,6 +152,8 @@ test("claude hook events overlay blocked status with hook authority", async () =
     readAgent: async () => ({ available: true as const, preview: "" }),
     promptAgent: async () => ({ submitted: true as const }),
     createTab: async () => ({ created: true as const, paneId: "wB:p9", tabId: "wB:t9" }),
+    readDialog: async () => ({ present: false as const }),
+    decideAgent: async () => ({ decided: true as const, sent: "Enter" }),
   };
   const server = await createMochaServer({ config, tmux: {} as SessionBackend, herdr, attention });
   await listen(server);
@@ -194,6 +198,78 @@ test("claude hook events overlay blocked status with hook authority", async () =
       body: JSON.stringify({ nonsense: true }),
     });
     assert.equal(rejected.status, 400);
+  } finally {
+    await close(server);
+  }
+});
+
+test("decision endpoint fires only when an authority flags the agent as waiting", async () => {
+  const attention = new AttentionOverlay();
+  const decisions: Array<{ paneId: string; decision: string }> = [];
+  let status: "idle" | "blocked" = "idle";
+  const makeAgent = () => ({
+    id: "wB:p1",
+    agent: "claude",
+    status,
+    cwd: "/work",
+    title: "",
+    workspaceId: "wB",
+    tabId: "wB:t1",
+    focused: false,
+    revision: 1,
+    authority: "herdr" as const,
+    sessionRef: "sess-1",
+  });
+  const herdr = {
+    listAgents: async () => ({ provider: "herdr" as const, available: true, protocol: 17, agents: [makeAgent()] }),
+    listTree: async () => ({ available: true as const, workspaces: [] }),
+    closeTab: async () => ({ closed: true as const }),
+    findAgent: async () => ({ available: true as const, agent: makeAgent() }),
+    attachCommand: (paneId: string) => ({ bin: "herdr", args: ["agent", "attach", paneId] }),
+    readAgent: async () => ({ available: true as const, preview: "" }),
+    readDialog: async () => ({ present: false as const }),
+    decideAgent: async (paneId: string, decision: "approve" | "deny") => {
+      decisions.push({ paneId, decision });
+      return { decided: true as const, sent: decision === "approve" ? "Enter" : "Escape" };
+    },
+    promptAgent: async () => ({ submitted: true as const }),
+    createTab: async () => ({ created: true as const, paneId: "wB:p9", tabId: "wB:t9" }),
+  };
+  const server = await createMochaServer({ config, tmux: {} as SessionBackend, herdr, attention });
+  await listen(server);
+
+  try {
+    const address = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${address.port}`;
+    const headers = { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" };
+    const decide = (decision: string) =>
+      fetch(`${base}/api/agents/wB:p1/decision`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ decision }),
+      });
+
+    // Neither authority flags a wait: refuse, fire nothing.
+    const idle = await decide("approve");
+    assert.equal(idle.status, 409);
+    assert.equal(decisions.length, 0);
+
+    // herdr alone reporting blocked is enough for the outer layer (the inner
+    // pane re-read is the real send-time safety).
+    status = "blocked";
+    const approved = await decide("approve");
+    assert.equal(approved.status, 200);
+    assert.deepEqual(decisions, [{ paneId: "wB:p1", decision: "approve" }]);
+
+    // The hook overlay alone also qualifies, even with herdr idle.
+    status = "idle";
+    attention.report({ event: "PermissionRequest", sessionId: "sess-1" });
+    const viaHook = await decide("deny");
+    assert.equal(viaHook.status, 200);
+    assert.deepEqual(decisions[1], { paneId: "wB:p1", decision: "deny" });
+
+    const bad = await decide("maybe");
+    assert.equal(bad.status, 400);
   } finally {
     await close(server);
   }

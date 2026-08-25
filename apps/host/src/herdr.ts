@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createConnection } from "node:net";
+import { parsePermissionDialog, type PermissionDialog } from "./dialog.js";
 import type { AgentStatus, AttachCommand, HerdrAgentInfo, HerdrAgentsResult } from "./types.js";
 
 // Verified against herdr 0.7.5. The socket speaks newline-delimited JSON:
@@ -7,6 +8,8 @@ import type { AgentStatus, AttachCommand, HerdrAgentInfo, HerdrAgentsResult } fr
 // incompatible herdr degrades to "unavailable" instead of mis-parsed state.
 const SUPPORTED_PROTOCOL = 17;
 const REQUEST_TIMEOUT_MILLISECONDS = 2_000;
+// Enough lines to always capture a dialog's option list plus its footer.
+const DIALOG_READ_LINES = 40;
 const AGENT_STATUSES: readonly AgentStatus[] = ["idle", "working", "blocked", "done", "unknown"];
 
 export interface HerdrOptions {
@@ -25,6 +28,20 @@ export type HerdrPreviewResult =
   | { available: false; reason: string };
 
 export type HerdrPromptResult = { submitted: true } | { submitted: false; reason: string };
+
+export type DialogDecision = "approve" | "deny";
+
+export type HerdrDialogResult =
+  | { present: true; dialog: PermissionDialog }
+  | { present: false }
+  | { available: false; reason: string };
+
+export type HerdrDecisionResult =
+  | { decided: true; sent: string }
+  // The dialog we were told about is no longer on screen — never fire a key
+  // at whatever replaced it. The caller surfaces this so a stale card can't
+  // answer a prompt that already resolved.
+  | { decided: false; reason: string; stale?: boolean };
 
 export interface HerdrTabRequest {
   agent?: string | undefined;
@@ -63,6 +80,8 @@ export interface HerdrAgentSource {
   findAgent(paneId: string): Promise<HerdrAgentLookup>;
   attachCommand(paneId: string): AttachCommand;
   readAgent(paneId: string, lines: number): Promise<HerdrPreviewResult>;
+  readDialog(paneId: string): Promise<HerdrDialogResult>;
+  decideAgent(paneId: string, decision: DialogDecision): Promise<HerdrDecisionResult>;
   promptAgent(paneId: string, text: string): Promise<HerdrPromptResult>;
   createTab(request: HerdrTabRequest): Promise<HerdrTabResult>;
 }
@@ -183,6 +202,43 @@ export class HerdrService implements HerdrAgentSource {
       return { available: true, preview: extractPreviewText(result) };
     } catch (error) {
       return { available: false, reason: describeConnectionFailure(error) };
+    }
+  }
+
+  // Reads the pane and returns the parsed permission dialog if one is up.
+  // The phone uses this to show the real choices on the Needs-you card.
+  async readDialog(paneId: string): Promise<HerdrDialogResult> {
+    const read = await this.readAgent(paneId, DIALOG_READ_LINES);
+    if (!read.available) return { available: false, reason: read.reason };
+    const dialog = parsePermissionDialog(read.preview);
+    return dialog ? { present: true, dialog } : { present: false };
+  }
+
+  // Answers a waiting permission dialog from the phone (issue #23). This is
+  // the one place Mocha fires a key that could take an action, so it re-reads
+  // the pane immediately before sending and refuses unless a dialog is still
+  // rendered: a card that went stale between the tap and the send must never
+  // answer whatever prompt is there now. approve = Enter (confirms the
+  // highlighted option); deny = Esc (cancel). The caller is responsible for
+  // the outer trust gate (hook overlay + herdr agree the agent is blocked).
+  async decideAgent(paneId: string, decision: DialogDecision): Promise<HerdrDecisionResult> {
+    const dialog = await this.readDialog(paneId);
+    if ("available" in dialog) {
+      return { decided: false, reason: dialog.reason };
+    }
+    if (!dialog.present) {
+      return {
+        decided: false,
+        stale: true,
+        reason: "The permission dialog is no longer on screen.",
+      };
+    }
+    const key = decision === "approve" ? "Enter" : "Escape";
+    try {
+      await this.request("agent.send_keys", { target: paneId, keys: [key] });
+      return { decided: true, sent: key };
+    } catch (error) {
+      return { decided: false, reason: describeConnectionFailure(error) };
     }
   }
 

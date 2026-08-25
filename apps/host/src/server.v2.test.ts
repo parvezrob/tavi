@@ -188,6 +188,14 @@ test("herdr agents are attachable terminal targets with honest failure modes", a
       herdrUp
         ? { available: true as const, preview: `preview of ${paneId} (${lines} lines)` }
         : { available: false as const, reason: "The Herdr server is not running." },
+    readDialog: async () =>
+      herdrUp
+        ? { present: false as const }
+        : { available: false as const, reason: "The Herdr server is not running." },
+    decideAgent: async () =>
+      herdrUp
+        ? { decided: true as const, sent: "Enter" }
+        : { decided: false as const, reason: "The Herdr server is not running." },
     promptAgent: async (paneId: string, text: string) => {
       prompts.push({ paneId, text });
       return herdrUp
