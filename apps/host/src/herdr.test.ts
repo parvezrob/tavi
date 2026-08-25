@@ -175,7 +175,7 @@ test("prompt falls back to typing when herdr insists the launch is pending", asy
 
   assert.equal(result.submitted, true);
   assert.equal(sentKeys.length, 1);
-  assert.deepEqual(sentKeys[0], [..."hi there", "Enter"]);
+  assert.deepEqual(sentKeys[0], ["h", "i", "Space", "t", "h", "e", "r", "e", "Enter"]);
 });
 
 test("typing fallback refuses non-idle panes", async (context) => {

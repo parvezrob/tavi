@@ -22,6 +22,13 @@ Practical knowledge for building, deploying, and verifying Mocha end-to-end. Pol
 - Physical device install: `xcrun devicectl device install app --device <udid> <DerivedData>/Build/Products/Debug-iphoneos/Mocha.app` — the phone must be unlocked and plugged in; "unavailable" resolves by unlocking and retrying.
 - Device connection settings on the phone live behind the Host button (AppStorage `mocha.dev.host` / `mocha.dev.token`) until Phase D replaces them with QR pairing + Keychain.
 
+## Claude Code hooks (needs-you fidelity, issue #22)
+
+- Herdr's `agent_status` is screen detection and can lag or flap around permission dialogs. The host overlays durable facts from Claude Code's own hooks: `PermissionRequest`/`Notification` (permission message) force `blocked` with `authority: "claude-hook"` on the matching agent; `PostToolUse`, `Stop`, or `UserPromptSubmit` clear it (`SubagentStop` deliberately does not). Overlay entries expire after 60 min as a phantom-block backstop.
+- Install into `~/.claude/settings.json` with `npm run hooks:install` (merges alongside existing hooks, writes a `.mocha-backup`, safe to re-run). Hooks apply to **new** Claude sessions only; the command reads the token from `~/.mocha/config.json` at fire time and POSTs the hook stdin to `POST /api/hooks/claude`.
+- Join key: the hook's `session_id` equals herdr's `agent_session.value` (`sessionRef` on the wire). Agents without a session ref are never overlaid.
+- Verified live 2026-08-26: permission ask → `blocked · claude-hook` on `/api/agents` and the events feed within seconds, persists while unanswered, clears on approval via `PostToolUse`.
+
 ## tmux lane
 
 - Everything runs on the dedicated socket `tmux -L mocha`. Managed sessions get `escape-time 10`, `focus-events on`, `status off`, `mouse on`.

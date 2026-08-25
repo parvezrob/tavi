@@ -229,7 +229,9 @@ export class HerdrService implements HerdrAgentSource {
     if (!lookup.available || !lookup.agent || lookup.agent.status !== "idle") {
       return { submitted: false, reason: describeConnectionFailure(cause) };
     }
-    const keys = [...text.replace(/\s+/g, " ").trim()];
+    // herdr names whitespace keys: a literal " " is rejected as
+    // "unsupported key" (observed live), so spaces travel as "Space".
+    const keys = [...text.replace(/\s+/g, " ").trim()].map((ch) => (ch === " " ? "Space" : ch));
     if (keys.length === 0) {
       return { submitted: false, reason: "The prompt is empty." };
     }
@@ -367,7 +369,9 @@ export class HerdrService implements HerdrAgentSource {
 
 function parseAgent(agent: Record<string, unknown>): HerdrAgentInfo {
   const status = typeof agent.agent_status === "string" ? agent.agent_status : "unknown";
+  const sessionRef = asString(asRecord(agent.agent_session).value);
   return {
+    ...(sessionRef ? { sessionRef } : {}),
     id: asString(agent.pane_id),
     agent: asString(agent.agent),
     status: AGENT_STATUSES.includes(status as AgentStatus) ? (status as AgentStatus) : "unknown",

@@ -6,6 +6,7 @@ import { bearerToken, isAuthorized } from "./auth.js";
 import type { HostConfig } from "./config.js";
 import { VERSION } from "./config.js";
 import { AttachmentStore, type TerminalAttachment, type AttachmentClient } from "./attachment.js";
+import { parseClaudeHookEvent, type AttentionOverlay } from "./attention.js";
 import type { AgentEventSource } from "./herdr-events.js";
 import {
   EVENTS_PROTOCOL,
@@ -38,6 +39,7 @@ export interface MochaServerOptions {
   tmux: SessionBackend;
   herdr?: HerdrAgentSource;
   agentEvents?: AgentEventSource;
+  attention?: AttentionOverlay;
   spawnTerminal?: typeof pty.spawn;
   attachmentRetentionMs?: number;
   attachmentBufferBytes?: number;
@@ -54,7 +56,7 @@ interface TerminalTarget {
 }
 
 export async function createMochaServer(options: MochaServerOptions) {
-  const { config, tmux, herdr, agentEvents, spawnTerminal = pty.spawn } = options;
+  const { config, tmux, herdr, agentEvents, attention, spawnTerminal = pty.spawn } = options;
   const eventsWss = new WebSocketServer({
     noServer: true,
     handleProtocols(protocols) {
@@ -82,7 +84,7 @@ export async function createMochaServer(options: MochaServerOptions) {
     }
 
     try {
-      await routeRequest(request, response, config, tmux, herdr);
+      await routeRequest(request, response, config, tmux, herdr, attention);
     } catch (error) {
       const status = error instanceof InputError ? 400 : 500;
       const message = error instanceof Error ? error.message : "Unexpected server error.";
@@ -240,6 +242,7 @@ async function routeRequest(
   config: HostConfig,
   tmux: SessionBackend,
   herdr?: HerdrAgentSource,
+  attention?: AttentionOverlay,
 ): Promise<void> {
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
@@ -396,6 +399,17 @@ async function routeRequest(
     return;
   }
 
+  if (url.pathname === "/api/hooks/claude" && request.method === "POST") {
+    const event = parseClaudeHookEvent(await readJsonBody(request));
+    if (!event) {
+      sendJson(response, 400, { error: "A hook event needs hook_event_name and session_id." });
+      return;
+    }
+    attention?.report(event);
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
   if (url.pathname === "/api/agents" && request.method === "GET") {
     if (!herdr) {
       sendJson(response, 200, {
@@ -406,7 +420,19 @@ async function routeRequest(
       });
       return;
     }
-    sendJson(response, 200, await herdr.listAgents());
+    const result = await herdr.listAgents();
+    if (result.available && attention) {
+      sendJson(response, 200, {
+        ...result,
+        agents: result.agents.map((agent) =>
+          attention.isBlocked(agent.sessionRef)
+            ? { ...agent, status: "blocked", authority: "claude-hook" }
+            : agent,
+        ),
+      });
+      return;
+    }
+    sendJson(response, 200, result);
     return;
   }
 

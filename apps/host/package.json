@@ -10,6 +10,7 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx watch src/index.ts",
+    "hooks:install": "node dist/index.js install-claude-hooks",
     "service:install": "node dist/index.js install-service",
     "service:uninstall": "node dist/index.js uninstall-service",
     "start": "node dist/index.js",

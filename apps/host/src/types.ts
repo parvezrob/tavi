@@ -63,7 +63,12 @@ export interface HerdrAgentInfo {
   tabId: string;
   focused: boolean;
   revision: number;
-  authority: "herdr";
+  // Who asserted `status`: herdr's screen detection, or the agent's own
+  // lifecycle hooks (issue #22) — the more direct authority wins.
+  authority: "herdr" | "claude-hook";
+  // The agent's own session identifier when herdr knows it (for claude,
+  // the Claude Code session UUID) — the join key for hook events.
+  sessionRef?: string | undefined;
 }
 
 export interface HerdrAgentsResult {

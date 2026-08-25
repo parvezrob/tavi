@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import test from "node:test";
 import type { IPty } from "node-pty";
 import WebSocket from "ws";
+import { AttentionOverlay } from "./attention.js";
 import type { HostConfig } from "./config.js";
 import { TERMINAL_PROTOCOL } from "./protocol.js";
 import { createMochaServer } from "./server.js";
@@ -116,6 +117,85 @@ test("agents endpoint serves herdr state and degrades honestly without it", asyn
     assert.deepEqual(body.agents, []);
   } finally {
     await close(bareServer);
+  }
+});
+
+test("claude hook events overlay blocked status with hook authority", async () => {
+  const attention = new AttentionOverlay();
+  const herdr = {
+    listAgents: async () => ({
+      provider: "herdr" as const,
+      available: true,
+      protocol: 17,
+      agents: [
+        {
+          id: "wB:p1",
+          agent: "claude",
+          status: "idle" as const,
+          cwd: "/work",
+          title: "",
+          workspaceId: "wB",
+          tabId: "wB:t1",
+          focused: false,
+          revision: 1,
+          authority: "herdr" as const,
+          sessionRef: "sess-1",
+        },
+      ],
+    }),
+    listTree: async () => ({ available: true as const, workspaces: [] }),
+    closeTab: async () => ({ closed: true as const }),
+    findAgent: async () => ({ available: true as const }),
+    attachCommand: (paneId: string) => ({ bin: "herdr", args: ["agent", "attach", paneId] }),
+    readAgent: async () => ({ available: true as const, preview: "" }),
+    promptAgent: async () => ({ submitted: true as const }),
+    createTab: async () => ({ created: true as const, paneId: "wB:p9", tabId: "wB:t9" }),
+  };
+  const server = await createMochaServer({ config, tmux: {} as SessionBackend, herdr, attention });
+  await listen(server);
+
+  try {
+    const address = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${address.port}`;
+    const headers = { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" };
+
+    const hooked = await fetch(`${base}/api/hooks/claude`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        hook_event_name: "Notification",
+        session_id: "sess-1",
+        cwd: "/work",
+        message: "Claude needs your permission to use Bash",
+      }),
+    });
+    assert.equal(hooked.status, 200);
+
+    const blocked = (await (await fetch(`${base}/api/agents`, { headers })).json()) as {
+      agents: Array<{ status: string; authority: string }>;
+    };
+    assert.equal(blocked.agents[0]?.status, "blocked");
+    assert.equal(blocked.agents[0]?.authority, "claude-hook");
+
+    await fetch(`${base}/api/hooks/claude`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ hook_event_name: "Stop", session_id: "sess-1" }),
+    });
+    const resolved = (await (await fetch(`${base}/api/agents`, { headers })).json()) as {
+      agents: Array<{ status: string; authority: string }>;
+    };
+    assert.equal(resolved.agents[0]?.status, "idle");
+    assert.equal(resolved.agents[0]?.authority, "herdr");
+
+    const rejected = await fetch(`${base}/api/hooks/claude`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ nonsense: true }),
+    });
+    assert.equal(rejected.status, 400);
+  } finally {
+    await close(server);
   }
 });
 

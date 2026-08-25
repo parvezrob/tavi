@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { AttentionOverlay, AttentiveAgentEvents } from "./attention.js";
+import { installClaudeHooks } from "./claude-hooks.js";
 import { loadConfig, VERSION } from "./config.js";
 import { HerdrService } from "./herdr.js";
 import { HerdrEventFeed } from "./herdr-events.js";
@@ -25,6 +27,16 @@ if (process.argv[2] === "uninstall-service") {
   process.exit(0);
 }
 
+if (process.argv[2] === "install-claude-hooks") {
+  const { settingsPath, changed } = installClaudeHooks(config);
+  console.log(
+    changed
+      ? `Claude Code hooks installed in ${settingsPath} (backup written alongside). New Claude sessions report permission waits to Mocha.`
+      : `Claude Code hooks already installed in ${settingsPath}.`,
+  );
+  process.exit(0);
+}
+
 const tmux = new TmuxService({ bin: config.tmuxBin, shell: config.shell, roots: config.roots });
 
 try {
@@ -35,8 +47,12 @@ try {
 }
 
 const herdr = new HerdrService({ socketPath: config.herdrSocket });
-const agentEvents = new HerdrEventFeed(herdr, { socketPath: config.herdrSocket });
-const server = await createMochaServer({ config, tmux, herdr, agentEvents });
+const attention = new AttentionOverlay();
+const agentEvents = new AttentiveAgentEvents(
+  new HerdrEventFeed(herdr, { socketPath: config.herdrSocket }),
+  attention,
+);
+const server = await createMochaServer({ config, tmux, herdr, agentEvents, attention });
 server.listen(config.port, config.bindHost, () => {
   console.log(`Mocha ${VERSION} is running on http://${config.bindHost}:${config.port}`);
   console.log(`Machine: ${config.machineName}`);
