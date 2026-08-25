@@ -11,9 +11,12 @@
 1. ~~Sessions home~~ **DONE** (#18, `125fe22`): Needs-you/Active/Recent cards, MochaTheme visual system, sanitized previews, freshness, dark-committed app. Sim-verified live; **physical-phone install still pending** (phone was unreachable).
 2. ~~Focused terminal + Jump to~~ **DONE** (#19, `0826dcf`): `GET /api/herdr/tree`, identity header, Jump sheet with Current badge. Live-gated UI test passes.
 3. ~~Composer + quick keys~~ **DONE** (#20, `d6d99b3`): deliberate-send composer (prompt endpoint for agents, bracketed paste + explicit return for terminals), Shift-Tab/Enter/Ctrl-latch. `DELETE /api/herdr/tabs/{tabId}` added; the live UI test now creates and cleans up its own disposable agent.
-4. Terminal ergonomics (NEXT): font size, selection/copy-paste, scroll feel tuning (issue #10), hardware keyboard.
+4. Terminal ergonomics: font size, selection/copy-paste, scroll feel tuning (issue #10), hardware keyboard.
+5. **Adopted 2026-08-26 (owner decision, recorded in ROADMAP):** approve/deny from the Needs-you card (#23), project picker for new agents (#24), diff glance (#25), project-grouped home + tmux card removal (#26). Post-MVP backlog: inbox (#27), snooze (#28), handoff cue (#29). Multi-host = Phase D item 3; push = Phase E item 1.
 
-Then: install the current build on the physical iPhone and run the founder-dogfood exit gate.
+Also shipped mid-phase: key-cap control bar, compose/live input mode toggle, status hysteresis smoother, stale-state retention, Claude Code hook overlay for needs-you fidelity (#22, `npm run hooks:install`), prompt delivery fixes (launch-pending retry, typing fallback, Enter nudge).
+
+Then: founder-dogfood exit gate on the physical iPhone.
 
 **Exit gate:** founder dogfood entirely from the phone — median under 5 s from app open to the correct session; 20 real interventions without the laptop.
 

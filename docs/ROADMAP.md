@@ -42,6 +42,15 @@ Target visuals: [`assets/agent-deck-v1-home-terminal.png`](./assets/agent-deck-v
 3. Multiline composer with deliberate send (the PRD's primary input mode) plus completed quick-key row (Shift-Tab, Ctrl modifier, Enter).
 4. Terminal ergonomics: font-size setting, selection + copy/paste, scroll feel tuning, hardware-keyboard pass.
 
+Adopted 2026-08-26 after a competitor survey (t3code, Happy, Omnara, CodeAgent Mobile — owner decision), extending Phase C:
+
+5. Approve/deny a waiting permission straight from the Needs-you card (#23) — the core intervention loop without entering the terminal.
+6. Project picker for phone-created agents (#24) — recent project directories from the host; no more agents landing in `~`.
+7. Read-only diff glance per agent (#25) — "what did it change", size-bounded, no mutating git operations.
+8. Project-grouped home (cwd-derived, no manual folder manager) and the tmux card leaves the UI (#26). The tmux lane stays dormant behind the dev bootstrap as the Herdr-down fallback; delete in Phase D if never missed.
+
+Post-MVP backlog adopted the same day: Inbox (#27), snooze/settle triage (#28), session-handoff cue (#29). Multi-host is Phase D item 3; push notifications remain Phase E item 1. Deliberately rejected: cloud relay/accounts, on-phone code editing or file trees, model catalogs/API keys, phone-side git mutations, task boards, web client, telemetry.
+
 **Exit gate:** Founder dogfood entirely from the phone: median under 5 seconds from app open to the correct session; 20 real interventions without opening the laptop (PRD MVP criteria).
 
 ## Phase D — Pairing and trust (replace the dev connection flow)
