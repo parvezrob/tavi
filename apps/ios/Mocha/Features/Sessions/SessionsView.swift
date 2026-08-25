@@ -20,6 +20,7 @@ struct SessionsView: View {
     @State private var newTabInFlight = false
     @State private var showingHostForm = false
     @State private var showingNewTabPicker = false
+    @State private var decisionAgent: AgentSummary?
     @State private var terminalController = TerminalSessionController()
     @State private var terminalIsPresented = false
 
@@ -72,6 +73,14 @@ struct SessionsView: View {
             .sheet(isPresented: $showingHostForm) {
                 hostForm
                     .presentationDetents([.medium])
+            }
+            .sheet(item: $decisionAgent) { agent in
+                PermissionDecisionSheet(
+                    agent: agent,
+                    directory: agentDirectory,
+                    onOpenTerminal: { openAgent(agent) }
+                )
+                .presentationDetents([.medium, .large])
             }
             .task {
                 HostCredentialStore.migrateFromDefaults()
@@ -132,17 +141,23 @@ struct SessionsView: View {
 
             if !blocked.isEmpty {
                 NeedsYouBanner(count: blocked.count) {
-                    if let first = blocked.first { openAgent(first) }
+                    if let first = blocked.first { decisionAgent = first }
                 }
                 SectionEyebrow(title: "Needs you")
                 // Identity includes the status so a section move always
-                // rebuilds the card instead of reusing a cached one.
-                ForEach(blocked, id: \.cardIdentity) { agentCard($0) }
+                // rebuilds the card instead of reusing a cached one. A
+                // needs-you card opens the decision sheet (approve/deny
+                // without the terminal); other sections open the terminal.
+                ForEach(blocked, id: \.cardIdentity) { agent in
+                    agentCard(agent, action: { decisionAgent = agent })
+                }
             }
 
             if !active.isEmpty {
                 SectionEyebrow(title: "Active")
-                ForEach(active, id: \.cardIdentity) { agentCard($0) }
+                ForEach(active, id: \.cardIdentity) { agent in
+                    agentCard(agent, action: { openAgent(agent) })
+                }
             }
 
             if !recent.isEmpty {
@@ -166,14 +181,13 @@ struct SessionsView: View {
         agentDirectory.agents.filter { $0.homeSection == section }
     }
 
-    private func agentCard(_ agent: AgentSummary) -> some View {
+    private func agentCard(_ agent: AgentSummary, action: @escaping () -> Void) -> some View {
         AgentCard(
             agent: agent,
             preview: agentDirectory.previews[agent.id],
-            observedAt: agentDirectory.statusObservedAt[agent.id]
-        ) {
-            openAgent(agent)
-        }
+            observedAt: agentDirectory.statusObservedAt[agent.id],
+            action: action
+        )
     }
 
     private func recentCard(_ agents: [AgentSummary]) -> some View {

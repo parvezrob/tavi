@@ -39,6 +39,44 @@ enum HerdrTreeFetch: Equatable {
     case failure(String)
 }
 
+// A parsed Claude permission/confirm dialog surfaced on a waiting agent's
+// pane (#23). Mirrors the host's GET /api/agents/{pane}/dialog shape.
+struct PermissionDialogOption: Identifiable, Equatable, Decodable {
+    let index: Int
+    let label: String
+    let selected: Bool
+
+    var id: Int { index }
+}
+
+struct PermissionDialog: Equatable, Decodable {
+    let prompt: String
+    let options: [PermissionDialogOption]
+}
+
+private struct DialogResponse: Decodable {
+    let present: Bool
+    let dialog: PermissionDialog?
+}
+
+enum DialogFetch: Equatable {
+    case dialog(PermissionDialog)
+    case none
+    case failure(String)
+}
+
+enum DialogDecision: String {
+    case approve
+    case deny
+}
+
+enum DecisionOutcome: Equatable {
+    case ok
+    // The dialog resolved before the decision landed — nothing was sent.
+    case stale
+    case failure(String)
+}
+
 private struct AgentsSnapshotMessage: Decodable {
     let type: String
     let available: Bool
@@ -182,6 +220,68 @@ final class AgentDirectory {
             return nil
         } catch {
             return error.localizedDescription
+        }
+    }
+
+    // Reads the live permission dialog on a waiting agent's pane (#23) so the
+    // Needs-you sheet can show the real choices. `.none` means no dialog is
+    // currently rendered (it may have just resolved).
+    func fetchDialog(paneId: String) async -> DialogFetch {
+        guard let host, !credential.isEmpty else { return .failure("Connect a host first.") }
+        guard var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else {
+            return .failure("The host address is invalid.")
+        }
+        components.path = "/api/agents/\(paneId)/dialog"
+        guard let url = components.url else { return .failure("The host address is invalid.") }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, response) = try await Self.session.data(for: request)
+            guard let status = (response as? HTTPURLResponse)?.statusCode else {
+                return .failure("The host did not answer.")
+            }
+            guard status == 200 else {
+                let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
+                return .failure(message ?? "The host could not read the dialog (HTTP \(status)).")
+            }
+            let payload = try JSONDecoder().decode(DialogResponse.self, from: data)
+            guard payload.present, let dialog = payload.dialog else { return .none }
+            return .dialog(dialog)
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+    }
+
+    // Answers a waiting permission from the phone (#23). The host re-reads the
+    // pane and refuses (409) if the dialog is already gone; that surfaces as
+    // `.stale` so the sheet can say the wait resolved instead of implying the
+    // tap did something. Returns `.ok` on a delivered decision.
+    func decide(paneId: String, decision: DialogDecision) async -> DecisionOutcome {
+        guard let host, !credential.isEmpty else { return .failure("Connect a host first.") }
+        guard var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else {
+            return .failure("The host address is invalid.")
+        }
+        components.path = "/api/agents/\(paneId)/decision"
+        guard let url = components.url else { return .failure("The host address is invalid.") }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONEncoder().encode(["decision": decision.rawValue])
+
+        do {
+            let (data, response) = try await Self.session.data(for: request)
+            guard let status = (response as? HTTPURLResponse)?.statusCode else {
+                return .failure("The host did not answer.")
+            }
+            if status == 200 { return .ok }
+            if status == 409 { return .stale }
+            let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
+            return .failure(message ?? "The host could not deliver the decision (HTTP \(status)).")
+        } catch {
+            return .failure(error.localizedDescription)
         }
     }
 

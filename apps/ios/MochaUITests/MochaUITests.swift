@@ -365,6 +365,63 @@ final class MochaUITests: XCTestCase {
         }
     }
 
+    // Approve a real waiting permission straight from the Needs-you card (#23)
+    // without entering the terminal. Uses a fresh scratch cwd so Claude raises
+    // its reliable trust-folder dialog; that leaves the agent blocked with a
+    // parseable dialog on the pane. Taps the card, taps Approve, and asserts
+    // the host stops reporting a dialog — the key actually landed.
+    @MainActor
+    func testApproveWaitingPermissionFromNeedsYouCard() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live approve test.")
+        }
+
+        // A folder Claude has not trusted yet. The simulator shares /private/tmp
+        // with the host, so creating it here makes it exist for the agent's cwd.
+        let scratch = "/private/tmp/mocha-ui-approve-\(UUID().uuidString.prefix(8))"
+        try? FileManager.default.createDirectory(atPath: scratch, withIntermediateDirectories: true)
+
+        let (paneId, tabId) = try await createAgentTab(host: host, token: token, cwd: scratch)
+        addTeardownBlock {
+            try? await Self.closeAgentTab(host: host, token: token, tabId: tabId)
+            try? FileManager.default.removeItem(atPath: scratch)
+        }
+
+        try await waitForAgentStatus(host: host, token: token, paneId: paneId, status: "blocked", timeout: 60)
+        // Confirm a dialog actually parses before driving the UI, else skip.
+        var sawDialog = false
+        for _ in 0 ..< 10 where !sawDialog {
+            sawDialog = try await readDialogPresent(host: host, token: token, paneId: paneId)
+            if !sawDialog { try await Task.sleep(for: .seconds(1)) }
+        }
+        guard sawDialog else {
+            throw XCTSkip("No permission dialog parsed on the pane; cannot exercise approve.")
+        }
+
+        let app = XCUIApplication()
+        app.launchEnvironment["MOCHA_DEV_HOST"] = host
+        app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
+        app.launch()
+
+        let card = app.buttons["sessions.agent.\(paneId)"]
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "Blocked agent never reached Needs you.")
+        card.tap()
+
+        let approve = app.buttons["decision.approve"]
+        XCTAssertTrue(approve.waitForExistence(timeout: 10), "Decision sheet never showed Approve.")
+        approve.tap()
+
+        // The key landed if the host stops reporting a live dialog on the pane.
+        var resolved = false
+        for _ in 0 ..< 15 where !resolved {
+            try await Task.sleep(for: .seconds(1))
+            resolved = try await !readDialogPresent(host: host, token: token, paneId: paneId)
+        }
+        XCTAssertTrue(resolved, "The dialog was still present after tapping Approve.")
+    }
+
     private func waitForAgentStatus(
         host: String,
         token: String,
@@ -404,18 +461,32 @@ final class MochaUITests: XCTestCase {
         _ = try await URLSession.shared.data(for: request)
     }
 
-    private func createAgentTab(host: String, token: String) async throws -> (paneId: String, tabId: String) {
+    private func createAgentTab(
+        host: String,
+        token: String,
+        cwd: String? = nil
+    ) async throws -> (paneId: String, tabId: String) {
         var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/herdr/tabs")))
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(["agent": "claude"])
+        var body = ["agent": "claude"]
+        if let cwd { body["cwd"] = cwd }
+        request.httpBody = try JSONEncoder().encode(body)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 201 else {
             throw XCTSkip("The host could not create a disposable agent tab.")
         }
         let payload = try JSONDecoder().decode([String: String].self, from: data)
         return (try XCTUnwrap(payload["paneId"]), try XCTUnwrap(payload["tabId"]))
+    }
+
+    private func readDialogPresent(host: String, token: String, paneId: String) async throws -> Bool {
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/agents/\(paneId)/dialog")))
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, _) = try await URLSession.shared.data(for: request)
+        struct Body: Decodable { let present: Bool }
+        return (try? JSONDecoder().decode(Body.self, from: data))?.present ?? false
     }
 
     private static func closeAgentTab(host: String, token: String, tabId: String) async throws {
