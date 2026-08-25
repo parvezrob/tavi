@@ -188,13 +188,19 @@ export class HerdrService implements HerdrAgentSource {
   }
 
   // Bounded plain-text snapshot for session cards. The text comes straight
-  // from Herdr's own read API — never scraped or reinterpreted here.
-  async readAgent(paneId: string, lines: number): Promise<HerdrPreviewResult> {
+  // from Herdr's own read API — never scraped or reinterpreted here. `source`
+  // picks the buffer: "recent" is a rolling window of recent output (good for
+  // an activity preview); "visible" is the current on-screen viewport.
+  async readAgent(
+    paneId: string,
+    lines: number,
+    source: "recent" | "visible" = "recent",
+  ): Promise<HerdrPreviewResult> {
     try {
       const result = asRecord(
         await this.request("agent.read", {
           target: paneId,
-          source: "recent",
+          source,
           lines,
           format: "text",
         }),
@@ -206,9 +212,12 @@ export class HerdrService implements HerdrAgentSource {
   }
 
   // Reads the pane and returns the parsed permission dialog if one is up.
-  // The phone uses this to show the real choices on the Needs-you card.
+  // Uses the "visible" viewport, not "recent" output: a dialog is defined by
+  // being on screen right now, and the rolling "recent" window can scroll a
+  // statically-displayed dialog out when the status line repaints — which
+  // showed up as the sheet falsely reporting "already resolved" (#23).
   async readDialog(paneId: string): Promise<HerdrDialogResult> {
-    const read = await this.readAgent(paneId, DIALOG_READ_LINES);
+    const read = await this.readAgent(paneId, DIALOG_READ_LINES, "visible");
     if (!read.available) return { available: false, reason: read.reason };
     const dialog = parsePermissionDialog(read.preview);
     return dialog ? { present: true, dialog } : { present: false };
