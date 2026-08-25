@@ -6,14 +6,11 @@
 
 ## Next work
 
-**Issue #23 — approve/deny a waiting permission straight from the Needs-you card.** The core intervention loop without entering the terminal. Design notes:
+**Issue #24 — project picker when creating a new agent.** No more agents born in `~`. Show recent project roots from the host; require a folder tap; the host rejects create outside configured roots unless "custom" with an extra confirm. Ties to #12/#19 in the App Store epic.
 
-- Trust gate: act only when the hook overlay (`authority: "claude-hook"`) **and** herdr agree a dialog is up; a stale card must never fire keys at a pane whose dialog is gone. Read the pane (`agent.read`) immediately before sending to confirm the dialog is still rendered.
-- Delivery: `agent.send_keys` to the exact pane (approve = Enter on the highlighted option; deny = Esc or the numbered option — read the dialog text to present the real choices).
-- Surface: options on the Needs-you card (or a Q0-style detail sheet per `docs/V1_SCREEN_AND_NAVIGATION_MAP.md`), always with "Open terminal" as the escape hatch.
-- Acceptance: from cold app open, median under 5 s to an approved permission.
+Then, in order: #26 (project-grouped home + tmux card removal), #25 (diff glance), ROADMAP Phase C item 4 (terminal ergonomics, issue #10), then the founder-dogfood exit gate.
 
-Then, in order: #24 (project picker for new agents), #26 (project-grouped home + tmux card removal), #25 (diff glance), ROADMAP Phase C item 4 (terminal ergonomics, issue #10), then the founder-dogfood exit gate.
+**#23 shipped 2026-08-25** (`2385f05` host, `0405d05` iOS): approve/deny a waiting permission from the Needs-you card. Two-layer trust gate — outer: at least one authority (hook overlay OR herdr blocked) flags a wait; inner (`decideAgent`): the pane is re-read and a real dialog must still parse before any key is sent, so a stale card can never answer. approve=Enter, deny=Esc. `dialog.ts` parser (numbered options + "Enter to confirm · Esc to cancel" footer). Phone: `PermissionDecisionSheet` shows the real choices + Open terminal. Live-verified end-to-end via `testApproveWaitingPermissionFromNeedsYouCard`. Note: the double-authority gate from the original design note was relaxed to "either authority" because some dialogs (trust-folder prompt) are herdr-blocked but emit no PermissionRequest hook; the inner pane re-read is the real safety.
 
 ## Live state
 
