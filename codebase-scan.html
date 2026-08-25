@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mocha codebase scan — August 2026</title>
+  <style>
+    :root {
+      --bg: #f6f4ef;
+      --paper: #fffdf8;
+      --ink: #1c1915;
+      --muted: #5c564c;
+      --line: #e4ddd2;
+      --blocker: #8b1e1e;
+      --blocker-bg: #f8e8e6;
+      --high: #9a4a12;
+      --high-bg: #f8ece0;
+      --medium: #6b5420;
+      --medium-bg: #f4eedc;
+      --low: #3d5a45;
+      --low-bg: #e8f0ea;
+      --ok: #245c3a;
+      --ok-bg: #e6f2ea;
+      --accent: #1f4b73;
+      --accent-bg: #e8f0f7;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font: 17px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+    a { color: var(--accent); }
+    .wrap {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 32px 20px 80px;
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr);
+      gap: 36px;
+    }
+    nav {
+      position: sticky;
+      top: 24px;
+      align-self: start;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    nav h2 {
+      margin: 0 0 12px;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    nav a {
+      display: block;
+      color: var(--ink);
+      text-decoration: none;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    nav a:hover { color: var(--accent); }
+    main { min-width: 0; }
+    header.hero {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 28px 28px 24px;
+      margin-bottom: 28px;
+    }
+    header.hero p.meta {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 32px;
+      line-height: 1.2;
+      letter-spacing: -0.03em;
+    }
+    h2 {
+      margin: 40px 0 12px;
+      font-size: 24px;
+      letter-spacing: -0.02em;
+    }
+    h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+    p { margin: 0 0 12px; }
+    .lede { font-size: 19px; color: #2a2620; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin: 20px 0 8px;
+    }
+    .stat {
+      background: var(--bg);
+      border-radius: 12px;
+      padding: 12px 14px;
+    }
+    .stat b { display: block; font-size: 26px; letter-spacing: -0.03em; }
+    .stat span { color: var(--muted); font-size: 13px; }
+    .callout {
+      border-radius: 12px;
+      padding: 16px 18px;
+      margin: 16px 0;
+    }
+    .callout.danger { background: var(--blocker-bg); }
+    .callout.warn { background: var(--high-bg); }
+    .callout.info { background: var(--accent-bg); }
+    .callout.ok { background: var(--ok-bg); }
+    .callout strong { display: block; margin-bottom: 4px; }
+    .issue {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px 18px 16px;
+      margin: 14px 0;
+    }
+    .issue header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+    .issue header h3 { flex: 1; min-width: 200px; }
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .badge.blocker { background: var(--blocker-bg); color: var(--blocker); }
+    .badge.high { background: var(--high-bg); color: var(--high); }
+    .badge.medium { background: var(--medium-bg); color: var(--medium); }
+    .badge.low { background: var(--low-bg); color: var(--low); }
+    .badge.ok { background: var(--ok-bg); color: var(--ok); }
+    .badge.apple { background: var(--accent-bg); color: var(--accent); }
+    .life {
+      background: var(--bg);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin: 10px 0 8px;
+    }
+    .life b { display: block; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+    .where { font-size: 13px; color: var(--muted); }
+    ul.plain { padding-left: 1.15em; }
+    ul.plain li { margin: 0 0 6px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      font-size: 15px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    th { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+    tr:last-child td { border-bottom: 0; }
+    .toc-mobile { display: none; }
+    footer {
+      margin-top: 40px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    @media (max-width: 860px) {
+      .wrap { grid-template-columns: 1fr; padding: 16px 14px 64px; }
+      nav { display: none; }
+      .toc-mobile { display: block; }
+      .stats { grid-template-columns: 1fr 1fr; }
+      h1 { font-size: 26px; }
+    }
+    @media print {
+      nav { display: none; }
+      .wrap { display: block; max-width: none; }
+      .issue, header.hero { break-inside: avoid; }
+      body { background: #fff; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav>
+      <h2>On this page</h2>
+      <a href="#verdict">The short answer</a>
+      <a href="#how-to-read">How to read this</a>
+      <a href="#apple">Would Apple approve it?</a>
+      <a href="#blockers">Blockers</a>
+      <a href="#high">High</a>
+      <a href="#medium">Medium</a>
+      <a href="#low">Low</a>
+      <a href="#gaps">Unfinished product, not bugs</a>
+      <a href="#solid">What is already solid</a>
+      <a href="#order">What to fix first</a>
+    </nav>
+
+    <main>
+      <header class="hero">
+        <p class="meta">Codebase scan · Mocha iPhone app + Mac host · 25 August 2026</p>
+        <h1>What is actually wrong, and what that would feel like in real life</h1>
+        <p class="lede">I read the iPhone app, the Mac host, the pairing/security path, Apple packaging, and the product plan. This is not a nitpick list. It is what would bite a real person using Mocha, and what Apple would likely bounce if you submitted a “finished” app tomorrow.</p>
+        <div class="stats">
+          <div class="stat"><b>8</b><span>Blockers</span></div>
+          <div class="stat"><b>11</b><span>High</span></div>
+          <div class="stat"><b>12</b><span>Medium</span></div>
+          <div class="stat"><b>8</b><span>Low / polish</span></div>
+        </div>
+        <p class="meta" style="margin-top:12px">Counts mix current bugs with store-readiness gaps. Mocha is a strong dogfood app. It is not an App Store product yet — and the plan already says that (pairing, Keychain, demo mode, and the review package are still later phases).</p>
+      </header>
+
+      <p class="toc-mobile"><a href="#apple">Jump to Apple review</a> · <a href="#blockers">Jump to blockers</a></p>
+
+      <section id="verdict">
+        <h2>The short answer</h2>
+        <div class="callout danger">
+          <strong>If you submitted Mocha to Apple today as a finished product, they would reject it.</strong>
+          A reviewer cannot pair with your private Mac. The home screen asks for a Tailscale address and a secret token. There is no demo, no privacy policy, no app icon artwork, and the secret is saved like an ordinary preference instead of in the iPhone’s secure vault.
+        </div>
+        <p>For <em>you</em>, using it on your own phone and Mac, the product already works: you can see agents, open the live terminal, send prompts, and come back after the phone locks. The painful bugs are concentrated in three places: secrets (too easy to steal or leak), the “please approve this” loop (you still have to dive into the terminal), and a few “I tapped Send and nothing happened” moments.</p>
+        <p>Nothing here is a guess from the marketing copy. Each item below was checked in the actual app and host code.</p>
+      </section>
+
+      <section id="how-to-read">
+        <h2>How to read this</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Rating</th>
+              <th>What it means in real life</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="badge blocker">Blocker</span></td>
+              <td>Apple would likely refuse the app, or a stolen phone / leaked secret could become full control of your Mac.</td>
+            </tr>
+            <tr>
+              <td><span class="badge high">High</span></td>
+              <td>A real person loses work, leaks private text, or cannot do the job Mocha exists to do (unblock an agent from the phone).</td>
+            </tr>
+            <tr>
+              <td><span class="badge medium">Medium</span></td>
+              <td>Frustrating, incomplete, or a safety net that is missing. You can live with it in dogfood. You should not ship it.</td>
+            </tr>
+            <tr>
+              <td><span class="badge low">Low</span></td>
+              <td>Polish, edge cases, or something that only bites if you change a setting you were told not to change.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="margin-top:14px">The peach box under each issue is the important part: <strong>what a human would actually experience</strong>, not the engineering name for it.</p>
+      </section>
+
+      <section id="apple">
+        <h2>Would Apple approve a finished Mocha?</h2>
+        <p>Assume pairing, polish, and the remaining home-screen work all get done. Apple still has a specific personality. Remote-control apps are allowed (TeamViewer, Blink, Termius exist). They are also suspicious. Reviewers sit at a desk with an iPhone and <em>no access to your Mac or your Tailscale network</em>.</p>
+
+        <h3>Things that would stop approval even after the product feels “done”</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Apple’s concern</th>
+              <th>Plain English</th>
+              <th>Mocha today</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>App completeness<br><span class="where">Guideline 2.1</span></td>
+              <td>If the reviewer opens the app and cannot actually use it, they reject it as incomplete. They will not install Tailscale, will not have your Mac, and will not paste a pairing token from a terminal.</td>
+              <td><strong>Would reject.</strong> There is no demo mode. First screen: “Add your Mac’s Tailscale address and token.”</td>
+            </tr>
+            <tr>
+              <td>Minimum functionality<br><span class="where">Guideline 4.2</span></td>
+              <td>The app has to be a real product on its own. A blank “please configure a computer we cannot see” screen looks like a half-built companion.</td>
+              <td><strong>Would reject</strong> until there is a built-in fake host that can show home, Needs you, terminal, reconnect, and errors without the internet.</td>
+            </tr>
+            <tr>
+              <td>Privacy honesty<br><span class="where">Guideline 5.1 / 5.1.1</span></td>
+              <td>Apple wants a privacy policy, a nutrition-label questionnaire, and a privacy manifest in the app binary. They also care that secrets are stored properly and that the on-screen text matches reality.</td>
+              <td><strong>Would reject.</strong> No privacy policy, no privacy manifest, token saved in ordinary iPhone preferences, and one screen says the token is “never saved” while the home screen does save it.</td>
+            </tr>
+            <tr>
+              <td>Accurate metadata and polish<br><span class="where">Guideline 2.3 / 4.0</span></td>
+              <td>Empty icon, “Development host” labels, and copy that says “paste from npm run token” look like an internal tool, not a store app.</td>
+              <td><strong>Would reject or delay.</strong> App icon slots exist but contain no image. UI still talks like a prototype.</td>
+            </tr>
+            <tr>
+              <td>Other companies’ names<br><span class="where">Guideline 5.2</span></td>
+              <td>You cannot look like the official Claude or Codex app, or like Apple/Anthropic/OpenAI endorsed you, unless you have permission.</td>
+              <td><strong>Risk of reject.</strong> Home uses the buttons “Claude” and “Codex” and the full names “Claude Code” and “Codex”.</td>
+            </tr>
+            <tr>
+              <td>Remote control of a computer</td>
+              <td>Apple allows this if it is clearly “your computer, that you set up.” They hate anything that looks like a way to sneak onto someone else’s machine, or a product they cannot demo.</td>
+              <td><strong>Survivable if</strong> pairing is scan-and-confirm, the copy says “computers you own,” Funnel/public internet is forbidden, and a demo + review video exists. <strong>Not survivable today.</strong></td>
+            </tr>
+            <tr>
+              <td>Encryption paperwork</td>
+              <td>HTTPS counts as encryption. App Store Connect asks a yes/no. You can usually answer “exempt” for ordinary HTTPS, but the question must be answered.</td>
+              <td><strong>Upload friction.</strong> The project does not pre-answer it. Not a philosophical reject, but it will stall the first upload.</td>
+            </tr>
+            <tr>
+              <td>Required-reason APIs</td>
+              <td>If the app uses certain iPhone APIs (including ordinary settings storage), Apple wants a small privacy manifest declaring why.</td>
+              <td><strong>Can fail automated validation.</strong> No privacy manifest exists, and the app does use iPhone settings storage for the host token.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout warn">
+          <strong>The non-negotiable Apple item is demo mode.</strong>
+          Pairing, Keychain, and a privacy policy are also required. But the classic kill-shot for this kind of app is: reviewer opens it, cannot connect to anything, sends a 2.1 screenshot of the empty state. Your own strategy doc already says this. It is still not built.
+        </div>
+
+        <h3>What Apple would probably <em>not</em> reject you for</h3>
+        <ul class="plain">
+          <li><strong>Being a terminal / remote-control app.</strong> That category is allowed if it is clearly user-owned and demos cleanly.</li>
+          <li><strong>Requiring iOS 26.</strong> By now that is a normal current-generation floor, not a policy violation. It just shrinks who can install.</li>
+          <li><strong>iPhone-only, dark-only.</strong> Apple prefers system light/dark and iPad layouts, but they do not usually reject a serious iPhone-first utility for that.</li>
+          <li><strong>No Mocha account.</strong> That is a plus. You avoid the “delete my account” rule.</li>
+          <li><strong>No tracking, no ads, no third-party analytics.</strong> That is a plus.</li>
+          <li><strong>Not a VPN.</strong> You are not claiming a VPN, so those extra VPN rules do not apply.</li>
+          <li><strong>Code running on the Mac, not on the phone.</strong> Apple hates apps that download and run new code <em>inside the iPhone app</em>. Mocha is a remote keyboard and screen for a Mac. That is the right shape.</li>
+        </ul>
+
+        <h3>The App Store homework list (even when the product is finished)</h3>
+        <ul class="plain">
+          <li>A demo that works with airplane mode on: fake Mac, fake agents, Needs you, terminal, reconnect, errors.</li>
+          <li>Review notes plus a screen recording of a real pair + unblock, so they understand the Mac side.</li>
+          <li>Privacy policy URL (App Store Connect requires one for basically every app now) and an in-app link to it.</li>
+          <li>Support URL (a page, even a simple one, where a human can reach you).</li>
+          <li>App Privacy questionnaire: you store a host address and a secret on device; you send clipboard text to the Mac when the user taps Paste; you show snippets of terminal output on the home screen; you do not sell data and have no account.</li>
+          <li>A real 1024×1024 app icon (and dark/tinted variants).</li>
+          <li>Screenshots that match the real UI, not mockups that oversell.</li>
+          <li>Age rating: this can drive a Mac shell. Rate it like a developer tool, not a kids’ app.</li>
+          <li>Paid Apple Developer Program membership (you cannot ship TestFlight or the store on a free personal team).</li>
+          <li>When camera pairing ships: a camera permission sentence in plain language <em>before</em> you turn the camera on.</li>
+          <li>When Face ID lock ships: a Face ID permission sentence.</li>
+          <li>Soften “Claude Code” / “Codex” in the store listing and, ideally, in the UI unless legal is comfortable. “Start a coding agent” plus the binary name is safer than looking like an official vendor client.</li>
+        </ul>
+      </section>
+
+      <section id="blockers">
+        <h2>Blockers</h2>
+        <p>Fix these before calling Mocha a product other people (or Apple) can trust.</p>
+
+        <article class="issue" id="i1">
+          <header>
+            <h3>1. The phone saves the Mac’s master key in an unlocked drawer</h3>
+            <span class="badge blocker">Blocker</span>
+            <span class="badge apple">Privacy / security</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            Anyone who gets into that iPhone — a thief, a backup that is not encrypted the way you think, a forensic dump, another process on a jailbroken phone — can read the pairing secret. That secret is not “an app password.” It is “sit at my Mac as me and run anything.” Lose the phone, and until you rotate the token on the Mac by hand, the thief still has a remote keyboard to your computer.
+          </div>
+          <p>The home screen stores the Tailscale address and the access token in ordinary iPhone settings storage, the same family of storage as “remember my last tab.” The product plan says this should live in the iPhone Keychain (the secure vault), with a unique key per phone that you can revoke. That work is still listed as a later phase. The code even has a comment saying so — and then it saves the token anyway.</p>
+          <p class="where">Home screen connection storage · also the reason Apple will not like the privacy answers if you claim “secure storage.”</p>
+        </article>
+
+        <article class="issue" id="i2">
+          <header>
+            <h3>2. One screen promises the token is never saved. Another screen saves it.</h3>
+            <span class="badge blocker">Blocker</span>
+            <span class="badge apple">Honesty</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            You (or an Apple reviewer) read: “The token stays in memory for this connection and is never saved or logged.” That is true for the extra terminal connection sheet. It is false for the main “Connect Host” flow, which writes the token down. People make security decisions based on that sentence. Apple rejects apps that describe privacy one way and behave another.
+          </div>
+          <p>This is not a wording typo. There are two different connect UIs, and they tell different stories about the same secret.</p>
+        </article>
+
+        <article class="issue" id="i3">
+          <header>
+            <h3>3. There is no way for an Apple reviewer to use the app</h3>
+            <span class="badge blocker">Blocker</span>
+            <span class="badge apple">Guideline 2.1 / 4.2</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            An Apple employee in Cupertino opens Mocha. They see “No Paired Computers.” They cannot reach your Mac. They do not have Tailscale. They tap around for a minute, screenshot the empty state, and reject the binary as incomplete. That is the standard fate of remote-Mac apps that ship without a demo.
+          </div>
+          <p>The product requirements already list demo mode as a must. The strategy doc already warns that review cannot depend on a private Tailscale network. It is still unbuilt. Without it, “finished product” and “App Store product” are different sentences.</p>
+        </article>
+
+        <article class="issue" id="i4">
+          <header>
+            <h3>4. Pairing is still a developer ritual, labeled as pairing</h3>
+            <span class="badge blocker">Blocker</span>
+            <span class="badge apple">Looks unfinished</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            A friend who is not you cannot set this up. They need Tailscale Serve, a terminal, <code>npm run token</code>, and a long secret to paste. The empty state says “No Paired Computers,” but nothing was paired — a string was pasted. There is no scan, no “yes, this is my studio Mac” confirmation, no way to kick a lost phone off the Mac. If this UI shipped, it would feel like a beta you handed a coworker, not a store app.
+          </div>
+          <p>The terminal sheet is still titled “Development host.” The token field placeholder still says to paste from <code>npm run token</code>. Apple’s design bar is subjective, but “Development host” in a customer build is an easy 2.1 / 4.0 note.</p>
+        </article>
+
+        <article class="issue" id="i5">
+          <header>
+            <h3>5. Apple’s privacy packaging is missing</h3>
+            <span class="badge blocker">Blocker</span>
+            <span class="badge apple">Store validation</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            You click “Submit for Review” and the upload fails, or review comes back asking for a privacy policy. You cannot even fill Apple’s nutrition labels honestly yet, because the app has no privacy policy page, no in-app privacy screen, and no privacy manifest file in the binary. This is paperwork, but it is the kind of paperwork that stops the train.
+          </div>
+          <p>Things Mocha actually handles that Apple will ask about: the host address, the access token, live terminal text (including whatever secrets an agent printed), and clipboard text when you paste into the terminal. “We have no account and no cloud” is good — it does not skip the privacy policy.</p>
+        </article>
+
+        <article class="issue" id="i6">
+          <header>
+            <h3>6. There is no app icon</h3>
+            <span class="badge blocker">Blocker</span>
+            <span class="badge apple">Upload / metadata</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            On the phone it shows a blank or default glyph. App Store Connect often refuses the archive, or the store listing looks unfinished. First impressions are the icon. Right now the icon folder has empty slots and no pictures.
+          </div>
+        </article>
+
+        <article class="issue" id="i7">
+          <header>
+            <h3>7. A stolen phone is a stolen Mac, with no kill switch</h3>
+            <span class="badge blocker">Blocker</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            You leave the phone in a taxi. The lock screen is the only thing between a stranger and your agents, your files, and a shell as you. There is no Face ID gate on Mocha itself. There is no “this iPhone is dead to me” button on the Mac. Every phone that ever pasted the token shares one master key. Rotating it means you do it by hand, and every legitimate phone has to be updated too.
+          </div>
+          <p>This is the product’s stated security model — “treat the token as shell access” — without the product’s stated protections (per-phone keys, revoke, Keychain, optional Face ID). Dogfood on a phone that never leaves your pocket is fine. Shipping it is not.</p>
+        </article>
+
+        <article class="issue" id="i8">
+          <header>
+            <h3>8. Claude’s “Needs you” hook can flash the master key in the process list</h3>
+            <span class="badge blocker">Blocker</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            Every time Claude asks permission, the Mac runs a tiny command that puts the access token into the command line of <code>curl</code>. On a family Mac, a shared machine, or a machine with any nosy software, that token can show up in Activity Monitor / process listings for a moment. Anyone who copies it can drive your Mocha host as you. The Claude settings file that contains this recipe is also readable by other accounts on the same Mac.
+          </div>
+          <p>The host is otherwise careful: it does not print the token at startup, and the background service does not put the token in its environment. This hook path undoes that care at the exact moment you are using the product’s best feature.</p>
+        </article>
+      </section>
+
+      <section id="high">
+        <h2>High</h2>
+
+        <article class="issue" id="i9">
+          <header>
+            <h3>9. Home-screen previews can show secrets sitting in the terminal</h3>
+            <span class="badge high">High</span>
+            <span class="badge apple">Privacy</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            You glance at Mocha on a train. The card for an agent shows the last few lines of its terminal. If that agent just printed an API key, a customer email, a private URL, or a password prompt, it is now in large type on your lock-adjacent home screen (and in iPhone memory). The app strips colors and control codes so the text cannot hijack the UI — good — but it does not hide secrets, and there is no “hide previews” switch.
+          </div>
+        </article>
+
+        <article class="issue" id="i10">
+          <header>
+            <h3>10. You still cannot approve a waiting agent from the card that says it needs you</h3>
+            <span class="badge high">High</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            This is the whole point of Mocha: you are in a shop, Claude is stuck on “may I run this command?”, you want to tap Allow. Today you open the full terminal, find the dialog, and tap as if you were at the Mac. On a phone keyboard that is slow, easy to mis-tap, and easy to hit the wrong option. The next planned issue (#23) is exactly this. Until it ships, the core loop is incomplete.
+          </div>
+        </article>
+
+        <article class="issue" id="i11">
+          <header>
+            <h3>11. Sometimes you tap Send and the prompt just sits there</h3>
+            <span class="badge high">High</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            You wrote a careful reply on the phone and hit send. The phone thinks it worked. On the Mac, the text is sitting in Claude/Codex’s input box, unsent, because that session is in a “type it yourself” mode. You wait. Nothing happens. You think Mocha is broken. The host already retries and even types the words as a fallback, and it still happens on the owner’s own sessions.
+          </div>
+          <p>This is the kind of bug that destroys trust faster than a crash, because the app looks fine.</p>
+        </article>
+
+        <article class="issue" id="i12">
+          <header>
+            <h3>12. New agents started from the phone land in your home folder</h3>
+            <span class="badge high">High</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            You tap “New agent” → Claude while standing in a kitchen. It boots in <code>~</code> (your home directory), not the project you meant. The agent may start reading or writing the wrong files. There is no project picker yet (planned as #24). That is a safety issue, not a convenience issue.
+          </div>
+        </article>
+
+        <article class="issue" id="i13">
+          <header>
+            <h3>13. After a deploy, the phone can hit a brick wall of “502” until you retry the Mac installer</h3>
+            <span class="badge high">High</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            You update the Mac service. The first install attempt often fails; a retry works. In between, Tailscale is pointing at a half-alive service. The phone shows a dead host. You think the internet is wrong, or Mocha died, and you poke things for ten minutes. This is already a known issue (#21).
+          </div>
+        </article>
+
+        <article class="issue" id="i14">
+          <header>
+            <h3>14. “Needs you” only works reliably for new Claude sessions</h3>
+            <span class="badge high">High</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            You installed the Claude hooks today. The Claude you started yesterday never learned to raise its hand. It sits blocked on the Mac, and the phone stays quiet. You only find out when you happen to open that terminal. People will think Mocha “missed” the wait. It did — by design of the current hook install, which does not retrofit old sessions.
+          </div>
+        </article>
+
+        <article class="issue" id="i15">
+          <header>
+            <h3>15. You cannot copy from the terminal, and paste is a blunt “send clipboard to the Mac”</h3>
+            <span class="badge high">High</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            An agent printed a command, a URL, or an error. On a laptop you select and copy. On Mocha, selection/copy is turned off at the terminal engine. You cannot grab the text. Paste exists as a button: it takes whatever is in the iPhone clipboard and types it into the remote session. That is useful, and it is also how a one-time password or a private note in your clipboard can accidentally go to the Mac. Apple will want that disclosed. Users will want real select-and-copy.
+          </div>
+        </article>
+
+        <article class="issue" id="i16">
+          <header>
+            <h3>16. The Mac can be told to listen on the whole network, in plain HTTP</h3>
+            <span class="badge high">High</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            The default is safe: only this Mac, only localhost, with Tailscale sitting in front. If someone sets the bind address to “all interfaces” — a tempting thing when debugging — the pairing token is now a cleartext password on the café Wi-Fi. The host does not refuse that setting. The docs say not to, which does not stop a tired 1 a.m. debug session.
+          </div>
+        </article>
+
+        <article class="issue" id="i17">
+          <header>
+            <h3>17. Mocha cannot tell if you accidentally published the host to the public internet</h3>
+            <span class="badge high">High</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            Tailscale Serve (private) and Tailscale Funnel (public website) can look like similar HTTPS names. The phone only checks that the name ends in <code>.ts.net</code>. If Funnel is on, anyone who gets the token — or in a worst case, probes a public URL — is talking to your user account on that Mac. The UI honestly says it cannot detect Funnel. Honesty is good. A hard fail would be better.
+          </div>
+        </article>
+
+        <article class="issue" id="i18">
+          <header>
+            <h3>18. Vendor names in the UI can look like an official Anthropic or OpenAI app</h3>
+            <span class="badge high">High</span>
+            <span class="badge apple">Guideline 5.2</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            Store listing and home screen say “Claude Code” and “Codex.” A reviewer, or a lawyer, can read that as impersonation or implied partnership. You can still <em>launch those programs on the user’s Mac</em> — that is the product — but the chrome should feel like Mocha talking to tools the user already installed, not like a branded client.
+          </div>
+        </article>
+
+        <article class="issue" id="i19">
+          <header>
+            <h3>19. Anyone with the token can start a shell anywhere on the Mac</h3>
+            <span class="badge high">High</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            This is partly the point: remote control. Defense in depth is still missing. The host has a list of “project folders” for picking workspaces, but creating a session does not have to stay inside them. A stolen token is not limited to “my code folder.” It is the whole user account. Fine if you accept that. Dangerous if you thought Mocha was a sandbox.
+          </div>
+        </article>
+      </section>
+
+      <section id="medium">
+        <h2>Medium</h2>
+
+        <article class="issue" id="i20">
+          <header>
+            <h3>20. First-run onboarding does not exist</h3>
+            <span class="badge medium">Medium</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            A new user never sees “this talks to a computer you own,” “this token is full access,” “install Tailscale,” or “closing the phone does not stop the agent.” They drop into a blank home screen. Support burden and bad security decisions follow.
+          </div>
+        </article>
+
+        <article class="issue" id="i21">
+          <header>
+            <h3>21. There are no Settings</h3>
+            <span class="badge medium">Medium</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            No place for privacy, font size, Face ID, demo, forget this computer, or a support/privacy link. Apple looks for those. Users look for those. Right now “Host” is a small form, not a product settings surface.
+          </div>
+        </article>
+
+        <article class="issue" id="i22">
+          <header>
+            <h3>22. One Mac only</h3>
+            <span class="badge medium">Medium</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            The product story is “laptop, studio Mac, and a remote box on one home screen.” The app stores a single address. If you have two computers you overwrite the first. Planned later; if you submitted now, the listing could not claim multi-computer.
+          </div>
+        </article>
+
+        <article class="issue" id="i23">
+          <header>
+            <h3>23. The web leftover: the Mac says “any website may call me”</h3>
+            <span class="badge medium">Medium</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            Mocha is a native iPhone app. It does not need browser permissions. The host still answers browser-style “yes I allow your web page” to whatever site asks. If a browser UI ever comes back, or if someone opens a page while the token is sitting in a password manager, this becomes a way to drive the Mac from a website. Today it is mostly leftover surface area. Easy to delete. Should be deleted.
+          </div>
+        </article>
+
+        <article class="issue" id="i24">
+          <header>
+            <h3>24. The Mac log file is world-readable</h3>
+            <span class="badge medium">Medium</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            On a shared Mac, another user account can read Mocha’s log. Today it is mostly “Mocha is running.” When something errors, file paths and failure text can land there. The secret file next to it is locked down correctly. The log is not.
+          </div>
+        </article>
+
+        <article class="issue" id="i25">
+          <header>
+            <h3>25. If you start the host by hand with the token in the environment, every terminal inherits it</h3>
+            <span class="badge medium">Medium</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            The recommended background service does not do this. If you debug with <code>MOCHA_TOKEN=… npm start</code>, Claude/Codex/your shell can see that variable. An agent that dumps its environment, or a script that prints env, just leaked shell access. Easy footgun.
+          </div>
+        </article>
+
+        <article class="issue" id="i26">
+          <header>
+            <h3>26. Font size, hardware keyboard, and scroll “feel” are unfinished</h3>
+            <span class="badge medium">Medium</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            Long diffs on a small phone are hard to read. There is no pinch-to-resize / font setting. A hardware keyboard should feel like a real terminal; that pass is still on the list. Scroll works at an MVP level and still has an open “this feels off” issue (#10). None of these fail Apple by themselves. They fail the “this is a serious terminal” claim.
+          </div>
+        </article>
+
+        <article class="issue" id="i27">
+          <header>
+            <h3>27. Diff glance, grouped home, inbox, and snooze are still missing</h3>
+            <span class="badge medium">Medium</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            You cannot peek at “what did it change?” without opening the terminal (#25). Home is not grouped by project (#26). There is no inbox (#27) or snooze (#28). These are product gaps, not crashes. Submitting without them is fine if you do not advertise them. Submitting while screenshots show the mockup that has them is an accuracy problem.
+          </div>
+        </article>
+
+        <article class="issue" id="i28">
+          <header>
+            <h3>28. Closing the phone drops the live connection (the Mac keeps working — but the UI does not say that loudly)</h3>
+            <span class="badge medium">Medium</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            You lock the phone. Mocha disconnects its live wires on purpose (iPhone background rules). tmux on the Mac keeps the agent running — that is the architecture, and it is correct. A nervous user will still think they “killed the job.” Onboarding and a one-line status (“agent still running on the Mac”) would prevent a class of support panic. Reconnect on unlock is already a strength; the messaging is the gap.
+          </div>
+        </article>
+
+        <article class="issue" id="i29">
+          <header>
+            <h3>29. Development environment variables can write the token even in a non-debug build</h3>
+            <span class="badge medium">Medium</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            If something injects <code>MOCHA_DEV_TOKEN</code> into the app’s environment, a release build will save it. Normal App Store users will never have that. Test harnesses and odd MDM setups might. The auto-open-terminal shortcuts are correctly debug-only. This seed path is not. Cheap to lock down.
+          </div>
+        </article>
+
+        <article class="issue" id="i30">
+          <header>
+            <h3>30. Network calls for the agent list use the iPhone’s shared web session</h3>
+            <span class="badge medium">Medium</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            The live terminal is careful: it uses a throwaway network session so leftovers do not sit on disk. The home screen’s agent list is less careful and uses the system-wide session, which can cache. Unlikely to be a headline breach. Inconsistent with “this secret should not linger.”
+          </div>
+        </article>
+
+        <article class="issue" id="i31">
+          <header>
+            <h3>31. Encryption export question is unanswered in the app file</h3>
+            <span class="badge medium">Medium</span>
+            <span class="badge apple">Connect paperwork</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            First upload to App Store Connect stops on a questionnaire. HTTPS is almost certainly “exempt encryption.” You still have to tick the box. Putting the standard answer in the app’s Info settings avoids a 2 a.m. stall.
+          </div>
+        </article>
+      </section>
+
+      <section id="low">
+        <h2>Low / polish</h2>
+
+        <article class="issue" id="i32">
+          <header>
+            <h3>32. Dark mode only</h3>
+            <span class="badge low">Low</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            The app forces dark. Fine for a terminal. A user who runs their phone in Light Mode gets an island of night. Apple rarely rejects for this. Some people will file it as a bug.
+          </div>
+        </article>
+
+        <article class="issue" id="i33">
+          <header>
+            <h3>33. iPhone only (iPad runs it in compatibility mode)</h3>
+            <span class="badge low">Low</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            On iPad it will look like a blown-up iPhone. That is an explicit later phase, not a store reject. Do not screenshot an iPad layout you do not have.
+          </div>
+        </article>
+
+        <article class="issue" id="i34">
+          <header>
+            <h3>34. “Herdr” and tmux jargon in the UI</h3>
+            <span class="badge low">Low</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            “New Herdr tab” and “Open a tmux session directly” are meaningful to you. A TestFlight stranger will blink. Rename to human words (“New coding agent”, “Raw terminal”) for anyone who is not the founder.
+          </div>
+        </article>
+
+        <article class="issue" id="i35">
+          <header>
+            <h3>35. A public health URL on the Mac</h3>
+            <span class="badge low">Low</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            Anyone who can reach the host can see “yes I’m Mocha, version X” without a token. Useful for debugging. Slightly helpful to an attacker mapping the service. Acceptable if the host stays on localhost + Tailscale. Bad if you ever bind widely (see #16).
+          </div>
+        </article>
+
+        <article class="issue" id="i36">
+          <header>
+            <h3>36. Token length can be guessed before the careful compare</h3>
+            <span class="badge low">Low</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            A very patient attacker on a local network could learn how long the secret is. They still cannot learn the secret itself this way. Academic. Worth a one-line hardening when you are already in that file.
+          </div>
+        </article>
+
+        <article class="issue" id="i37">
+          <header>
+            <h3>37. Needs-you status can stay “needs you” for about five extra seconds after it is resolved</h3>
+            <span class="badge low">Low</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            This is on purpose so a blip does not flicker the card. You might tap into a session that just unblocked. Mildly confusing, not dangerous. The opposite bug (missing a wait) is worse, and they chose this side.
+          </div>
+        </article>
+
+        <article class="issue" id="i38">
+          <header>
+            <h3>38. An old pairing file from a previous product name may still exist</h3>
+            <span class="badge low">Low</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            If you used the earlier project on this Mac, a second copy of the secret can sit in a legacy folder as a rollback. Two copies of a master key is two places to leak. The host refuses to start if they disagree, which is the right kind of stubborn.
+          </div>
+        </article>
+
+        <article class="issue" id="i39">
+          <header>
+            <h3>39. Ghostty (the terminal engine) is a local binary with no privacy manifest of its own</h3>
+            <span class="badge low">Low</span>
+          </header>
+          <div class="life">
+            <b>In real life</b>
+            This is the engine that draws the terminal. It is open source, pinned, and not a tracker. Apple may still want a privacy manifest on shipped third-party binaries. Also keep license text in the app’s acknowledgements when you ship. Not exciting. Easy to forget.
+          </div>
+        </article>
+      </section>
+
+      <section id="gaps">
+        <h2>Unfinished product, not really “bugs”</h2>
+        <p>These are honest later-phase items. They are not defects in the code that exists. They <em>become</em> App Store or trust problems if the listing pretends they exist.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Missing piece</th>
+              <th>What a user notices</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>QR pairing with a one-time code</td>
+              <td>Setup is copy-paste instead of “scan the Mac.”</td>
+            </tr>
+            <tr>
+              <td>Per-phone keys and revoke</td>
+              <td>You cannot amputate a lost iPhone without rotating everyone.</td>
+            </tr>
+            <tr>
+              <td>Face ID lock</td>
+              <td>Anyone who unlocks the phone is inside Mocha.</td>
+            </tr>
+            <tr>
+              <td>Push notifications / Live Activities</td>
+              <td>If the app is closed, you will not feel a wait. You have to open Mocha. Planned as a later phase; it also requires a small cloud piece (Apple’s push service), which the project has been careful not to pretend it has.</td>
+            </tr>
+            <tr>
+              <td>Chat / pretty agent UI</td>
+              <td>You get a real terminal, not a ChatGPT-style thread. That is intentional. Store screenshots should not look like a chat client you do not ship.</td>
+            </tr>
+            <tr>
+              <td>Crash analytics / 99.5% crash-free gate</td>
+              <td>You will not know if other people’s phones are crashing until TestFlight. Fine for dogfood. Required before a public store story.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="solid">
+        <h2>What is already solid</h2>
+        <div class="callout ok">
+          <strong>This is not a shaky prototype in the places that usually explode.</strong>
+          The scary remote-control parts that are easy to get wrong — sending the password in the web address, talking HTTP to random hosts, keeping a spy connection in the background, replaying keystrokes twice after a drop, crashing when you lock the phone — those were clearly designed on purpose.
+        </div>
+        <ul class="plain">
+          <li><strong>The phone will only talk HTTPS to a Tailscale name.</strong> It refuses raw HTTP, extra URL paths, and passwords stuffed into the URL.</li>
+          <li><strong>The Mac checks the secret on almost everything,</strong> including the live terminal socket. The only open door is a tiny “am I alive?” check.</li>
+          <li><strong>Locking the phone does not kill the agent.</strong> The Mac owns the session. Unlocking reconnects instead of starting a second chaotic job.</li>
+          <li><strong>Reconnect was built as a product, not an afterthought.</strong> Wi-Fi to cellular, lock/unlock, and “don’t lose the stream in the middle” are already in the “shipped and device-tested” column.</li>
+          <li><strong>No Mocha account, no telemetry, no ads, no tracker SDKs.</strong> That is both a privacy win and an App Store win.</li>
+          <li><strong>The terminal will not silently read or write your clipboard</strong> because an agent asked. Paste only happens when you tap Paste.</li>
+          <li><strong>The codebase is not littered with TODO bombs.</strong> Unfinished work lives on the roadmap and in GitHub issues, which is the right habit.</li>
+          <li><strong>When Herdr (the agent control plane) is down, you still get a terminal</strong> instead of a brick wall. That matches the product promise.</li>
+        </ul>
+      </section>
+
+      <section id="order">
+        <h2>What to fix first</h2>
+        <p>If the goal is “keep dogfooding safely,” do 1–4. If the goal is “Apple might someday approve this,” do all of them; 5–8 are the store-specific wall.</p>
+        <ol>
+          <li><strong>Put the token in the iPhone Keychain</strong> and delete the ordinary settings copy. Fix the “never saved” sentence so every screen tells the same truth.</li>
+          <li><strong>Stop putting the token on the command line</strong> in the Claude hook. Talk to the local host without flashing the secret at the process list. Lock down that Claude settings file.</li>
+          <li><strong>Refuse to listen on the public network</strong> unless someone passes an explicit unsafe flag. Create the Mac log as a private file.</li>
+          <li><strong>Project picker</strong> so a phone-created agent cannot wander through the home directory. Then <strong>Approve / Deny on the Needs-you card</strong> so the core loop matches the marketing.</li>
+          <li><strong>Demo mode</strong> that can be used in airplane mode. This is the App Store on/off switch.</li>
+          <li><strong>Privacy policy, privacy manifest, real icon, encryption tick-box, support URL.</strong> Unblocking paperwork.</li>
+          <li><strong>Scan-to-pair, per-phone keys, revoke, optional Face ID.</strong> Without these you should not call it pairing, and you should not sell it as safe remote access.</li>
+          <li><strong>Soften vendor brand names</strong> and record a review video that shows a user-owned Mac, not a magic cloud.</li>
+        </ol>
+        <div class="callout info">
+          <strong>Bottom line</strong>
+          Mocha is a real, usable remote control surface for the person who built it. The bugs that matter are not “Swift is messy.” They are: the master key is treated too casually, the unblock-from-the-phone loop is still one tap short, and Apple will not review a private Tailscale accessory without a demo. Finish those three stories and the rest is a normal product punch list.
+        </div>
+      </section>
+
+      <footer>
+        <p>Scan of the Mocha repo as of 25 August 2026. Host, iPhone app, protocol notes, and product docs. No production secrets were copied into this file. This is a review artifact, not a second bug tracker — durable work still belongs in GitHub issues.</p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>
