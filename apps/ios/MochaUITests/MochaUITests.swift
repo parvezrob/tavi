@@ -365,13 +365,14 @@ final class MochaUITests: XCTestCase {
         }
     }
 
-    // Approve a real waiting permission straight from the Needs-you card (#23)
+    // Answer a real waiting permission straight from the Needs-you card (#23)
     // without entering the terminal. Uses a fresh scratch cwd so Claude raises
     // its reliable trust-folder dialog; that leaves the agent blocked with a
-    // parseable dialog on the pane. Taps the card, taps Approve, and asserts
-    // the host stops reporting a dialog — the key actually landed.
+    // parseable dialog on the pane. Taps the card, taps the first option (the
+    // "Yes, I trust this folder" choice), and asserts the host stops reporting
+    // a dialog — the specific numbered choice actually landed.
     @MainActor
-    func testApproveWaitingPermissionFromNeedsYouCard() async throws {
+    func testAnswerWaitingPermissionFromNeedsYouCard() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let host = environment["MOCHA_DEV_HOST"],
               let token = environment["MOCHA_DEV_TOKEN"] else {
@@ -409,17 +410,17 @@ final class MochaUITests: XCTestCase {
         XCTAssertTrue(card.waitForExistence(timeout: 20), "Blocked agent never reached Needs you.")
         card.tap()
 
-        let approve = app.buttons["decision.approve"]
-        XCTAssertTrue(approve.waitForExistence(timeout: 10), "Decision sheet never showed Approve.")
-        approve.tap()
+        let option = app.buttons["decision.option.1"]
+        XCTAssertTrue(option.waitForExistence(timeout: 10), "Decision sheet never showed the options.")
+        option.tap()
 
-        // The key landed if the host stops reporting a live dialog on the pane.
+        // The choice landed if the host stops reporting a live dialog on the pane.
         var resolved = false
         for _ in 0 ..< 15 where !resolved {
             try await Task.sleep(for: .seconds(1))
             resolved = try await !readDialogPresent(host: host, token: token, paneId: paneId)
         }
-        XCTAssertTrue(resolved, "The dialog was still present after tapping Approve.")
+        XCTAssertTrue(resolved, "The dialog was still present after tapping the option.")
     }
 
     private func waitForAgentStatus(

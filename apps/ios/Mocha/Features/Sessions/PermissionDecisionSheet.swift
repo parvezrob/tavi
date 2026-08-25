@@ -100,16 +100,64 @@ struct PermissionDecisionSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
+            // Every option the dialog offers is its own button and sends that
+            // choice. The highlighted option is marked "default"; options that
+            // grant standing permission ("always allow", "don't ask again")
+            // are flagged so a consequential pick is never a casual tap.
+            VStack(spacing: 8) {
                 ForEach(dialog.options) { option in
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: option.selected ? "largecircle.fill.circle" : "circle")
-                            .font(.caption)
-                            .foregroundStyle(option.selected ? MochaTheme.statusBlocked : MochaTheme.textSecondary)
-                            .padding(.top, 2)
-                        Text("\(option.index). \(option.label)")
-                            .font(.footnote)
-                            .foregroundStyle(MochaTheme.textSecondary)
+                    optionButton(option)
+                }
+            }
+            .disabled(inFlight != nil)
+
+            Button {
+                Task { await decide(.deny) }
+            } label: {
+                HStack(spacing: 8) {
+                    if inFlight == .deny {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "xmark")
+                    }
+                    Text("Cancel (Esc)").fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.bordered)
+            .tint(MochaTheme.statusBlocked)
+            .disabled(inFlight != nil)
+            .accessibilityIdentifier("decision.deny")
+
+            Text("Tap a choice to send it. Options that grant standing access are marked — they stop the prompts from coming back.")
+                .font(.caption2)
+                .foregroundStyle(MochaTheme.textSecondary.opacity(0.8))
+        }
+    }
+
+    private func optionButton(_ option: PermissionDialogOption) -> some View {
+        let elevated = Self.grantsStandingAccess(option.label)
+        let tint = elevated ? MochaTheme.statusBlocked : MochaTheme.statusDone
+        return Button {
+            Task { await decide(.option(option.index)) }
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                if inFlight == .option(option.index) {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: elevated ? "exclamationmark.shield" : "\(option.index).circle")
+                        .foregroundStyle(tint)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(option.label)
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(MochaTheme.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if option.selected || elevated {
+                        Text(elevated ? "Grants standing access" : "Default")
+                            .font(.caption2)
+                            .foregroundStyle(tint)
                     }
                 }
             }
@@ -119,45 +167,21 @@ struct PermissionDecisionSheet: View {
                 MochaTheme.well,
                 in: RoundedRectangle(cornerRadius: MochaTheme.wellRadius, style: .continuous)
             )
-
-            VStack(spacing: 10) {
-                Button {
-                    Task { await decide(.approve) }
-                } label: {
-                    decisionLabel("Approve", systemImage: "checkmark", busy: inFlight == .approve)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(MochaTheme.statusDone)
-                .accessibilityIdentifier("decision.approve")
-
-                Button {
-                    Task { await decide(.deny) }
-                } label: {
-                    decisionLabel("Deny", systemImage: "xmark", busy: inFlight == .deny)
-                }
-                .buttonStyle(.bordered)
-                .tint(MochaTheme.statusBlocked)
-                .accessibilityIdentifier("decision.deny")
-            }
-            .disabled(inFlight != nil)
-
-            Text("Approve confirms the highlighted choice. Deny cancels the prompt. For any other option, open the terminal.")
-                .font(.caption2)
-                .foregroundStyle(MochaTheme.textSecondary.opacity(0.8))
+            .overlay(
+                RoundedRectangle(cornerRadius: MochaTheme.wellRadius, style: .continuous)
+                    .strokeBorder(option.selected ? tint.opacity(0.7) : MochaTheme.hairline, lineWidth: 1)
+            )
         }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("decision.option.\(option.index)")
     }
 
-    private func decisionLabel(_ title: String, systemImage: String, busy: Bool) -> some View {
-        HStack(spacing: 8) {
-            if busy {
-                ProgressView().controlSize(.small)
-            } else {
-                Image(systemName: systemImage)
-            }
-            Text(title).fontWeight(.semibold)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 4)
+    private static func grantsStandingAccess(_ label: String) -> Bool {
+        let lowered = label.lowercased()
+        return lowered.contains("always allow")
+            || lowered.contains("don't ask")
+            || lowered.contains("dont ask")
+            || lowered.contains("always")
     }
 
     private func outcomeCard(icon: String, tint: Color, title: String, message: String) -> some View {

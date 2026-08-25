@@ -18,7 +18,7 @@ import {
   TERMINAL_PROTOCOL,
   TERMINAL_PROTOCOL_V2,
 } from "./protocol.js";
-import type { HerdrAgentSource } from "./herdr.js";
+import type { DialogDecision, HerdrAgentSource } from "./herdr.js";
 import type { AttachCommand, HostInfo, ServerTerminalMessage, SessionBackend } from "./types.js";
 import { InputError, parseCreateSession, safeSessionId } from "./validation.js";
 
@@ -340,12 +340,23 @@ async function routeRequest(
     }
     const paneId = safeSessionId(decisionMatch[1] || "");
     const body = await readJsonBody(request);
-    const decision =
-      typeof body === "object" && body !== null && "decision" in body
-        ? (body as Record<string, unknown>).decision
-        : undefined;
-    if (decision !== "approve" && decision !== "deny") {
-      sendJson(response, 400, { error: 'decision must be "approve" or "deny".' });
+    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const rawDecision = record.decision;
+    // "approve" / "deny", or { decision: "option", option: N } to pick a
+    // specific numbered choice.
+    let decision: DialogDecision | undefined;
+    if (rawDecision === "approve" || rawDecision === "deny") {
+      decision = rawDecision;
+    } else if (rawDecision === "option") {
+      const option = record.option;
+      if (typeof option === "number" && Number.isInteger(option) && option > 0) {
+        decision = { option };
+      }
+    }
+    if (!decision) {
+      sendJson(response, 400, {
+        error: 'decision must be "approve", "deny", or "option" with a positive integer option.',
+      });
       return;
     }
     // Trust gate, two layers. Outer (here): at least one authority must flag
@@ -379,7 +390,7 @@ async function routeRequest(
       });
       return;
     }
-    sendJson(response, 200, { decided: true, decision, paneId });
+    sendJson(response, 200, { decided: true, sent: result.sent, paneId });
     return;
   }
 

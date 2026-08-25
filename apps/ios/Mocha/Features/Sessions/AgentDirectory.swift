@@ -65,9 +65,12 @@ enum DialogFetch: Equatable {
     case failure(String)
 }
 
-enum DialogDecision: String {
+// approve = confirm the highlighted option (Enter); deny = cancel (Esc);
+// option = pick a specific numbered choice by its index.
+enum DialogDecision: Equatable {
     case approve
     case deny
+    case option(Int)
 }
 
 enum DecisionOutcome: Equatable {
@@ -269,7 +272,7 @@ final class AgentDirectory {
         request.httpMethod = "POST"
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONEncoder().encode(["decision": decision.rawValue])
+        request.httpBody = try? JSONSerialization.data(withJSONObject: decisionBody(decision))
 
         do {
             let (data, response) = try await Self.session.data(for: request)
@@ -282,6 +285,14 @@ final class AgentDirectory {
             return .failure(message ?? "The host could not deliver the decision (HTTP \(status)).")
         } catch {
             return .failure(error.localizedDescription)
+        }
+    }
+
+    private func decisionBody(_ decision: DialogDecision) -> [String: Any] {
+        switch decision {
+        case .approve: return ["decision": "approve"]
+        case .deny: return ["decision": "deny"]
+        case let .option(index): return ["decision": "option", "option": index]
         }
     }
 

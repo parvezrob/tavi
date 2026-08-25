@@ -29,7 +29,10 @@ export type HerdrPreviewResult =
 
 export type HerdrPromptResult = { submitted: true } | { submitted: false; reason: string };
 
-export type DialogDecision = "approve" | "deny";
+// approve = Enter (confirm the highlighted option); deny = Esc (cancel);
+// { option } = pick a specific numbered option by pressing its digit, which
+// Claude Code treats as select-and-confirm.
+export type DialogDecision = "approve" | "deny" | { option: number };
 
 export type HerdrDialogResult =
   | { present: true; dialog: PermissionDialog }
@@ -228,8 +231,11 @@ export class HerdrService implements HerdrAgentSource {
   // the pane immediately before sending and refuses unless a dialog is still
   // rendered: a card that went stale between the tap and the send must never
   // answer whatever prompt is there now. approve = Enter (confirms the
-  // highlighted option); deny = Esc (cancel). The caller is responsible for
-  // the outer trust gate (hook overlay + herdr agree the agent is blocked).
+  // highlighted option); deny = Esc (cancel); { option: N } presses that
+  // digit, which Claude Code treats as select-and-confirm — but only after
+  // re-confirming N is a real option in the dialog still on screen, so a
+  // stale option number can never land on a different prompt. The caller is
+  // responsible for the outer trust gate (an authority agrees it is blocked).
   async decideAgent(paneId: string, decision: DialogDecision): Promise<HerdrDecisionResult> {
     const dialog = await this.readDialog(paneId);
     if ("available" in dialog) {
@@ -242,7 +248,22 @@ export class HerdrService implements HerdrAgentSource {
         reason: "The permission dialog is no longer on screen.",
       };
     }
-    const key = decision === "approve" ? "Enter" : "Escape";
+    let key: string;
+    if (decision === "approve") {
+      key = "Enter";
+    } else if (decision === "deny") {
+      key = "Escape";
+    } else {
+      const exists = dialog.dialog.options.some((option) => option.index === decision.option);
+      if (!exists) {
+        return {
+          decided: false,
+          stale: true,
+          reason: "That option is no longer offered by the dialog on screen.",
+        };
+      }
+      key = String(decision.option);
+    }
     try {
       await this.request("agent.send_keys", { target: paneId, keys: [key] });
       return { decided: true, sent: key };

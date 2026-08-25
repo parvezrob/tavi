@@ -212,6 +212,39 @@ test("approves a live dialog by sending Enter after re-reading the pane", async 
   assert.deepEqual(sentKeys, [["Enter"]]);
 });
 
+test("picks a specific numbered option by sending its digit", async (context) => {
+  const socketPath = temporarySocketPath(context);
+  const sentKeys: string[][] = [];
+  await startFakeHerdr(context, socketPath, {
+    protocol: 17,
+    agents: [{ agent: "claude", agent_status: "blocked", pane_id: "wB:p1", tab_id: "wB:t1", workspace_id: "wB" }],
+    readText: " Proceed?\n ❯ 1. Yes\n   2. Yes, always allow\n   3. No\n\n Esc to cancel",
+    sentKeys,
+  });
+
+  const result = await new HerdrService({ socketPath }).decideAgent("wB:p1", { option: 2 });
+
+  assert.deepEqual(result, { decided: true, sent: "2" });
+  assert.deepEqual(sentKeys, [["2"]]);
+});
+
+test("refuses an option the dialog on screen does not offer", async (context) => {
+  const socketPath = temporarySocketPath(context);
+  const sentKeys: string[][] = [];
+  await startFakeHerdr(context, socketPath, {
+    protocol: 17,
+    agents: [{ agent: "claude", agent_status: "blocked", pane_id: "wB:p1", tab_id: "wB:t1", workspace_id: "wB" }],
+    readText: " ❯ 1. Yes\n   2. No\n\n Esc to cancel",
+    sentKeys,
+  });
+
+  const result = await new HerdrService({ socketPath }).decideAgent("wB:p1", { option: 5 });
+
+  assert.equal(result.decided, false);
+  assert.equal(result.decided === false && result.stale, true);
+  assert.equal(sentKeys.length, 0);
+});
+
 test("denies a live dialog with Escape", async (context) => {
   const socketPath = temporarySocketPath(context);
   const sentKeys: string[][] = [];
