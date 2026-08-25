@@ -1,14 +1,16 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { HostConfig } from "./config.js";
 
 // Installs Claude Code lifecycle hooks that report to the Mocha host
 // (issue #22): Notification carries permission requests, and
-// PostToolUse/Stop/UserPromptSubmit prove resolution. The hook command
-// reads the pairing token from ~/.mocha/config.json at fire time, stays
-// silent on stdout (UserPromptSubmit stdout would become model context),
-// and times out fast so a down host can never stall Claude.
+// PostToolUse/Stop/UserPromptSubmit prove resolution. The hook command is a
+// relay script so the pairing token never appears in another process's argv
+// (issue #32); the relay reads it from ~/.mocha/config.json at fire time,
+// stays silent on stdout (UserPromptSubmit stdout would become model
+// context), and times out fast so a down host can never stall Claude.
 const HOOK_EVENTS = [
   "Notification",
   "PermissionRequest",
@@ -16,16 +18,16 @@ const HOOK_EVENTS = [
   "Stop",
   "UserPromptSubmit",
 ] as const;
-const HOOK_MARKER = "/api/hooks/claude";
+// Both markers identify Mocha-owned entries: the relay filename for current
+// installs, the endpoint path for pre-relay curl commands being replaced.
+const HOOK_MARKERS = ["claude-hook-relay.js", "/api/hooks/claude"];
 
-export function claudeHookCommand(config: HostConfig): string {
-  const tokenScript =
-    'JSON.parse(require("fs").readFileSync(process.env.HOME+"/.mocha/config.json","utf8")).token';
-  return (
-    `curl -s -m 3 -o /dev/null -X POST -H "Content-Type: application/json" ` +
-    `-H "Authorization: Bearer $(node -p '${tokenScript}' 2>/dev/null)" ` +
-    `--data-binary @- http://127.0.0.1:${config.port}${HOOK_MARKER} || true`
-  );
+export function claudeHookCommand(config: HostConfig, relayPath = defaultRelayPath()): string {
+  return `node '${relayPath}' ${config.port} || true`;
+}
+
+function defaultRelayPath(): string {
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), "claude-hook-relay.js");
 }
 
 export function installClaudeHooks(
@@ -47,7 +49,9 @@ export function installClaudeHooks(
 
   for (const event of HOOK_EVENTS) {
     const entries = Array.isArray(hooks[event]) ? (hooks[event] as unknown[]) : [];
-    const withoutMocha = entries.filter((entry) => !JSON.stringify(entry).includes(HOOK_MARKER));
+    const withoutMocha = entries.filter(
+      (entry) => !HOOK_MARKERS.some((marker) => JSON.stringify(entry).includes(marker)),
+    );
     const next = [...withoutMocha, { hooks: [{ type: "command", command, timeout: 5 }] }];
     if (JSON.stringify(entries) !== JSON.stringify(next)) changed = true;
     hooks[event] = next;

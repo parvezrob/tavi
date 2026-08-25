@@ -77,12 +77,6 @@ export async function createMochaServer(options: MochaServerOptions) {
   });
 
   const server = createServer(async (request, response) => {
-    setCors(request, response);
-    if (request.method === "OPTIONS") {
-      response.writeHead(204).end();
-      return;
-    }
-
     try {
       await routeRequest(request, response, config, tmux, herdr, attention);
     } catch (error) {
@@ -755,14 +749,6 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
   });
   response.end(body);
 }
-
-function setCors(request: IncomingMessage, response: ServerResponse): void {
-  response.setHeader("Access-Control-Allow-Origin", request.headers.origin || "*");
-  response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
-  response.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-  response.setHeader("Vary", "Origin");
-}
-
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));

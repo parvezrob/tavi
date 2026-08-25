@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { access, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, platform, userInfo } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +37,11 @@ export async function installService(config: HostConfig, options: ServiceOptions
 
   await mkdir(path.dirname(runtime.currentPlist), { recursive: true });
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
+  // mkdir leaves an existing directory's mode alone, and launchd creates the log
+  // with the default umask — keep both owner-only on every install.
+  await chmod(config.stateDir, 0o700);
+  await writeFile(logFile, "", { flag: "a", mode: 0o600 });
+  await chmod(logFile, 0o600);
   await writeFileAtomically(
     runtime.currentPlist,
     launchAgentXml({ config, projectRoot: runtime.projectRoot, entrypoint, logFile }),
