@@ -80,7 +80,10 @@ struct AgentCard: View {
                         .foregroundStyle(status.color)
                 }
 
-                if showsLocation || agent.meaningfulTitle != nil || observedAt != nil {
+                let showsFreshness = observedAt.map {
+                    FreshnessRule.shows(status: agent.status, observedAt: $0)
+                } ?? false
+                if showsLocation || agent.meaningfulTitle != nil || showsFreshness {
                     HStack(spacing: 8) {
                         if showsLocation {
                             Text(agent.projectName)
@@ -94,7 +97,7 @@ struct AgentCard: View {
                                 .lineLimit(1)
                         }
                         Spacer(minLength: 8)
-                        if let observedAt {
+                        if let observedAt, showsFreshness {
                             FreshnessLabel(observedAt: observedAt)
                         }
                     }
@@ -167,7 +170,7 @@ struct RecentAgentRow: View {
                 Text(status.label)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(status.color)
-                if let observedAt {
+                if let observedAt, FreshnessRule.shows(status: agent.status, observedAt: observedAt) {
                     FreshnessLabel(observedAt: observedAt)
                 }
                 Image(systemName: "chevron.right")

@@ -120,7 +120,7 @@ struct PairingFlowView: View {
                 .background(MochaTheme.well, in: RoundedRectangle(cornerRadius: MochaTheme.wellRadius, style: .continuous))
                 .accessibilityIdentifier("pairing.manualCode")
             Button("Continue") { handleCode(manualCode) }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.mochaProminent)
                 .disabled(manualCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityIdentifier("pairing.manualContinue")
         }
@@ -189,7 +189,7 @@ struct PairingFlowView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.mochaProminent)
             .accessibilityIdentifier("pairing.confirm")
 
             Button("Not this Mac") { step = .scan }
@@ -267,7 +267,7 @@ struct PairingFlowView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.mochaProminent)
             .accessibilityIdentifier("pairing.viewSessions")
         }
         .padding(20)
@@ -315,7 +315,7 @@ struct PairingFlowView: View {
                 scanError = nil
                 step = .scan
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.mochaProminent)
             .accessibilityIdentifier("pairing.retry")
         }
         .padding(20)

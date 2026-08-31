@@ -253,10 +253,10 @@ struct TerminalSessionView: View {
                 .padding(.vertical, 8)
                 .background(
                     MochaTheme.well,
-                    in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    in: RoundedRectangle(cornerRadius: MochaTheme.wellRadius, style: .continuous)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    RoundedRectangle(cornerRadius: MochaTheme.wellRadius, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
                 )
                 .accessibilityIdentifier("terminal.composer")
@@ -462,17 +462,17 @@ private struct TerminalKeyStyle: ButtonStyle {
             .frame(minWidth: 36, minHeight: 38)
             .padding(.horizontal, 8)
             .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                RoundedRectangle(cornerRadius: MochaTheme.wellRadius, style: .continuous)
                     .fill(fillColor(pressed: configuration.isPressed))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                RoundedRectangle(cornerRadius: MochaTheme.wellRadius, style: .continuous)
                     .strokeBorder(
                         armed ? Color.clear : Color.white.opacity(isEnabled ? 0.09 : 0.05),
                         lineWidth: 1
                     )
             )
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: MochaTheme.wellRadius, style: .continuous))
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
             .animation(.easeOut(duration: 0.15), value: armed)
     }

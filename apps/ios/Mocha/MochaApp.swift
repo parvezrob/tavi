@@ -10,8 +10,11 @@ struct MochaApp: App {
                 SessionsView()
             }
             // Dark-first is the product's visual contract (PRD §7.1);
-            // the terminal and home surfaces are designed for it.
+            // the terminal and home surfaces are designed for it. The
+            // global tint is the one brand accent (#54) — system blue is
+            // the color of an unconsidered app.
             .preferredColorScheme(.dark)
+            .tint(MochaTheme.accent)
         }
     }
 }

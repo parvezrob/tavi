@@ -297,7 +297,7 @@ struct SessionsView: View {
             } label: {
                 Label("Scan pairing code", systemImage: "qrcode.viewfinder")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.mochaProminent)
             .padding(.top, 4)
             .accessibilityIdentifier("sessions.scanPairingCode")
         }

@@ -151,7 +151,7 @@ private struct AppLockScreen: View {
                 } label: {
                     Label("Unlock", systemImage: "faceid")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.mochaProminent)
                 .disabled(lock.authenticating)
                 .accessibilityIdentifier("lock.unlock")
                 if !lock.canAuthenticate {
