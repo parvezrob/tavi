@@ -16,8 +16,10 @@ const STRUCTURAL_SUBSCRIPTIONS = [
   // freshly started claude/codex is invisible until some other event fires.
   "pane.agent_detected",
 ];
-// Refresh-only trigger: catches an agent leaving a pane that stays open.
-const REFRESH_SUBSCRIPTIONS = ["pane.updated"];
+// Refresh-only triggers: an agent leaving a pane that stays open, and a
+// tab getting a new name (#55) — the label rides the agent payload, so a
+// rename must push a fresh list to every phone.
+const REFRESH_SUBSCRIPTIONS = ["pane.updated", "tab.renamed"];
 
 export interface HerdrAgentsSnapshot {
   available: boolean;

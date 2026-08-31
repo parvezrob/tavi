@@ -89,14 +89,14 @@ struct AgentCard: View {
                 let showsFreshness = observedAt.map {
                     FreshnessRule.shows(status: agent.status, observedAt: $0)
                 } ?? false
-                if showsLocation || agent.meaningfulTitle != nil || showsFreshness {
+                if showsLocation || agent.secondaryIdentity != nil || showsFreshness {
                     HStack(spacing: 8) {
                         if showsLocation {
-                            Text(agent.projectName)
+                            Text(agent.userTabName ?? agent.projectName)
                                 .font(.footnote)
                                 .foregroundStyle(MochaTheme.textSecondary)
                                 .lineLimit(1)
-                        } else if let title = agent.meaningfulTitle {
+                        } else if let title = agent.secondaryIdentity {
                             Text(title)
                                 .font(.footnote)
                                 .foregroundStyle(MochaTheme.textSecondary)
@@ -165,7 +165,9 @@ struct RecentAgentRow: View {
                     Text(agent.displayName)
                         .font(.subheadline)
                         .foregroundStyle(MochaTheme.textPrimary)
-                    if let title = agent.meaningfulTitle {
+                    // The user's own name for the task (#55) is what tells
+                    // four same-kind rows apart — #52's honest answer.
+                    if let title = agent.secondaryIdentity {
                         Text(title)
                             .font(.caption)
                             .foregroundStyle(MochaTheme.textSecondary)

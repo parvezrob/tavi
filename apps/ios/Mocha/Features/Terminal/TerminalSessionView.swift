@@ -12,6 +12,9 @@ private enum TerminalInputMode {
 struct TerminalSessionView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var showingJump = false
+    @State private var showingRename = false
+    @State private var renameDraft = ""
+    @State private var renameError: String?
     @State private var composerText = ""
     @State private var composerError: String?
     @State private var composerSending = false
@@ -122,6 +125,16 @@ struct TerminalSessionView: View {
                     }
                     .buttonStyle(.plain)
                     .glassEffect(.regular.interactive(), in: Capsule())
+                    // Naming lives on the pane's own page (#55): hold the
+                    // chip and the rename sheet opens directly — no context
+                    // menu layer, which is unreliable on nav-bar items for
+                    // fingers and tests alike.
+                    .simultaneousGesture(
+                        LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                            renameDraft = agent.userTabName ?? ""
+                            showingRename = true
+                        }
+                    )
                 }
             }
             if canJump {
@@ -148,6 +161,30 @@ struct TerminalSessionView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
             keyboardUp = false
+        }
+        .alert("Name this pane", isPresented: $showingRename) {
+            TextField("What is it working on?", text: $renameDraft)
+            Button("Save") {
+                let name = renameDraft.trimmingCharacters(in: .whitespaces)
+                guard !name.isEmpty, let agent = activeAgent, let agentDirectory else { return }
+                Task {
+                    renameError = await agentDirectory.renameTab(tabId: agent.tabId, label: name)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your name for this tab shows on the home, here, and in Jump to.")
+        }
+        .alert(
+            "Couldn't rename",
+            isPresented: Binding(
+                get: { renameError != nil },
+                set: { if !$0 { renameError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { renameError = nil }
+        } message: {
+            Text(renameError ?? "")
         }
         .sheet(isPresented: $showingJump) {
             if let agentDirectory, let onSelectAgent {
@@ -181,7 +218,10 @@ struct TerminalSessionView: View {
         // green means live, and the banner row never has to exist for the
         // nominal case. Agent status lives on the home; here the transcript
         // itself shows what the agent is doing.
-        let location = agent.isShell ? HomeGrouping.projectName(of: agent.cwd) : agent.projectName
+        // Your name for the tab beats the folder (#55); the folder beats a
+        // shell's prompt string.
+        let location = agent.userTabName
+            ?? (agent.isShell ? HomeGrouping.projectName(of: agent.cwd) : agent.projectName)
         // One line, not a stack: a two-line title made the whole nav bar
         // tall. Name leads, the folder rides along in the quiet type.
         return HStack(spacing: 6) {

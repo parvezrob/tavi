@@ -438,6 +438,61 @@ final class MochaUITests: XCTestCase {
         spoken.split(whereSeparator: { !$0.isNumber }).first.flatMap { Int($0) }
     }
 
+    // #55: name a pane from its own page. The host renames the herdr tab;
+    // the name comes back through the events feed and becomes the pane's
+    // identity on the chip.
+    @MainActor
+    func testRenamesAPaneFromTheTerminal() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live rename test.")
+        }
+        let paneId = try await createDisposableShell(host: host, token: token)
+        let app = launchIntoAgent(paneId, host: host, token: token)
+
+        let chip = app.descendants(matching: .any)["terminal.identity"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 15), "The identity chip never appeared.")
+        // Holding the chip opens the rename alert directly; retry the
+        // press while the freshly attached surface settles.
+        let alert = app.alerts.firstMatch
+        for _ in 0 ..< 3 where !alert.exists {
+            chip.press(forDuration: 0.9)
+            if alert.waitForExistence(timeout: 4) { break }
+        }
+        XCTAssertTrue(alert.waitForExistence(timeout: 4), "The rename alert never appeared.")
+        let field = alert.textFields.firstMatch.exists ? alert.textFields.firstMatch : app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "The rename field never appeared.")
+        field.tap()
+        field.typeText("ship the fix")
+        alert.buttons["Save"].tap()
+
+        // The host is the truth: the herdr tab now carries the name.
+        var label: String?
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline, label != "ship the fix" {
+            label = try await Self.tabLabel(host: host, token: token, paneId: paneId)
+            if label != "ship the fix" { try await Task.sleep(for: .seconds(1)) }
+        }
+        XCTAssertEqual(label, "ship the fix", "The host never reported the new tab name.")
+
+        // And the chip speaks it once the events feed catches up.
+        let renamedChip = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS 'ship the fix'"),
+            object: chip
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [renamedChip], timeout: 15), .completed, "The chip never showed the new name: \(chip.label)")
+    }
+
+    private static func tabLabel(host: String, token: String, paneId: String) async throws -> String? {
+        var request = URLRequest(url: URL(string: "\(host)/api/agents")!)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, _) = try await URLSession.shared.data(for: request)
+        guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let agents = payload["agents"] as? [[String: Any]] else { return nil }
+        return agents.first { $0["id"] as? String == paneId }?["tabLabel"] as? String
+    }
+
     // #46: a phone can unpair itself. The Mac stops listing it and the home
     // goes back to "No Paired Computers".
     @MainActor

@@ -7,7 +7,8 @@ struct AgentPresentationTests {
         agent: String = "claude",
         status: String = "working",
         cwd: String = "/Users/dev/projects/mocha",
-        title: String = ""
+        title: String = "",
+        tabLabel: String? = nil
     ) -> AgentSummary {
         AgentSummary(
             id: "pane-1",
@@ -17,8 +18,35 @@ struct AgentPresentationTests {
             title: title,
             workspaceId: "ws-1",
             tabId: "tab-1",
+            tabLabel: tabLabel,
             focused: false
         )
+    }
+
+    // #55: a tab label is identity only when a person plausibly chose it.
+    @Test
+    func keepsUserChosenTabNamesAndDropsHerdrDefaults() {
+        #expect(summary(tabLabel: "fix auth bug").userTabName == "fix auth bug")
+        #expect(summary(tabLabel: "  spaced  ").userTabName == "spaced")
+        #expect(summary(tabLabel: nil).userTabName == nil)
+        #expect(summary(tabLabel: "").userTabName == nil)
+        #expect(summary(tabLabel: "3").userTabName == nil)
+        #expect(summary(tabLabel: "claude").userTabName == nil)
+        #expect(summary(tabLabel: "Claude Code").userTabName == nil)
+        #expect(summary(tabLabel: "mocha claude").userTabName == nil)
+        #expect(summary(agent: "shell", tabLabel: "mocha terminal").userTabName == nil)
+        // "mocha" leading a real name is still the user's name.
+        #expect(summary(tabLabel: "mocha redesign").userTabName == "mocha redesign")
+    }
+
+    @Test
+    func secondaryIdentityPrefersTheUsersNameOverTheAgentsTitle() {
+        #expect(summary(title: "Fixing the tests", tabLabel: "ship v2").secondaryIdentity == "ship v2")
+        #expect(summary(title: "Fixing the tests").secondaryIdentity == "Fixing the tests")
+        // A shell's title is its prompt — never identity; the user's tab
+        // name still is.
+        #expect(summary(agent: "shell", title: "user@host:~").secondaryIdentity == nil)
+        #expect(summary(agent: "shell", title: "user@host:~", tabLabel: "deploy box").secondaryIdentity == "deploy box")
     }
 
     @Test

@@ -65,6 +65,7 @@ test("agents endpoint serves herdr state and degrades honestly without it", asyn
     readDialog: async () => ({ present: false as const }),
     decideAgent: async () => ({ decided: true as const, sent: "Enter" }),
     closeTab: async () => ({ closed: true as const }),
+    renameTab: async (_tabId: string, label: string) => ({ renamed: true as const, label: label.trim() }),
     listTree: async () => ({
       available: true as const,
       workspaces: [
@@ -109,6 +110,23 @@ test("agents endpoint serves herdr state and degrades honestly without it", asyn
     });
     assert.equal(closed.status, 200);
     assert.deepEqual(await closed.json(), { closed: true, tabId: "wB:t9" });
+
+    // #55: renaming a tab wraps herdr's tab.rename; blank labels never
+    // reach herdr.
+    const renamed = await fetch(`http://127.0.0.1:${address.port}/api/herdr/tabs/wB:t9`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "  ship the fix  " }),
+    });
+    assert.equal(renamed.status, 200);
+    assert.deepEqual(await renamed.json(), { renamed: true, tabId: "wB:t9", label: "ship the fix" });
+
+    const blankRename = await fetch(`http://127.0.0.1:${address.port}/api/herdr/tabs/wB:t9`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "   " }),
+    });
+    assert.equal(blankRename.status, 400);
   } finally {
     await close(server);
   }
@@ -160,6 +178,7 @@ test("claude hook events overlay blocked status with hook authority", async () =
     createTab: async () => ({ created: true as const, paneId: "wB:p9", tabId: "wB:t9" }),
     readDialog: async () => ({ present: false as const }),
     decideAgent: async () => ({ decided: true as const, sent: "Enter" }),
+    renameTab: async (_tabId: string, label: string) => ({ renamed: true as const, label }),
   };
   const server = await createMochaServer({ config, herdr, attention });
   await listen(server);
@@ -240,6 +259,7 @@ test("decision endpoint fires only when an authority flags the agent as waiting"
     },
     promptAgent: async () => ({ submitted: true as const }),
     createTab: async () => ({ created: true as const, paneId: "wB:p9", tabId: "wB:t9" }),
+    renameTab: async (_tabId: string, label: string) => ({ renamed: true as const, label }),
   };
   const server = await createMochaServer({ config, herdr, attention });
   await listen(server);
@@ -800,7 +820,11 @@ test("terminal websocket returns not found before spawning a pty", async () => {
 // A herdr double that satisfies the full agent source, with only the pieces
 // a given test cares about overridden.
 function stubHerdr(
-  options: { cwd?: string; onCreateTab?: (request: HerdrTabRequest) => void } = {},
+  options: {
+    cwd?: string;
+    onCreateTab?: (request: HerdrTabRequest) => void;
+    onRenameTab?: (tabId: string, label: string) => void;
+  } = {},
 ): HerdrAgentSource {
   const agent = {
     id: "wB:p1",
@@ -823,6 +847,10 @@ function stubHerdr(
     readDialog: async () => ({ present: false as const }),
     decideAgent: async () => ({ decided: true as const, sent: "Enter" }),
     promptAgent: async () => ({ submitted: true as const }),
+    renameTab: async (tabId: string, label: string) => {
+      options.onRenameTab?.(tabId, label);
+      return { renamed: true as const, label };
+    },
     createTab: async (request: HerdrTabRequest) => {
       options.onCreateTab?.(request);
       return { created: true as const, paneId: "wB:p9", tabId: "wB:t9" };

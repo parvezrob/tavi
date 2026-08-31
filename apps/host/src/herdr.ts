@@ -77,6 +77,10 @@ export type HerdrTreeResult =
 
 export type HerdrTabCloseResult = { closed: true } | { closed: false; reason: string };
 
+export type HerdrTabRenameResult =
+  | { renamed: true; label: string }
+  | { renamed: false; reason: string };
+
 export interface TerminalSize {
   cols: number;
   rows: number;
@@ -89,6 +93,7 @@ export interface HerdrAgentSource {
   paneSize?(paneId: string): Promise<TerminalSize | undefined>;
   listTree(): Promise<HerdrTreeResult>;
   closeTab(tabId: string): Promise<HerdrTabCloseResult>;
+  renameTab(tabId: string, label: string): Promise<HerdrTabRenameResult>;
   findAgent(paneId: string): Promise<HerdrAgentLookup>;
   attachCommand(paneId: string): AttachCommand;
   readAgent(paneId: string, lines: number): Promise<HerdrPreviewResult>;
@@ -116,16 +121,50 @@ export class HerdrService implements HerdrAgentSource {
     }
 
     try {
-      const result = asRecord(await this.request("agent.list", {}));
+      // The user's name for a tab (herdr tab rename, #55) is identity on
+      // the phone. Joined here so every consumer — the REST list, the
+      // events feed, the tree — carries the same label. Fetched alongside
+      // the list (one round-trip of latency, not two) and as enrichment
+      // only: a failed tab.list must never take the agent list down.
+      const [result, labels] = await Promise.all([
+        this.request("agent.list", {}).then(asRecord),
+        this.request("tab.list", {})
+          .then((tabsRaw) => {
+            const map = new Map<string, string>();
+            for (const tab of asArray(asRecord(tabsRaw).tabs).map(asRecord)) {
+              const tabId = asString(tab.tab_id);
+              const label = asString(tab.label);
+              if (tabId && label) map.set(tabId, label);
+            }
+            return map;
+          })
+          .catch(() => new Map<string, string>()),
+      ]);
       const agents = Array.isArray(result.agents) ? result.agents : [];
       return {
         provider: "herdr",
         available: true,
         protocol,
-        agents: agents.map((agent) => parseAgent(asRecord(agent))),
+        agents: agents.map((raw) => {
+          const parsed = parseAgent(asRecord(raw));
+          const label = labels.get(parsed.tabId);
+          return label ? { ...parsed, tabLabel: label } : parsed;
+        }),
       };
     } catch (error) {
       return unavailable(describeConnectionFailure(error));
+    }
+  }
+
+  // Verified live on the socket: tab.rename answers { type: "tab_info",
+  // tab: { ..., label } } with the applied label.
+  async renameTab(tabId: string, label: string): Promise<HerdrTabRenameResult> {
+    try {
+      const result = asRecord(await this.request("tab.rename", { tab_id: tabId, label }));
+      const applied = asString(asRecord(result.tab).label);
+      return { renamed: true, label: applied || label };
+    } catch (error) {
+      return { renamed: false, reason: describeConnectionFailure(error) };
     }
   }
 

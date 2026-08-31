@@ -32,6 +32,7 @@ test("publishes a snapshot, refreshes on status events, and rebuilds on structur
     { type: "pane.exited" },
     { type: "pane.agent_detected" },
     { type: "pane.updated" },
+    { type: "tab.renamed" },
     { type: "pane.agent_status_changed", pane_id: "wB:p1" },
   ]);
 
@@ -124,6 +125,11 @@ async function startScriptedHerdr(context: TestContext, socketPath: string): Pro
         } else if (request.method === "agent.list") {
           socket.write(
             `${JSON.stringify({ id: request.id, result: { type: "agent_list", agents: scripted.agents } })}\n`,
+          );
+        } else if (request.method === "tab.list") {
+          // Real herdr always answers tab.list (the label join, #55).
+          socket.write(
+            `${JSON.stringify({ id: request.id, result: { type: "tab_list", tabs: [] } })}\n`,
           );
         } else if (request.method === "events.subscribe") {
           scripted.subscriptions.push(

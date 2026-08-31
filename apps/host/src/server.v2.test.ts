@@ -167,6 +167,10 @@ test("herdr agents are attachable terminal targets with honest failure modes", a
       herdrUp
         ? { closed: true as const }
         : { closed: false as const, reason: "The Herdr server is not running." },
+    renameTab: async (_tabId: string, label: string) =>
+      herdrUp
+        ? { renamed: true as const, label }
+        : { renamed: false as const, reason: "The Herdr server is not running." },
     findAgent: async (paneId: string) =>
       herdrUp
         ? paneId === "wB:p1"
@@ -407,6 +411,7 @@ function fixtureHerdr(): HerdrAgentSource {
     listAgents: async () => ({ provider: "herdr" as const, available: true, protocol: 17, agents: [agent] }),
     listTree: async () => ({ available: true as const, workspaces: [] }),
     closeTab: async () => ({ closed: true as const }),
+    renameTab: async (_tabId: string, label: string) => ({ renamed: true as const, label }),
     findAgent: async (paneId: string) =>
       paneId === agent.id ? { available: true as const, agent } : { available: true as const },
     attachCommand: (paneId: string) => ({ bin: "herdr", args: ["agent", "attach", paneId] }),

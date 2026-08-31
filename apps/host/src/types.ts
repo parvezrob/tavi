@@ -27,6 +27,9 @@ export interface HerdrAgentInfo {
   title: string;
   workspaceId: string;
   tabId: string;
+  // The tab's label as herdr reports it (#55). Users rename tabs to name
+  // the task; the phone decides which labels are user-meaningful.
+  tabLabel?: string | undefined;
   focused: boolean;
   revision: number;
   // Who asserted `status`: herdr's screen detection, or the agent's own

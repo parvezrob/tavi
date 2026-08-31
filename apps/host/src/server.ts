@@ -574,6 +574,31 @@ async function routeRequest(
     return;
   }
 
+  // Rename a tab (#55): the user's own name for the task becomes the
+  // pane's identity on the phone. Herdr owns the truth; the new label
+  // reaches every phone through the events feed's refresh.
+  if (tabCloseMatch && request.method === "PATCH") {
+    if (!herdr) {
+      sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
+      return;
+    }
+    const tabId = safeSessionId(tabCloseMatch[1] || "");
+    const body = await readJsonBody(request);
+    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const label = typeof record.label === "string" ? record.label.trim() : "";
+    if (!label || label.length > 120) {
+      sendJson(response, 400, { error: "label must be 1–120 characters." });
+      return;
+    }
+    const result = await herdr.renameTab(tabId, label);
+    if (!result.renamed) {
+      sendJson(response, 503, { error: result.reason });
+      return;
+    }
+    sendJson(response, 200, { renamed: true, tabId, label: result.label });
+    return;
+  }
+
   if (url.pathname === "/api/herdr/tabs" && request.method === "POST") {
     if (!herdr) {
       sendJson(response, 404, { error: "Herdr integration is not configured on this host." });

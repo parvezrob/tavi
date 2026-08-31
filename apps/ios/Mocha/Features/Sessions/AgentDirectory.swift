@@ -10,6 +10,10 @@ struct AgentSummary: Identifiable, Equatable, Sendable, Decodable {
     let title: String
     let workspaceId: String
     let tabId: String
+    // The herdr tab's label (#55) — the user's own name for the task when
+    // they set one. Absent from older hosts; presentation decides which
+    // labels are user-meaningful.
+    var tabLabel: String? = nil
     let focused: Bool
 }
 
@@ -438,6 +442,38 @@ final class AgentDirectory {
     // endpoint. Submits exactly once; returns a user-facing error message
     // on failure, nil on success. Note the host-side contract: the text
     // appends to whatever is already typed in the agent's own composer.
+    // Renames the herdr tab behind a pane (#55). Returns a user-facing
+    // error message, nil on success; the new label reaches every phone
+    // through the events feed like any other change.
+    func renameTab(tabId: String, label: String) async -> String? {
+        guard let host, !credential.isEmpty else { return "Connect a host first." }
+        guard var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else {
+            return "The host address is invalid."
+        }
+        components.path = "/api/herdr/tabs/\(tabId)"
+        guard let url = components.url else { return "The host address is invalid." }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONEncoder().encode(["label": label])
+
+        do {
+            let (data, response) = try await Self.session.data(for: request)
+            guard let status = (response as? HTTPURLResponse)?.statusCode else {
+                return "The host did not answer."
+            }
+            guard status == 200 else {
+                let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
+                return message ?? "The host could not rename the tab (HTTP \(status))."
+            }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
     func promptAgent(paneId: String, text: String) async -> String? {
         guard let host, !credential.isEmpty else { return "Connect a host first." }
         guard var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else {

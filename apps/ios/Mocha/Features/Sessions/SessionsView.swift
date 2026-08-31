@@ -31,19 +31,24 @@ struct SessionsView: View {
     // than read from defaults on every body pass: the home re-renders on
     // every status event and every freshness tick.
     @State private var computerName = ""
+    // Held for the needs-you banner's scroll-to-cards tap.
+    @State private var homeScrollProxy: ScrollViewProxy?
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                // Deliberately not lazy: the home holds a handful of rows,
-                // and LazyVStack's subview caching served a stale card (old
-                // status pill) after a row moved between sections.
-                VStack(alignment: .leading, spacing: 12) {
-                    homeContent
+            ScrollViewReader { proxy in
+                ScrollView {
+                    // Deliberately not lazy: the home holds a handful of
+                    // rows, and LazyVStack's subview caching served a stale
+                    // card (old status pill) after a row moved sections.
+                    VStack(alignment: .leading, spacing: 12) {
+                        homeContent
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 2)
+                    .padding(.bottom, 28)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 2)
-                .padding(.bottom, 28)
+                .onAppear { homeScrollProxy = proxy }
             }
             .background(MochaTheme.canvas.ignoresSafeArea())
             .navigationTitle("Mocha")
@@ -216,14 +221,19 @@ struct SessionsView: View {
                 // everything the banner would; the banner earns its row only
                 // as a tally of several (#54).
                 // One header, never two: the banner is the section header
-                // when several wait; the eyebrow is when one does.
+                // when several wait; the eyebrow is when one does. The
+                // banner never picks an agent for you (owner call): its tap
+                // brings the waiting cards into view and you choose.
                 if layout.needsYou.count > 1 {
                     NeedsYouBanner(count: layout.needsYou.count) {
-                        if let first = layout.needsYou.first { decisionAgent = first }
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            homeScrollProxy?.scrollTo("home.needsYou", anchor: .top)
+                        }
                     }
                 } else {
                     SectionEyebrow(title: "Needs you")
                 }
+                Color.clear.frame(height: 0).id("home.needsYou")
                 // Needs-you is flat and first, across every computer and
                 // project: a waiting agent never hides under a group.
                 // Identity includes the status so a section move always

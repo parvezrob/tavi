@@ -89,10 +89,11 @@ struct JumpToSheet: View {
     private func agentRow(_ agent: AgentSummary) -> some View {
         let status = AgentStatusStyle.of(agent.status)
         let isCurrent = agent.id == currentPaneID
-        // A switcher answers "where am I jumping?" — the second line is the
-        // address, always: the abbreviated path, never a title standing in
-        // for a place and never a bare folder name two rows could share.
-        let location = agent.abbreviatedPath
+        // A switcher answers "where am I jumping?" — the second line always
+        // ends in the address. Your name for the tab (#55) leads it when
+        // one exists: "fix auth bug · ~/Projects/api".
+        let location = agent.userTabName.map { "\($0) · \(agent.abbreviatedPath)" }
+            ?? agent.abbreviatedPath
         return Button {
             guard !isCurrent else {
                 dismiss()

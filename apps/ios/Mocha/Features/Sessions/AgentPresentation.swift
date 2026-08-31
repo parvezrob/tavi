@@ -72,6 +72,27 @@ extension AgentSummary {
     var meaningfulTitle: String? {
         isShell ? nil : ownTitle
     }
+
+    // The user's own name for the pane's tab (#55): herdr's tab label,
+    // kept only when a person plausibly chose it. Herdr's defaults — bare
+    // numbers, "mocha <kind>" from phone-created tabs — and echoes of the
+    // agent's name are noise, not identity.
+    var userTabName: String? {
+        guard let raw = tabLabel?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
+        if Int(raw) != nil { return nil }
+        let lowered = raw.lowercased()
+        if lowered == agent.lowercased() || lowered == displayName.lowercased() { return nil }
+        if lowered == "mocha \(agent.lowercased())" || lowered == "mocha \(displayName.lowercased())" {
+            return nil
+        }
+        return raw
+    }
+
+    // The line under the agent's name wherever the folder is already on
+    // screen: your name for the task first, the agent's own title second.
+    var secondaryIdentity: String? {
+        userTabName ?? meaningfulTitle
+    }
 }
 
 // Status language and color live in one place; an unrecognized status is
@@ -171,6 +192,7 @@ extension AgentSummary {
             title: title,
             workspaceId: workspaceId,
             tabId: tabId,
+            tabLabel: tabLabel,
             focused: focused
         )
     }

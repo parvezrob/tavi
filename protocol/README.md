@@ -135,6 +135,23 @@ Creates a Herdr tab and launches an agent in it.
 
 **Compatibility.** Requiring `cwd` is a breaking change to this endpoint, made while Mocha is pre-MVP with a single first-party client shipped alongside the host. A client that omits `cwd` gets `400` on every create and must be updated with the host; there is no negotiated fallback. Deploy the host and the app together.
 
+### `PATCH /api/herdr/tabs/{tabId}`
+
+Renames a Herdr tab (#55) — the user's own name for the task the pane is doing.
+
+```json
+{ "label": "ship the fix" }
+```
+
+`label` is trimmed and must be 1–120 characters after trimming (`400` otherwise). The host wraps `tab.rename`; Herdr owns the truth, and the applied label reaches every client through the agents feed — each agent in `GET /api/agents` (and the events snapshots) carries the tab's current label as `tabLabel` when the tab has one. Clients decide which labels are user-meaningful; Herdr's defaults (bare numbers, `mocha <kind>` on phone-created tabs) are not identity.
+
+| Status | Meaning |
+| --- | --- |
+| `200` | Renamed; body is `{ "renamed": true, "tabId", "label" }`. |
+| `400` | Missing, blank, or over-long `label`. |
+| `404` | Herdr is not configured on this host. |
+| `503` | Herdr is configured but could not rename the tab. |
+
 ## Terminal WebSocket
 
 Connect to:

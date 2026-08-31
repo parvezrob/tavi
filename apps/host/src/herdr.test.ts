@@ -365,6 +365,32 @@ test("reports unavailable when herdr stops responding", async (context) => {
   assert.equal(result.reason, "Herdr did not respond in time.");
 });
 
+test("joins tab labels onto agents and renames tabs", async (context) => {
+  const socketPath = temporarySocketPath(context);
+  const methodCalls: string[] = [];
+  await startFakeHerdr(context, socketPath, {
+    protocol: 17,
+    agents: [
+      { agent: "claude", agent_status: "idle", cwd: "/w", pane_id: "wB:p1", tab_id: "wB:t1", workspace_id: "wB" },
+      { agent: "shell", agent_status: "idle", cwd: "/w", pane_id: "wB:p2", tab_id: "wB:t9", workspace_id: "wB" },
+    ],
+    tabs: [{ tab_id: "wB:t1", workspace_id: "wB", label: "fix auth bug", focused: false }],
+    methodCalls,
+  });
+  const service = new HerdrService({ socketPath });
+
+  const result = await service.listAgents();
+  assert.equal(result.available, true);
+  assert.equal(result.agents[0]?.tabLabel, "fix auth bug");
+  // A tab herdr does not list leaves its agent without a label rather
+  // than inventing one.
+  assert.equal(result.agents[1]?.tabLabel, undefined);
+  assert.ok(methodCalls.includes("tab.list"));
+
+  const renamed = await service.renameTab("wB:t1", "ship the fix");
+  assert.deepEqual(renamed, { renamed: true, label: "ship the fix" });
+});
+
 function temporarySocketPath(context: TestContext): string {
   const directory = mkdtempSync(path.join(tmpdir(), "mocha-herdr-test-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -395,7 +421,7 @@ async function startFakeHerdr(
       const request = JSON.parse(buffered.slice(0, lineEnd)) as {
         id: string;
         method: string;
-        params?: { keys?: string[] };
+        params?: { keys?: string[]; tab_id?: string; label?: string };
       };
       buffered = buffered.slice(lineEnd + 1);
       behavior.methodCalls?.push(request.method);
@@ -421,7 +447,12 @@ async function startFakeHerdr(
                   ? { type: "session_snapshot", snapshot: behavior.snapshot ?? {} }
                 : request.method === "agent.prompt" || request.method === "agent.send_keys"
                   ? { type: "ok" }
-                  : { type: "agent_list", agents: behavior.agents };
+                  : request.method === "tab.rename"
+                    ? {
+                        type: "tab_info",
+                        tab: { tab_id: request.params?.tab_id ?? "", label: request.params?.label ?? "" },
+                      }
+                    : { type: "agent_list", agents: behavior.agents };
       socket.write(`${JSON.stringify({ id: request.id, result })}\n`);
     });
   });
