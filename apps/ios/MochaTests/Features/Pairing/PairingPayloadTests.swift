@@ -15,6 +15,16 @@ struct PairingPayloadTests {
         #expect(payload.hostName == "studio-mac")
     }
 
+    // The exact string a pre-fix host printed (owner screenshot): spaces as "+".
+    @Test
+    func acceptsPlusEncodedSpacesFromOlderHosts() throws {
+        let code = "mocha://pair?u=https%3A%2F%2Fparvezs-macbook-air.tail4c71f5.ts.net&s=ishIShUAJxIhmHCbVgItGw&f=99F5+7AF0+%C2%B7+E678+C534&n=Parvezs-MacBook-Air"
+        let payload = try PairingPayload.decode(code)
+        #expect(payload.fingerprint == "99F5 7AF0 · E678 C534")
+        #expect(payload.hostName == "Parvezs-MacBook-Air")
+        #expect(payload.secret == "ishIShUAJxIhmHCbVgItGw")
+    }
+
     @Test
     func fallsBackToTheHostnameWhenNoNameIsGiven() throws {
         let payload = try PairingPayload.decode("mocha://pair?u=https://studio-mac.tail1234.ts.net&s=x&f=y")

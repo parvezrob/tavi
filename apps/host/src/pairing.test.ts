@@ -121,6 +121,10 @@ test("the QR payload round-trips and rejects anything else", () => {
   const encoded = encodePairingPayload(payload);
 
   assert.ok(encoded.startsWith("mocha://pair?"));
+  // Never "+" for a space: the phone's parser does not decode it (owner-hit
+  // bug: the fingerprint arrived as "99F5+7AF0+·+E678+C534").
+  assert.ok(!encoded.includes("+"), encoded);
+  assert.ok(encoded.includes("f=8F2A%2019C4%20%C2%B7%207B10%20D6E9"), encoded);
   assert.deepEqual(decodePairingPayload(encoded), payload);
   assert.deepEqual(decodePairingPayload(`  ${encoded}\n`), payload);
   assert.equal(decodePairingPayload("https://example.com/pair?u=x&s=y&f=z"), undefined);

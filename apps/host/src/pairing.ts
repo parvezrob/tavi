@@ -226,14 +226,19 @@ export interface PairingPayload {
   hostName: string;
 }
 
+// encodeURIComponent, not URLSearchParams: the latter writes spaces as "+",
+// which Foundation's URL parser on the phone keeps as a literal plus — the
+// fingerprint then never matches. "%20" is read the same way everywhere.
 export function encodePairingPayload(payload: PairingPayload): string {
-  const query = new URLSearchParams({
-    u: payload.url,
-    s: payload.secret,
-    f: payload.fingerprint,
-    n: payload.hostName,
-  });
-  return `mocha://pair?${query.toString()}`;
+  const query = [
+    ["u", payload.url],
+    ["s", payload.secret],
+    ["f", payload.fingerprint],
+    ["n", payload.hostName],
+  ]
+    .map(([key, value]) => `${key}=${encodeURIComponent(value ?? "")}`)
+    .join("&");
+  return `mocha://pair?${query}`;
 }
 
 export function decodePairingPayload(text: string): PairingPayload | undefined {

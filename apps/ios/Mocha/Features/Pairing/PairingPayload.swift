@@ -28,8 +28,13 @@ struct PairingPayload: Equatable {
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             throw DecodeError.notAPairingCode
         }
+        // Foundation keeps "+" literal in query values; a host that encoded
+        // spaces that way (pre-fix hosts, or anything using URLSearchParams)
+        // must still pair. Nothing in a pairing code legitimately contains "+".
         let items = Dictionary(
-            (components.queryItems ?? []).map { ($0.name, $0.value?.trimmingCharacters(in: .whitespaces) ?? "") },
+            (components.queryItems ?? []).map {
+                ($0.name, ($0.value ?? "").replacingOccurrences(of: "+", with: " ").trimmingCharacters(in: .whitespaces))
+            },
             uniquingKeysWith: { first, _ in first }
         )
         guard let rawURL = items["u"], !rawURL.isEmpty,
