@@ -38,12 +38,25 @@ struct ProjectWorkspace: Identifiable, Equatable, Decodable {
     var id: String { path }
 }
 
+// An agent the host's herdr can launch. `installed` is whether the
+// executable resolves on the Mac's login-shell PATH — the picker offers
+// every kind so the list is honest about what exists, but only installed
+// ones can be chosen.
+struct AgentKind: Identifiable, Equatable, Decodable {
+    let kind: String
+    let label: String
+    let installed: Bool
+
+    var id: String { kind }
+}
+
 struct ProjectCatalog: Equatable, Decodable {
     let recent: [ProjectFolder]
     let workspaces: [ProjectWorkspace]
     // The project roots configured on the Mac. Empty means none were found,
     // which is worth saying plainly: every folder will then need confirming.
     let roots: [String]
+    let agents: [AgentKind]
 }
 
 enum ProjectsFetch: Equatable {

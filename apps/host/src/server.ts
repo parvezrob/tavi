@@ -6,6 +6,7 @@ import { bearerToken, isAuthorized } from "./auth.js";
 import type { HostConfig } from "./config.js";
 import { VERSION } from "./config.js";
 import { AttachmentStore, type TerminalAttachment, type AttachmentClient } from "./attachment.js";
+import { AGENT_KIND_NAMES, AgentKindDetector } from "./agent-kinds.js";
 import { parseClaudeHookEvent, type AttentionOverlay } from "./attention.js";
 import type { AgentEventSource } from "./herdr-events.js";
 import {
@@ -31,7 +32,6 @@ import { InputError, parseCreateSession, safeSessionId } from "./validation.js";
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_PREVIEW_CHARACTERS = 4_096;
 const MAX_PROMPT_CHARACTERS = 16_384;
-const ALLOWED_TAB_AGENTS = ["claude", "codex"];
 // Small buffers on purpose: when the phone falls behind, pausing the pty
 // quickly means tmux holds fresh frames instead of the connection replaying a
 // large backlog of stale screen paints.
@@ -47,6 +47,7 @@ export interface MochaServerOptions {
   agentEvents?: AgentEventSource;
   attention?: AttentionOverlay;
   projects?: ProjectHistory;
+  agentKinds?: AgentKindDetector;
   spawnTerminal?: typeof pty.spawn;
   attachmentRetentionMs?: number;
   attachmentBufferBytes?: number;
@@ -70,6 +71,7 @@ export async function createMochaServer(options: MochaServerOptions) {
     agentEvents,
     attention,
     projects = new ProjectHistory(config.stateDir),
+    agentKinds = new AgentKindDetector({ shell: config.shell }),
     spawnTerminal = pty.spawn,
   } = options;
   const eventsWss = new WebSocketServer({
@@ -93,7 +95,7 @@ export async function createMochaServer(options: MochaServerOptions) {
 
   const server = createServer(async (request, response) => {
     try {
-      await routeRequest(request, response, { config, tmux, herdr, attention, projects });
+      await routeRequest(request, response, { config, tmux, herdr, attention, projects, agentKinds });
     } catch (error) {
       const status = error instanceof InputError ? 400 : 500;
       const message = error instanceof Error ? error.message : "Unexpected server error.";
@@ -249,6 +251,7 @@ interface RouteContext {
   config: HostConfig;
   tmux: SessionBackend;
   projects: ProjectHistory;
+  agentKinds: AgentKindDetector;
   herdr?: HerdrAgentSource | undefined;
   attention?: AttentionOverlay | undefined;
 }
@@ -258,7 +261,7 @@ async function routeRequest(
   response: ServerResponse,
   context: RouteContext,
 ): Promise<void> {
-  const { config, tmux, herdr, attention, projects } = context;
+  const { config, tmux, herdr, attention, projects, agentKinds } = context;
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
   if (url.pathname === "/api/health" && request.method === "GET") {
@@ -313,15 +316,21 @@ async function routeRequest(
 
   // Everything the New Agent picker needs in one call (#24): the folders
   // agents are living in now plus this host's remembered choices, the
-  // browsable roots, and the roots themselves so the phone knows which
-  // custom path will need the extra confirmation.
+  // browsable roots, the roots themselves so the phone knows which custom
+  // path will need the extra confirmation, and which agent kinds this Mac
+  // can actually launch.
   if (url.pathname === "/api/projects" && request.method === "GET") {
-    const agents = herdr ? await herdr.listAgents() : undefined;
+    const [agents, workspaces, kinds] = await Promise.all([
+      herdr ? herdr.listAgents() : undefined,
+      tmux.listWorkspaces(),
+      agentKinds.list(),
+    ]);
     const agentCwds = agents?.available ? agents.agents.map((agent) => agent.cwd) : [];
     sendJson(response, 200, {
       recent: mergeRecentProjects(projects.list(), agentCwds, config.roots),
-      workspaces: await tmux.listWorkspaces(),
+      workspaces,
       roots: config.roots,
+      agents: kinds,
     });
     return;
   }
@@ -493,9 +502,19 @@ async function routeRequest(
     const body = await readJsonBody(request);
     const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
     const agent = typeof record.agent === "string" ? record.agent : undefined;
-    if (agent !== undefined && !ALLOWED_TAB_AGENTS.includes(agent)) {
-      sendJson(response, 400, { error: "agent must be one of: claude, codex." });
+    if (agent !== undefined && !AGENT_KIND_NAMES.includes(agent)) {
+      sendJson(response, 400, { error: `agent must be one of: ${AGENT_KIND_NAMES.join(", ")}.` });
       return;
+    }
+    // herdr accepts a kind that is not installed and hands back a tab whose
+    // launch has already failed — a dead pane that lists as nothing. Refuse
+    // up front instead, with the reason the picker already shows.
+    if (agent !== undefined) {
+      const kind = (await agentKinds.list()).find((entry) => entry.kind === agent);
+      if (kind && !kind.installed) {
+        sendJson(response, 400, { error: `${kind.label} is not installed on this Mac.` });
+        return;
+      }
     }
     // `cwd` is required (#24). It used to be optional, which is exactly how
     // phone-created agents ended up in the host user's home directory.

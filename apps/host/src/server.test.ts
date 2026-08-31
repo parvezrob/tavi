@@ -8,6 +8,7 @@ import type { AddressInfo } from "node:net";
 import test from "node:test";
 import type { IPty } from "node-pty";
 import WebSocket from "ws";
+import { AgentKindDetector } from "./agent-kinds.js";
 import { AttentionOverlay } from "./attention.js";
 import type { HostConfig } from "./config.js";
 import { TERMINAL_PROTOCOL } from "./protocol.js";
@@ -300,6 +301,7 @@ test("the project picker serves live agent folders, remembered choices, and root
     tmux,
     herdr,
     projects,
+    agentKinds: new AgentKindDetector({ shell: "/bin/sh", runShell: async () => "codex\n" }),
   });
   await listen(server);
 
@@ -313,6 +315,7 @@ test("the project picker serves live agent folders, remembered choices, and root
       recent: Array<{ path: string; name: string; active: boolean; withinRoots: boolean }>;
       workspaces: Array<{ path: string }>;
       roots: string[];
+      agents: Array<{ kind: string; label: string; installed: boolean }>;
     };
 
     // The folder an agent is living in leads; the remembered one follows.
@@ -321,6 +324,10 @@ test("the project picker serves live agent folders, remembered choices, and root
     assert.equal(body.recent.every((entry) => entry.withinRoots), true);
     assert.deepEqual(body.workspaces, [{ name: "api", path: api, git: true }]);
     assert.deepEqual(body.roots, [root]);
+    // Every kind herdr supports is offered; only what this Mac has is installed.
+    assert.equal(body.agents.find((entry) => entry.kind === "codex")?.installed, true);
+    assert.equal(body.agents.find((entry) => entry.kind === "claude")?.installed, false);
+    assert.equal(body.agents.find((entry) => entry.kind === "gemini")?.label, "Gemini CLI");
 
     const unauthorized = await fetch(`http://127.0.0.1:${address.port}/api/projects`);
     assert.equal(unauthorized.status, 401);
@@ -347,6 +354,10 @@ test("creating an agent requires a real folder and confirmation outside the root
     tmux: {} as SessionBackend,
     herdr,
     projects,
+    agentKinds: new AgentKindDetector({
+      shell: "/bin/sh",
+      runShell: async () => "claude\ncodex\ngemini\n",
+    }),
   });
   await listen(server);
 
@@ -388,6 +399,20 @@ test("creating an agent requires a real folder and confirmation outside the root
     assert.equal(confirmed.status, 201);
     assert.deepEqual(created.at(-1), { agent: "codex", cwd: outside });
     assert.deepEqual(projects.list().map((entry) => entry.path), [outside, project]);
+
+    // Any kind herdr can launch is accepted, not just the first two; anything
+    // else is refused before herdr sees it.
+    const gemini = await create({ agent: "gemini", cwd: project });
+    assert.equal(gemini.status, 201);
+    assert.deepEqual(created.at(-1), { agent: "gemini", cwd: project });
+    const bogus = await create({ agent: "rm -rf", cwd: project });
+    assert.equal(bogus.status, 400);
+    // A real kind that this Mac does not have is refused before herdr sees
+    // it — herdr would otherwise hand back a tab whose launch already died.
+    const notInstalled = await create({ agent: "cursor", cwd: project });
+    assert.equal(notInstalled.status, 400);
+    assert.match(((await notInstalled.json()) as { error: string }).error, /Cursor is not installed/);
+    assert.equal(created.length, 3);
   } finally {
     await close(server);
   }

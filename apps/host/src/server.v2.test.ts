@@ -11,6 +11,7 @@ import type { IPty } from "node-pty";
 import WebSocket from "ws";
 import type { HostConfig } from "./config.js";
 import { OUTPUT_FRAME_HEADER_BYTES, OUTPUT_FRAME_TYPE, TERMINAL_PROTOCOL_V2 } from "./protocol.js";
+import { AgentKindDetector } from "./agent-kinds.js";
 import { ProjectHistory } from "./projects.js";
 import { createMochaServer, type MochaServerOptions } from "./server.js";
 import type { ServerTerminalMessage, SessionBackend } from "./types.js";
@@ -408,6 +409,7 @@ class TerminalHarness {
       // Never the developer's real state directory: creating an agent
       // records the folder, and that must not leak between test runs.
       projects: new ProjectHistory(mkdtempSync(path.join(tmpdir(), "mocha-v2-state-"))),
+      agentKinds: new AgentKindDetector({ shell: "/bin/sh", runShell: async () => "claude\n" }),
       ...(this.herdr ? { herdr: this.herdr } : {}),
       ...(this.agentEvents ? { agentEvents: this.agentEvents } : {}),
       spawnTerminal: (bin, args) => {

@@ -136,9 +136,15 @@ Everything a client needs to choose where a new agent starts.
   "workspaces": [
     { "name": "api", "path": "/Users/example/Projects/api", "git": true }
   ],
-  "roots": ["/Users/example/Projects"]
+  "roots": ["/Users/example/Projects"],
+  "agents": [
+    { "kind": "claude", "label": "Claude Code", "installed": true },
+    { "kind": "gemini", "label": "Gemini CLI", "installed": false }
+  ]
 }
 ```
+
+`agents` is every agent kind the host's herdr can launch, in the host's preferred order, with a display label and whether the executable resolves on the Mac's login-shell PATH. Clients offer only installed kinds for creation; the rest are listed so a missing agent is explainable rather than absent.
 
 `recent` merges the folders agents are running in right now (`active: true`) with the folders this host has previously launched an agent in. Folders with a live agent come first, then the most recently chosen; `lastUsedAt` is absent for a folder known only from a live agent, and a remembered folder that no longer exists on disk is omitted rather than offered. `name` is the folder's basename. `withinRoots` says whether the folder sits inside `roots`, so a client can mark the folders whose creation will require the confirmation described below instead of discovering it after a failed request. `workspaces` is the same scan as `GET /api/workspaces`.
 
@@ -152,7 +158,7 @@ Creates a Herdr tab and launches an agent in it.
 { "agent": "claude", "cwd": "/Users/example/Projects/api", "allowOutsideRoots": false }
 ```
 
-`agent` is `claude` or `codex`, or absent for a plain shell tab. `cwd` is **required** and must be an absolute path to an existing directory — the host never starts an agent in an unspecified location. A `cwd` outside the configured roots is refused with `400` and `{ "outsideRoots": true }` unless the request carries `allowOutsideRoots: true`, which clients send only after confirming the custom location with the person.
+`agent` is any `kind` from `GET /api/projects` → `agents` (herdr's supported set — `claude`, `codex`, `gemini`, `opencode`, `copilot`, `cursor`, …), or absent for a plain shell tab. A kind that is not installed on the Mac is refused with `400` (`"<Label> is not installed on this Mac."`) — herdr would otherwise return a tab whose launch has already failed. `cwd` is **required** and must be an absolute path to an existing directory — the host never starts an agent in an unspecified location. A `cwd` outside the configured roots is refused with `400` and `{ "outsideRoots": true }` unless the request carries `allowOutsideRoots: true`, which clients send only after confirming the custom location with the person.
 
 | Status | Meaning |
 | --- | --- |

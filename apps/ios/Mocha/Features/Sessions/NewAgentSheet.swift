@@ -11,7 +11,10 @@ struct NewAgentSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var phase: Phase = .loading
-    @State private var agentKind = "claude"
+    // Remembered across sheets: the kind you launched last is what you most
+    // likely want next. Validated against the host's installed list on load.
+    @AppStorage("mocha.newAgent.kind") private var rememberedKind = "claude"
+    @State private var agentKind: String?
     @State private var selectedPath: String?
     @State private var query = ""
     @State private var customPath = ""
@@ -39,11 +42,11 @@ struct NewAgentSheet: View {
                         Button("Create") {
                             // Disable before the task starts: two taps inside
                             // one frame would otherwise create two agents.
-                            guard !inFlight, selectedPath != nil else { return }
+                            guard !inFlight, selectedPath != nil, agentKind != nil else { return }
                             inFlight = true
                             Task { await create(allowOutsideRoots: false) }
                         }
-                        .disabled(selectedPath == nil || inFlight)
+                        .disabled(selectedPath == nil || agentKind == nil || inFlight)
                         .accessibilityIdentifier("newAgent.create")
                     }
                 }
@@ -108,12 +111,56 @@ struct NewAgentSheet: View {
         let sections = ProjectPicker.sections(for: catalog, query: query)
         return List {
             Section {
-                Picker("Agent", selection: $agentKind) {
-                    Text("Claude").tag("claude")
-                    Text("Codex").tag("codex")
+                // One row, not one per kind: herdr can launch twenty-odd
+                // agents, and listing them inline pushed the folders — the
+                // actual decision — off the screen. Kinds not on this Mac
+                // stay visible but disabled, so "why isn't X here?" has an
+                // answer without cluttering the sheet.
+                Menu {
+                    Section("Installed") {
+                        ForEach(catalog.agents.filter(\.installed)) { kind in
+                            Button {
+                                agentKind = kind.kind
+                                rememberedKind = kind.kind
+                            } label: {
+                                if agentKind == kind.kind {
+                                    Label(kind.label, systemImage: "checkmark")
+                                } else {
+                                    Text(kind.label)
+                                }
+                            }
+                            .accessibilityIdentifier("newAgent.agentKind.\(kind.kind)")
+                        }
+                    }
+                    let missing = catalog.agents.filter { !$0.installed }
+                    if !missing.isEmpty {
+                        Section("Not installed on your Mac") {
+                            ForEach(missing) { kind in
+                                Button(kind.label) {}.disabled(true)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text("Agent")
+                            .foregroundStyle(MochaTheme.textPrimary)
+                        Spacer()
+                        Text(agentKind.map { label(for: $0, in: catalog) } ?? "None installed")
+                            .foregroundStyle(agentKind == nil ? MochaTheme.statusBlocked : MochaTheme.textSecondary)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption)
+                            .foregroundStyle(MochaTheme.textSecondary)
+                    }
+                    .contentShape(Rectangle())
                 }
-                .pickerStyle(.segmented)
                 .accessibilityIdentifier("newAgent.agentKind")
+            } footer: {
+                if !catalog.agents.contains(where: \.installed) {
+                    Text("No supported agent is installed on your Mac. Install one (for example Claude Code or Codex) and reopen this sheet.")
+                        .font(.footnote)
+                        .foregroundStyle(MochaTheme.statusBlocked)
+                        .accessibilityIdentifier("newAgent.noAgents")
+                }
             }
             .listRowBackground(MochaTheme.card)
 
@@ -136,8 +183,8 @@ struct NewAgentSheet: View {
                         .font(.footnote)
                         .foregroundStyle(MochaTheme.statusBlocked)
                         .accessibilityIdentifier("newAgent.error")
-                } else if let selectedPath {
-                    Text("Starting \(agentKind) in \(selectedPath)")
+                } else if let selectedPath, let agentKind {
+                    Text("Starting \(label(for: agentKind, in: catalog)) in \(selectedPath)")
                         .font(.footnote)
                         .foregroundStyle(MochaTheme.textSecondary)
                 } else {
@@ -196,6 +243,10 @@ struct NewAgentSheet: View {
             prompt: "Find a folder"
         )
         .accessibilityIdentifier("newAgent.folders")
+    }
+
+    private func label(for kind: String, in catalog: ProjectCatalog) -> String {
+        catalog.agents.first { $0.kind == kind }?.label ?? kind
     }
 
     private func emptyMessage(for catalog: ProjectCatalog) -> String {
@@ -268,7 +319,9 @@ struct NewAgentSheet: View {
     private func load() async {
         phase = .loading
         switch await directory.fetchProjects() {
-        case let .catalog(catalog): phase = .catalog(catalog)
+        case let .catalog(catalog):
+            agentKind = ProjectPicker.defaultAgentKind(in: catalog.agents, preferring: rememberedKind)
+            phase = .catalog(catalog)
         case let .failure(message): phase = .failed(message)
         }
     }
@@ -279,7 +332,7 @@ struct NewAgentSheet: View {
     }
 
     private func create(allowOutsideRoots: Bool, path: String? = nil) async {
-        guard let cwd = path ?? selectedPath else {
+        guard let cwd = path ?? selectedPath, let agentKind else {
             inFlight = false
             return
         }

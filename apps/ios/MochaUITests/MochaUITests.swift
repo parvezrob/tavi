@@ -261,6 +261,15 @@ final class MochaUITests: XCTestCase {
 
         keepScreenshot(named: "new-agent-picker")
 
+        // The agent menu lists what this Mac can launch. Claude is installed
+        // wherever these live tests run (they drive it), so pick it
+        // explicitly rather than trusting the remembered default.
+        app.buttons["newAgent.agentKind"].tap()
+        let claudeChoice = app.buttons["newAgent.agentKind.claude"]
+        XCTAssertTrue(claudeChoice.waitForExistence(timeout: 10), "The agent menu never offered Claude Code.")
+        keepScreenshot(named: "new-agent-kinds-menu")
+        claudeChoice.tap()
+
         // Nothing is chosen yet, so there is nowhere to create the agent.
         let create = app.buttons["newAgent.create"]
         XCTAssertTrue(create.exists)

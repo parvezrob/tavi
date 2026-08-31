@@ -23,6 +23,16 @@ enum ProjectPicker {
         return Sections(recent: recent, projects: projects)
     }
 
+    // The agent preselected when the sheet opens: what the person chose last
+    // time if it is still installed, else the first installed kind in the
+    // host's order, else nothing — Create then stays disabled with an honest
+    // reason rather than launching something that is not there.
+    static func defaultAgentKind(in kinds: [AgentKind], preferring previous: String?) -> String? {
+        let installed = kinds.filter(\.installed)
+        if let previous, installed.contains(where: { $0.kind == previous }) { return previous }
+        return installed.first?.kind
+    }
+
     private static func matches(_ name: String, _ path: String, _ needle: String) -> Bool {
         guard !needle.isEmpty else { return true }
         return name.lowercased().contains(needle) || path.lowercased().contains(needle)

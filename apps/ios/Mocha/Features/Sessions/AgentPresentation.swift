@@ -18,10 +18,25 @@ extension AgentSummary {
         }
     }
 
+    // Product names for the kinds herdr can launch; the host serves the same
+    // labels in the picker, this covers agents that were started elsewhere.
     var displayName: String {
         switch agent {
         case "claude": "Claude Code"
         case "codex": "Codex"
+        case "gemini": "Gemini CLI"
+        case "opencode": "OpenCode"
+        case "copilot": "GitHub Copilot"
+        case "cursor": "Cursor"
+        case "amp": "Amp"
+        case "droid": "Droid"
+        case "kimi": "Kimi"
+        case "kiro": "Kiro"
+        case "grok": "Grok"
+        case "cline": "Cline"
+        case "devin": "Devin"
+        case "mastracode": "Mastra Code"
+        case "qodercli": "Qoder CLI"
         default: agent.capitalized
         }
     }

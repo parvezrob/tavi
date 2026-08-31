@@ -13,8 +13,15 @@ struct ProjectPickerTests {
             ProjectWorkspace(name: "web", path: "/Users/dev/Projects/web", git: true),
             ProjectWorkspace(name: "notes", path: "/Users/dev/Projects/notes", git: false),
         ],
-        roots: ["/Users/dev/Projects"]
+        roots: ["/Users/dev/Projects"],
+        agents: []
     )
+
+    private let kinds = [
+        AgentKind(kind: "claude", label: "Claude Code", installed: true),
+        AgentKind(kind: "codex", label: "Codex", installed: false),
+        AgentKind(kind: "gemini", label: "Gemini CLI", installed: true),
+    ]
 
     @Test
     func keepsHostOrderAndDoesNotRepeatARecentFolderUnderProjects() {
@@ -56,5 +63,23 @@ struct ProjectPickerTests {
 
         #expect(sections.recent.isEmpty)
         #expect(sections.projects.map(\.name) == ["web"])
+    }
+
+    @Test
+    func defaultAgentIsTheLastUsedOneWhenStillInstalled() {
+        #expect(ProjectPicker.defaultAgentKind(in: kinds, preferring: "gemini") == "gemini")
+    }
+
+    @Test
+    func defaultAgentFallsBackToTheFirstInstalledKind() {
+        // codex was used last but is gone from this Mac.
+        #expect(ProjectPicker.defaultAgentKind(in: kinds, preferring: "codex") == "claude")
+        #expect(ProjectPicker.defaultAgentKind(in: kinds, preferring: nil) == "claude")
+    }
+
+    @Test
+    func noInstalledAgentMeansNoDefault() {
+        let none = kinds.map { AgentKind(kind: $0.kind, label: $0.label, installed: false) }
+        #expect(ProjectPicker.defaultAgentKind(in: none, preferring: "claude") == nil)
     }
 }

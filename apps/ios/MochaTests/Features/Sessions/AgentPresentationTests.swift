@@ -41,7 +41,10 @@ struct AgentPresentationTests {
     func displayNamesAreRecognizableProducts() {
         #expect(summary(agent: "claude").displayName == "Claude Code")
         #expect(summary(agent: "codex").displayName == "Codex")
-        #expect(summary(agent: "gemini").displayName == "Gemini")
+        #expect(summary(agent: "gemini").displayName == "Gemini CLI")
+        #expect(summary(agent: "opencode").displayName == "OpenCode")
+        // A kind herdr adds before this map learns it still reads sensibly.
+        #expect(summary(agent: "newthing").displayName == "Newthing")
     }
 
     @Test
