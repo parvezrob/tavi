@@ -110,7 +110,18 @@ struct TerminalSessionView: View {
         .toolbar {
             if let agent = activeAgent {
                 ToolbarItem(placement: .principal) {
-                    identityHeader(agent)
+                    // The identity is a glass chip, and it does something:
+                    // tapping it opens Jump to — switching panes starts at
+                    // the name of the one you're in (#54).
+                    Button {
+                        if canJump { showingJump = true }
+                    } label: {
+                        identityHeader(agent)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 5)
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: Capsule())
                 }
             }
             if canJump {
@@ -171,16 +182,16 @@ struct TerminalSessionView: View {
         // nominal case. Agent status lives on the home; here the transcript
         // itself shows what the agent is doing.
         let location = agent.isShell ? HomeGrouping.projectName(of: agent.cwd) : agent.projectName
-        return VStack(spacing: 1) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(connectionColor)
-                    .frame(width: 7, height: 7)
-                Text(agent.displayName)
-                    .font(.subheadline.weight(.semibold))
-            }
-            Text(location)
-                .font(.caption2)
+        // One line, not a stack: a two-line title made the whole nav bar
+        // tall. Name leads, the folder rides along in the quiet type.
+        return HStack(spacing: 6) {
+            Circle()
+                .fill(connectionColor)
+                .frame(width: 7, height: 7)
+            Text(agent.displayName)
+                .font(.subheadline.weight(.semibold))
+            Text("· \(location)")
+                .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.head)
@@ -270,10 +281,11 @@ struct TerminalSessionView: View {
         .padding(.horizontal, 12)
         .padding(.top, 10)
         .padding(.bottom, 8)
-        // Liquid Glass chrome (owner call, 2026-09-01): the system
-        // material, not web glassmorphism — the bar reads as glass over
-        // the terminal's black.
-        .background(.ultraThinMaterial)
+        // Opaque on purpose: a material here live-blurs the Metal surface
+        // beneath it, which taxed an iPhone 12 Pro into visible typing
+        // latency. The glass lives on the caps (over this opaque bar) and
+        // in the nav chip — where it costs nothing per keystroke.
+        .background(MochaTheme.card)
         .overlay(alignment: .top) {
             Rectangle().fill(MochaTheme.hairline).frame(height: 1)
         }
@@ -364,6 +376,9 @@ struct TerminalSessionView: View {
 
     private var quickKeyRow: some View {
         HStack(spacing: 8) {
+            // A mode, not a key (#54): the chip names the mode you are in —
+            // amber "live" when keys stream to the pty, quiet "compose"
+            // when text drafts locally. Tap to switch.
             Button {
                 if inputMode == .live {
                     switchToCompose()
@@ -371,12 +386,13 @@ struct TerminalSessionView: View {
                     switchToLive()
                 }
             } label: {
-                Image(systemName: "keyboard")
+                Text(inputMode == .live ? "live" : "compose")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
             }
             .buttonStyle(TerminalKeyStyle(armed: inputMode == .live))
             .disabled(!controller.connectionState.canSubmitInput)
             .accessibilityLabel(
-                inputMode == .live ? "Live typing on, switch to composer" : "Live typing"
+                inputMode == .live ? "Live typing on, switch to composer" : "Compose mode on, switch to live typing"
             )
             .accessibilityIdentifier("terminal.keyboard")
 

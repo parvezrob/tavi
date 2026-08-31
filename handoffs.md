@@ -2,6 +2,14 @@
 
 > Append-only log of completed work sessions, newest first. Each entry is what the *next* agent needs to know about that session: what shipped, what was learned, what was left open. The live starting point is always [`current-session.md`](./current-session.md); prune entries older than a few sessions — git history keeps everything.
 
+## 2026-09-01 (small hours) — #54 design pass P1+P2
+
+**Shipped:** the premium-not-flashy pass. Audit first (nine live screens, reusable `MochaScreenshotAudit` harness, "Mocha Design Audit" artifact), then P1 (graphite ramp + one amber accent + cream tint in `MochaTheme`, `ad01c76`) and P2 (every screen, `fc6eee8`), each verified by two Opus passes with all substantive findings fixed pre-commit, each recaptured by the harness after. Owner steered mid-pass: warm/cream rejected (too Anthropic), Liquid Glass chrome adopted for the terminal, ended-sessions get a composed final state, connection state lives in the dot beside the pane name.
+
+**Learned:** put status banners in overlays, never in the layout — an in-layout banner made the terminal's height connection-dependent and double-resized the Mac's pty every reconnect flap. Gate keyboard chrome on `keyboardWillShow`, not mode flags — the Ghostty surface raises the keyboard from UIKit outside SwiftUI's state. One accent means the *tint* can't be the accent: amber as global tint made every Done button the attention color. `.plain` buttons hit-test only their glyphs — `contentShape` or a background restores the target. A `List` is lazy: a row moved to the bottom doesn't exist for XCUITest until scrolled to.
+
+**Left open:** #54 P3 (icon/launch/App Store, gated on the name); #52's honest disambiguator; the banner-tap behavior call; owner's hands-on pinch check from #51.
+
 ## 2026-08-31 (later night) — #51 Settings: font size + pinch, Face ID lock
 
 **Shipped:** #51 — Settings (Terminal / Security / Privacy per the issue-comment skeleton), one persisted terminal font size driven by both a slider and pinch, a measured grid readout from a real Ghostty preview surface, Face ID app lock (default off) behind its own UIWindow cover, "This iPhone" relocated under Security. Live-verified: the Mac's herdr pane follows the phone's font-size grid (8 pt → 62×42 → `viewport_rows: 42`). Full suite green; phone build installed.

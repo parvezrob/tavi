@@ -193,13 +193,11 @@ struct SettingsView: View {
         }
     }
 
+    // Two sentences at most (#54); the This iPhone row explains itself.
     private var securityFooter: String {
         var sentences = ["Face ID protects the app, not the Mac: anyone who unlocks Mocha can type into your agents."]
         if !lockAvailable {
             sentences.append("Face ID or a passcode must be set up on this iPhone before the lock can be turned on.")
-        }
-        if directory.isConfigured {
-            sentences.append("This iPhone shows the paired Mac and lets you unpair.")
         }
         return sentences.joined(separator: " ")
     }

@@ -89,9 +89,10 @@ struct JumpToSheet: View {
     private func agentRow(_ agent: AgentSummary) -> some View {
         let status = AgentStatusStyle.of(agent.status)
         let isCurrent = agent.id == currentPaneID
-        // The home's naming rules, not herdr's raw tab title: a tab called
-        // "1" or a shell's prompt string never stands in for identity (#54).
-        let location = agent.isShell ? HomeGrouping.projectName(of: agent.cwd) : agent.projectName
+        // A switcher answers "where am I jumping?" — the second line is the
+        // address, always: the abbreviated path, never a title standing in
+        // for a place and never a bare folder name two rows could share.
+        let location = agent.abbreviatedPath
         return Button {
             guard !isCurrent else {
                 dismiss()
@@ -109,9 +110,10 @@ struct JumpToSheet: View {
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(MochaTheme.textPrimary)
                     Text(location)
-                        .font(.caption)
+                        .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(MochaTheme.textSecondary)
                         .lineLimit(1)
+                        .truncationMode(.head)
                 }
                 Spacer(minLength: 8)
                 if isCurrent {

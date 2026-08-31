@@ -93,6 +93,13 @@ struct PairingFlowView: View {
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            // The screen's anchor, not a footnote (#54): the promise is the
+            // reason a careful person proceeds.
+            Label("No provider login. No public relay.", systemImage: "lock")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(MochaTheme.textPrimary)
+                .padding(.top, 2)
+
             if PairingScannerView.isAvailable {
                 Button(showingManualEntry ? "Scan instead" : "Enter code manually") {
                     showingManualEntry.toggle()
@@ -103,9 +110,6 @@ struct PairingFlowView: View {
             }
 
             Spacer(minLength: 0)
-            Label("No provider login. No public relay.", systemImage: "lock")
-                .font(.caption2)
-                .foregroundStyle(MochaTheme.textSecondary)
         }
         .padding(20)
         .navigationTitle("Scan pairing code")
