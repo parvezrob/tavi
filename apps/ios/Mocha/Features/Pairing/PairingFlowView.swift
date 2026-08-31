@@ -5,7 +5,7 @@ import SwiftUI
 // moment of consent and is told plainly what the phone will be able to do;
 // nothing is stored until the exchange and every check have passed.
 struct PairingFlowView: View {
-    let onPaired: (_ endpoint: HostEndpoint, _ credential: String) -> Void
+    let onPaired: (_ endpoint: HostEndpoint, _ grant: HostPairing.Grant) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var step: Step = .scan
@@ -220,7 +220,7 @@ struct PairingFlowView: View {
             let checks = try await HostPairing.verify(endpoint: payload.endpoint, credential: grant.credential)
             // Only now does anything persist: the credential proved itself
             // against the host that matched the code.
-            onPaired(payload.endpoint, grant.credential)
+            onPaired(payload.endpoint, grant)
             step = .done(grant, checks)
         } catch {
             step = .failed(error.localizedDescription)

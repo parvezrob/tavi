@@ -45,4 +45,22 @@ struct PairingPayloadTests {
             try PairingPayload.decode("mocha://pair?u=https://evil.example.com&s=x&f=y")
         }
     }
+
+    @Test
+    func pairedHostRecordRoundTripsThroughDefaults() {
+        let defaults = UserDefaults(suiteName: "mocha.tests.\(UUID().uuidString)")!
+        let record = PairedHostRecord(
+            hostName: "studio-mac",
+            fingerprint: "8F2A 19C4 · 7B10 D6E9",
+            deviceId: "abc123",
+            deviceName: "Parvez's iPhone",
+            pairedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        #expect(PairedHostRecord.load(from: defaults) == nil)
+        record.save(to: defaults)
+        #expect(PairedHostRecord.load(from: defaults) == record)
+        PairedHostRecord.clear(from: defaults)
+        #expect(PairedHostRecord.load(from: defaults) == nil)
+    }
 }

@@ -18,6 +18,7 @@ struct SessionsView: View {
     @State private var draftToken = ""
     @State private var showingHostForm = false
     @State private var showingPairing = false
+    @State private var showingManageAccess = false
     @State private var showingNewAgent = false
     @State private var decisionAgent: AgentSummary?
     @State private var terminalController = TerminalSessionController()
@@ -52,6 +53,10 @@ struct SessionsView: View {
                     // Pairing is the way in (#45). The typed host/token form
                     // survives only in DEBUG for simulator and UI-test runs.
                     Menu {
+                        if agentDirectory.isConfigured {
+                            Button("This iPhone", systemImage: "iphone") { showingManageAccess = true }
+                                .accessibilityIdentifier("sessions.manageAccess")
+                        }
                         Button("Pair a Mac", systemImage: "qrcode.viewfinder") { showingPairing = true }
                             .accessibilityIdentifier("sessions.pair")
                         #if DEBUG
@@ -79,11 +84,27 @@ struct SessionsView: View {
                 NewAgentSheet(directory: agentDirectory)
             }
             .sheet(isPresented: $showingPairing) {
-                PairingFlowView { endpoint, credential in
+                PairingFlowView { endpoint, grant in
                     storedHost = endpoint.baseURL.absoluteString
-                    persistToken(credential)
+                    persistToken(grant.credential)
+                    PairedHostRecord(
+                        hostName: grant.hostName,
+                        fingerprint: grant.fingerprint,
+                        deviceId: grant.deviceId,
+                        deviceName: grant.deviceName,
+                        pairedAt: Date()
+                    ).save()
                     agentDirectory.configure(hostText: storedHost, credential: storedToken)
                 }
+            }
+            .sheet(isPresented: $showingManageAccess) {
+                ManageAccessView(
+                    record: PairedHostRecord.load(),
+                    hostAddress: storedHost,
+                    directory: agentDirectory,
+                    onForget: { forgetHost() },
+                    onPairAnother: { showingPairing = true }
+                )
             }
             .sheet(isPresented: $showingHostForm) {
                 hostForm
@@ -106,6 +127,7 @@ struct SessionsView: View {
                 if ProcessInfo.processInfo.environment["MOCHA_DEV_RESET"] == "1" {
                     storedHost = ""
                     persistToken("")
+                    PairedHostRecord.clear()
                 }
                 #endif
                 seedFromDevelopmentEnvironmentIfNeeded()
@@ -288,6 +310,7 @@ struct SessionsView: View {
                     // on this phone can revive it, so the only offer is pairing.
                     Button("Pair again") {
                         persistToken("")
+                        PairedHostRecord.clear()
                         showingPairing = true
                     }
                     .buttonStyle(.bordered)
@@ -402,6 +425,15 @@ struct SessionsView: View {
             persistToken(token)
         }
         #endif
+    }
+
+    // Back to "No Paired Computers": credential gone from the Keychain,
+    // address and pairing record gone from defaults, directory reset.
+    private func forgetHost() {
+        persistToken("")
+        storedHost = ""
+        PairedHostRecord.clear()
+        agentDirectory.configure(hostText: "", credential: "")
     }
 
     private func persistToken(_ token: String) {

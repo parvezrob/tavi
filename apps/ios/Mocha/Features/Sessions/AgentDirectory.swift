@@ -334,6 +334,36 @@ final class AgentDirectory {
         let outsideRoots: Bool?
     }
 
+    // Asks the host to revoke this phone's own credential (#46). nil on
+    // success; a message when the host could not be reached or refused —
+    // the caller then decides whether to forget locally anyway.
+    func unpairSelf() async -> String? {
+        guard let host, !credential.isEmpty else { return "This iPhone is not paired." }
+        guard var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else {
+            return "The host address is invalid."
+        }
+        components.path = "/api/devices/me"
+        guard let url = components.url else { return "The host address is invalid." }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, response) = try await Self.session.data(for: request)
+            guard let status = (response as? HTTPURLResponse)?.statusCode else {
+                return "The Mac did not answer."
+            }
+            // 401 means the credential is already dead: unpaired either way.
+            guard status == 204 || status == 401 else {
+                let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
+                return message ?? "The Mac could not unpair this iPhone (HTTP \(status))."
+            }
+            return nil
+        } catch {
+            return "Could not reach the Mac: \(error.localizedDescription)"
+        }
+    }
+
     // Reads the live permission dialog on a waiting agent's pane (#23) so the
     // Needs-you sheet can show the real choices. `.none` means no dialog is
     // currently rendered (it may have just resolved).

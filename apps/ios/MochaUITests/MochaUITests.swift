@@ -304,6 +304,14 @@ final class MochaUITests: XCTestCase {
         )
         XCTAssertFalse(app.buttons["sessions.scanPairingCode"].exists, "The home still asks to pair.")
 
+        // "This iPhone" shows who the Mac knows us as.
+        app.buttons["sessions.hostMenu"].tap()
+        XCTAssertTrue(app.buttons["sessions.manageAccess"].waitForExistence(timeout: 5))
+        app.buttons["sessions.manageAccess"].tap()
+        XCTAssertTrue(app.staticTexts[fingerprint].waitForExistence(timeout: 10), "Manage access never showed the fingerprint.")
+        keepScreenshot(named: "manage-access")
+        app.buttons["Done"].firstMatch.tap()
+
         // Revoke on the Mac while the app is open: the phone must notice and
         // offer to pair again rather than retry a dead credential forever.
         for id in after where !before.contains(id) {
@@ -323,6 +331,55 @@ final class MochaUITests: XCTestCase {
         app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
         app.launch()
         XCTAssertTrue(app.buttons["sessions.scanPairingCode"].waitForExistence(timeout: 10))
+    }
+
+    // #46: a phone can unpair itself. The Mac stops listing it and the home
+    // goes back to "No Paired Computers".
+    @MainActor
+    func testUnpairsItselfFromThePhone() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live unpair test.")
+        }
+        let before = Set(try await Self.pairedDeviceIds(host: host, token: token))
+        addTeardownBlock {
+            for id in (try? await Self.pairedDeviceIds(host: host, token: token)) ?? [] where !before.contains(id) {
+                try? await Self.revokeDevice(host: host, token: token, id: id)
+            }
+        }
+        let (code, _) = try await beginPairing(host: host, token: token)
+
+        let app = XCUIApplication()
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
+        app.launch()
+        app.buttons["sessions.scanPairingCode"].tap()
+        let manual = app.textViews["pairing.manualCode"].firstMatch.exists
+            ? app.textViews["pairing.manualCode"].firstMatch
+            : app.textFields["pairing.manualCode"].firstMatch
+        XCTAssertTrue(manual.waitForExistence(timeout: 10))
+        manual.tap()
+        manual.typeText(code)
+        app.buttons["pairing.manualContinue"].tap()
+        XCTAssertTrue(app.buttons["pairing.confirm"].waitForExistence(timeout: 10))
+        app.buttons["pairing.confirm"].tap()
+        XCTAssertTrue(app.staticTexts["pairing.done"].waitForExistence(timeout: 30))
+        app.buttons["pairing.viewSessions"].tap()
+        let paired = try await Self.pairedDeviceIds(host: host, token: token)
+        XCTAssertEqual(paired.count, before.count + 1)
+
+        app.buttons["sessions.hostMenu"].tap()
+        XCTAssertTrue(app.buttons["sessions.manageAccess"].waitForExistence(timeout: 5))
+        app.buttons["sessions.manageAccess"].tap()
+        XCTAssertTrue(app.buttons["manageAccess.unpair"].waitForExistence(timeout: 10))
+        app.buttons["manageAccess.unpair"].tap()
+
+        XCTAssertTrue(
+            app.buttons["sessions.scanPairingCode"].waitForExistence(timeout: 15),
+            "The home did not return to the unpaired state."
+        )
+        let after = try await Self.pairedDeviceIds(host: host, token: token)
+        XCTAssertEqual(Set(after), before, "The Mac still lists the unpaired phone.")
     }
 
     // #24 acceptance: create an agent in a folder chosen on the phone, and
