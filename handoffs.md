@@ -2,6 +2,14 @@
 
 > Append-only log of completed work sessions, newest first. Each entry is what the *next* agent needs to know about that session: what shipped, what was learned, what was left open. The live starting point is always [`current-session.md`](./current-session.md); prune entries older than a few sessions — git history keeps everything.
 
+## 2026-09-01 (small hours, later) — #55 tab names as pane identity
+
+**Shipped:** #55 (`e72076c`, host deployed, phone installed, issue closed) — herdr tab labels ride every agent payload as `tabLabel`; `PATCH /api/herdr/tabs/{tabId}` renames; the events feed subscribes `tab.renamed`; the phone's `userTabName` filters herdr defaults and leads identity on home cards (#52's honest disambiguator), the terminal chip, and Jump-to rows. Rename = hold the chip → alert. Owner decisions closed: banner-tap scrolls to the cards; Face ID stays default-off.
+
+**Learned:** tsx runs the host tests without typechecking — `npm run build` is the real type gate, and a widened interface only breaks test doubles at tsc. Herdr does *not* re-detect an agent started by hand in a reported shell pane (report authority pins the kind) but the pane *title* follows honestly; `herdr agent start --kind --pane` is the sanctioned conversion. Nav-bar context menus never materialized (element dump proved it) — a direct long-press gesture replaced the menu, for fingers and tests alike. XCUITest: alert text fields live under `app.alerts`; toolbar-chip identities are `descendants(matching: .any)`, not `otherElements`. Keep the host **quiet** during live suites — my own disposable-pane experiments mid-run cost two false failures. #21 reproduced again on deploy.
+
+**Left open:** #54 P3 (icon/launch/App Store, named-gated); a "Start <agent> here" affordance if wanted; #21 root cause is next.
+
 ## 2026-09-01 (small hours) — #54 design pass P1+P2
 
 **Shipped:** the premium-not-flashy pass. Audit first (nine live screens, reusable `MochaScreenshotAudit` harness, "Mocha Design Audit" artifact), then P1 (graphite ramp + one amber accent + cream tint in `MochaTheme`, `ad01c76`) and P2 (every screen, `fc6eee8`), each verified by two Opus passes with all substantive findings fixed pre-commit, each recaptured by the harness after. Owner steered mid-pass: warm/cream rejected (too Anthropic), Liquid Glass chrome adopted for the terminal, ended-sessions get a composed final state, connection state lives in the dot beside the pane name.
