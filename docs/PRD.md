@@ -118,7 +118,7 @@ Removed (#53, 2026-08-31). Herdr is the only backend; there is no separate multi
 - Mobile control row: Esc, Tab, Shift-Tab, Ctrl, arrows, Enter, interrupt, and customizable slots.
 - Multiline composer that sends text deliberately rather than on every keystroke.
 - Optional live typing mode for terminal-native interaction.
-- Pinch or settings-based font size.
+- Pinch or settings-based font size (shipped 2026-08-31, #51: one persisted preference, Settings slider + terminal pinch, grid readout).
 - VoiceOver labels for surrounding controls; terminal accessibility quality documented honestly.
 - Recover focus and input correctly after sheets, app backgrounding, and reconnect.
 

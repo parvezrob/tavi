@@ -2,6 +2,14 @@
 
 > Append-only log of completed work sessions, newest first. Each entry is what the *next* agent needs to know about that session: what shipped, what was learned, what was left open. The live starting point is always [`current-session.md`](./current-session.md); prune entries older than a few sessions — git history keeps everything.
 
+## 2026-08-31 (later night) — #51 Settings: font size + pinch, Face ID lock
+
+**Shipped:** #51 — Settings (Terminal / Security / Privacy per the issue-comment skeleton), one persisted terminal font size driven by both a slider and pinch, a measured grid readout from a real Ghostty preview surface, Face ID app lock (default off) behind its own UIWindow cover, "This iPhone" relocated under Security. Live-verified: the Mac's herdr pane follows the phone's font-size grid (8 pt → 62×42 → `viewport_rows: 42`). Full suite green; phone build installed.
+
+**Learned:** an app's `UserDefaults` live in the app container — `simctl spawn defaults` writes a different domain, and cfprefsd's cache beats direct plist edits, hence the `MOCHA_DEV_FONT_SIZE` seed. Ghostty's `set_font_size` binding action re-flows synchronously (vendored `Surface.setFontSize` assigns the cell size before returning), so no delayed re-read is needed. A ZStack privacy cover is a lie twice over: sheets present *above* it and VoiceOver walks straight through it — cover with a UIWindow at alert level and hide content from accessibility. Lock on scene-*inactive*, not background, or the app-switcher snapshot shows the terminal. `find … -name Mocha.app | head -1` picked a stale Release product over the fresh Debug one — name the configuration path explicitly. A slider's `accessibilityValue` read back through XCUITest asserts persistence and the VoiceOver criterion in one line.
+
+**Left open:** owner's hands-on pinch check on the physical phone at both extremes under a full-screen TUI; Face ID default stays an open owner decision; #21 root cause is next.
+
 ## 2026-08-31 (late night) — #53 tmux lane deleted
 
 **Shipped:** #53 — tmux removed from host, app, tests, and docs; herdr is the only backend. Owner decision: delete rather than maintain a dormant fallback. Host deployed; old routes 404; all ported live UI tests green against the deployed cutover.

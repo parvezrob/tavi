@@ -251,6 +251,14 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
     private static let logger = Logger(subsystem: "com.parvezrob.mocha", category: "terminal.surface")
 
     var onGridSizeChange: ((TerminalGridSize) -> Void)?
+    // Set by the real terminal only (#51): a pinch that settles is saved as
+    // the one font size preference. The Settings preview leaves this nil,
+    // which also disables its pinch entirely.
+    var onFontSizeCommit: ((Double) -> Void)?
+    // The Settings preview renders but must never pop the keyboard or
+    // record its (clipped, off-screen-sized) layout as the real viewport.
+    var acceptsKeyboardFocus = true
+    var recordsViewport = false
 
     var hasText: Bool { true }
     // The standard iOS keyboard, with only the text-rewriting features off:
@@ -267,7 +275,7 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
     var enablesReturnKeyAutomatically = false
     var isSecureTextEntry = false
 
-    override var canBecomeFirstResponder: Bool { true }
+    override var canBecomeFirstResponder: Bool { acceptsKeyboardFocus }
 
     override var keyCommands: [UIKeyCommand]? {
         [
@@ -283,8 +291,16 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
 
     private let callback: GhosttyWriteCallback
     private let inputHandler: @MainActor (Data) -> Void
+    private(set) var fontSize: Double
     private var keyboardObservers: [NSObjectProtocol] = []
+    private var keyboardVisible = false
     private var lastGridSize: TerminalGridSize?
+    private var pinchBaseFontSize: Double = 0
+    // While a pinch is in flight the surface re-renders on every step, but
+    // the grid is published once, on release: publishing each 0.5-pt step
+    // would queue a pty resize per step and thrash the Mac pane through a
+    // dozen re-flows per gesture.
+    private var pinchInFlight = false
     private var outputPump: GhosttyOutputPump?
     private var scrollMomentumLink: CADisplayLink?
     private var scrollMomentumVelocity: CGFloat = 0
@@ -292,11 +308,13 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
 
     init(
         runtime: GhosttyRuntime,
+        fontSize: Double,
         onInput: @escaping @MainActor (Data) -> Void,
         onFailure: @escaping @MainActor (String) -> Void
     ) throws {
         callback = GhosttyWriteCallback(handler: onInput, failureHandler: onFailure)
         inputHandler = onInput
+        self.fontSize = TerminalFontPreference.clamp(fontSize)
         super.init(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
 
         isAccessibilityElement = true
@@ -316,6 +334,10 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         scrollGesture.maximumNumberOfTouches = 1
         addGestureRecognizer(scrollGesture)
 
+        // Pinch adjusts the same persisted font size Settings shows (#51):
+        // what you pinch is what you keep, never a transient zoom.
+        addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(handleFontPinch(_:))))
+
         var configuration = ghostty_surface_config_new()
         configuration.platform_tag = GHOSTTY_PLATFORM_IOS
         configuration.platform = ghostty_platform_u(
@@ -325,6 +347,7 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         )
         configuration.userdata = Unmanaged.passUnretained(self).toOpaque()
         configuration.scale_factor = traitCollection.displayScale
+        configuration.font_size = Float(self.fontSize)
         configuration.use_custom_io = true
 
         guard let surface = ghostty_surface_new(runtime.app, &configuration) else {
@@ -345,13 +368,27 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         // layoutSubviews on every transition. An explicit resize pass after
         // each keyboard settle guarantees the grid is recomputed on both
         // edges; the grid guard in resizeSurface dedupes no-op passes.
+        // keyboardVisible additionally flips on willShow so the layout
+        // passes between willShow and didShow are already marked as
+        // keyboard-up and never recorded as the terminal's viewport.
+        keyboardObservers.append(NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillShowNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.keyboardVisible = true
+            }
+        })
         for name in [UIResponder.keyboardDidShowNotification, UIResponder.keyboardDidHideNotification] {
             keyboardObservers.append(NotificationCenter.default.addObserver(
                 forName: name,
                 object: nil,
                 queue: .main
-            ) { [weak self] _ in
+            ) { [weak self] notification in
+                let keyboardVisible = notification.name == UIResponder.keyboardDidShowNotification
                 MainActor.assumeIsolated {
+                    self?.keyboardVisible = keyboardVisible
                     self?.keyboardDidSettle()
                 }
             })
@@ -399,7 +436,59 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
     }
 
     @objc func focusKeyboard() {
+        guard acceptsKeyboardFocus else { return }
         becomeFirstResponder()
+    }
+
+    // Applies a font size through Ghostty's own keybind action, which
+    // re-flows the grid synchronously (the cell size is assigned before
+    // the action returns — verified in the vendored Surface.setFontSize);
+    // the pty resize then follows through onGridSizeChange exactly as a
+    // rotation or keyboard change would.
+    func setFontSize(_ points: Double) {
+        guard let surface else { return }
+        let target = TerminalFontPreference.clamp(points)
+        guard target != fontSize else { return }
+        // The action string is Ghostty wire format, never user-facing: it
+        // must always use "." regardless of locale, so it is built from
+        // non-localizing conversions only.
+        let argument = target.truncatingRemainder(dividingBy: 1) == 0
+            ? String(Int(target))
+            : String(target)
+        let action = "set_font_size:\(argument)"
+        let applied = action.withCString { pointer in
+            ghostty_surface_binding_action(surface, pointer, UInt(action.utf8.count))
+        }
+        guard applied else {
+            Self.logger.error("font size action rejected: \(action)")
+            return
+        }
+        fontSize = target
+        ghostty_surface_refresh(surface)
+        ghostty_surface_draw(surface)
+        if !pinchInFlight {
+            publishGridSize()
+        }
+    }
+
+    @objc private func handleFontPinch(_ gesture: UIPinchGestureRecognizer) {
+        guard onFontSizeCommit != nil else { return }
+        switch gesture.state {
+        case .began:
+            pinchBaseFontSize = fontSize
+            pinchInFlight = true
+        case .changed:
+            setFontSize(pinchBaseFontSize * Double(gesture.scale))
+        case .ended, .cancelled, .failed:
+            // What you pinch is what you keep — a cancelled gesture has
+            // already re-rendered, so it commits too rather than silently
+            // reverting on the next open.
+            pinchInFlight = false
+            publishGridSize()
+            onFontSizeCommit?(fontSize)
+        default:
+            break
+        }
     }
 
     // Touch scrolling maps finger drags to Ghostty's precision scroll input
@@ -522,10 +611,24 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         ghostty_surface_refresh(surface)
         ghostty_surface_draw(surface)
 
+        // Only the real terminal's layout is the viewport Settings projects
+        // grids from; the preview's own frame must never overwrite it, and
+        // neither must a keyboard-up layout — that would make Settings
+        // project rows against half the screen and present it as fact.
+        if recordsViewport, !keyboardVisible {
+            TerminalViewportRecord(width: bounds.width, height: bounds.height).save()
+        }
+        publishGridSize()
+    }
+
+    // Reads the surface's current grid and reports a change. Runs after
+    // anything that can re-flow it: a resize or a font size change.
+    private func publishGridSize() {
+        guard let surface else { return }
         let size = ghostty_surface_size(surface)
         let grid = TerminalGridSize(columns: Int(size.columns), rows: Int(size.rows))
         Self.logger.info(
-            "resizeSurface bounds=\(self.bounds.width, format: .fixed(precision: 0))x\(self.bounds.height, format: .fixed(precision: 0)) scale=\(scale) grid=\(grid.columns)x\(grid.rows) last=\(String(describing: self.lastGridSize))"
+            "grid \(grid.columns)x\(grid.rows) bounds=\(self.bounds.width, format: .fixed(precision: 0))x\(self.bounds.height, format: .fixed(precision: 0)) font=\(self.fontSize) last=\(String(describing: self.lastGridSize))"
         )
         guard grid.columns > 0, grid.rows > 0, grid != lastGridSize else { return }
         lastGridSize = grid

@@ -4,10 +4,14 @@ import SwiftUI
 struct MochaApp: App {
     var body: some Scene {
         WindowGroup {
-            SessionsView()
-                // Dark-first is the product's visual contract (PRD §7.1);
-                // the terminal and home surfaces are designed for it.
-                .preferredColorScheme(.dark)
+            // The optional Face ID gate (#51) wraps everything; with the
+            // setting off it renders the content untouched.
+            AppLockGate {
+                SessionsView()
+            }
+            // Dark-first is the product's visual contract (PRD §7.1);
+            // the terminal and home surfaces are designed for it.
+            .preferredColorScheme(.dark)
         }
     }
 }

@@ -18,7 +18,11 @@ struct SessionsView: View {
     @State private var draftToken = ""
     @State private var showingHostForm = false
     @State private var showingPairing = false
-    @State private var showingManageAccess = false
+    @State private var showingSettings = false
+    // "Pair a different Mac" from inside Settings must wait for the
+    // Settings sheet to finish dismissing before the pairing sheet can
+    // present; flipping both flags in one turn silently drops the second.
+    @State private var pairingAfterSettings = false
     @State private var showingNewAgent = false
     @State private var decisionAgent: AgentSummary?
     @State private var terminalController = TerminalSessionController()
@@ -56,10 +60,9 @@ struct SessionsView: View {
                     // Pairing is the way in (#45). The typed host/token form
                     // survives only in DEBUG for simulator and UI-test runs.
                     Menu {
-                        if agentDirectory.isConfigured {
-                            Button("This iPhone", systemImage: "iphone") { showingManageAccess = true }
-                                .accessibilityIdentifier("sessions.manageAccess")
-                        }
+                        // "This iPhone" lives under Settings → Security (#51).
+                        Button("Settings", systemImage: "gearshape") { showingSettings = true }
+                            .accessibilityIdentifier("sessions.settings")
                         Button("Pair a Mac", systemImage: "qrcode.viewfinder") { showingPairing = true }
                             .accessibilityIdentifier("sessions.pair")
                         #if DEBUG
@@ -101,13 +104,20 @@ struct SessionsView: View {
                     agentDirectory.configure(hostText: storedHost, credential: storedToken)
                 }
             }
-            .sheet(isPresented: $showingManageAccess) {
-                ManageAccessView(
-                    record: PairedHostRecord.load(),
+            .sheet(isPresented: $showingSettings, onDismiss: {
+                if pairingAfterSettings {
+                    pairingAfterSettings = false
+                    showingPairing = true
+                }
+            }) {
+                SettingsView(
                     hostAddress: storedHost,
                     directory: agentDirectory,
                     onForget: { forgetHost() },
-                    onPairAnother: { showingPairing = true }
+                    onPairAnother: {
+                        pairingAfterSettings = true
+                        showingSettings = false
+                    }
                 )
             }
             .sheet(isPresented: $showingHostForm) {
@@ -132,9 +142,21 @@ struct SessionsView: View {
                     storedHost = ""
                     persistToken("")
                     PairedHostRecord.clear()
+                    TerminalFontPreference.reset()
+                    TerminalViewportRecord.clear()
+                    UserDefaults.standard.removeObject(forKey: AppLock.storageKey)
                 }
                 #endif
                 seedFromDevelopmentEnvironmentIfNeeded()
+                #if DEBUG
+                // Scripted font-size runs (#51): the terminal preference is
+                // in the app container, unreachable from simctl, so live
+                // verification seeds it here like the other MOCHA_DEV_ keys.
+                if let raw = ProcessInfo.processInfo.environment["MOCHA_DEV_FONT_SIZE"],
+                   let size = Double(raw) {
+                    TerminalFontPreference.save(size)
+                }
+                #endif
                 refreshComputerName()
                 agentDirectory.configure(hostText: storedHost, credential: storedToken)
                 #if DEBUG

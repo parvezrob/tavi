@@ -328,11 +328,17 @@ final class MochaUITests: XCTestCase {
 
         // "This iPhone" shows who the Mac knows us as.
         app.buttons["sessions.hostMenu"].tap()
-        XCTAssertTrue(app.buttons["sessions.manageAccess"].waitForExistence(timeout: 5))
-        app.buttons["sessions.manageAccess"].tap()
+        XCTAssertTrue(app.buttons["sessions.settings"].waitForExistence(timeout: 5))
+        app.buttons["sessions.settings"].tap()
+        XCTAssertTrue(app.buttons["settings.thisIPhone"].waitForExistence(timeout: 10))
+        app.buttons["settings.thisIPhone"].tap()
         XCTAssertTrue(app.staticTexts[fingerprint].waitForExistence(timeout: 10), "Manage access never showed the fingerprint.")
         keepScreenshot(named: "manage-access")
-        app.buttons["Done"].firstMatch.tap()
+        // Two sheets are up (Settings under This iPhone); close both so the
+        // home is visible for the revocation check below.
+        app.buttons["manageAccess.done"].tap()
+        XCTAssertTrue(app.buttons["settings.done"].waitForExistence(timeout: 5))
+        app.buttons["settings.done"].tap()
 
         // Revoke on the Mac while the app is open: the phone must notice and
         // offer to pair again rather than retry a dead credential forever.
@@ -353,6 +359,81 @@ final class MochaUITests: XCTestCase {
         app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
         app.launch()
         XCTAssertTrue(app.buttons["sessions.scanPairingCode"].waitForExistence(timeout: 10))
+    }
+
+    // #51: the font size setting shows the projected terminal grid in
+    // honest numbers and survives a relaunch. Runs without a host — the
+    // preview is a local Ghostty surface.
+    @MainActor
+    func testFontSizeSettingShowsGridAndPersists() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
+        app.launch()
+        app.buttons["sessions.hostMenu"].tap()
+        XCTAssertTrue(app.buttons["sessions.settings"].waitForExistence(timeout: 5))
+        app.buttons["sessions.settings"].tap()
+
+        let slider = app.sliders["settings.fontSize"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 10), "The font size slider never appeared.")
+        let readout = app.descendants(matching: .any)["settings.gridReadout"]
+        // The preview surface must report a real grid, not a placeholder.
+        // The readout speaks the way VoiceOver does: "44 by 22".
+        let hasGrid = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value CONTAINS ' by '"),
+            object: readout
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [hasGrid], timeout: 10), .completed, "The grid readout never showed numbers.")
+        let beforeColumns = try XCTUnwrap(
+            Self.firstNumber(in: (readout.value as? String) ?? ""),
+            "Unreadable grid readout"
+        )
+
+        // Push the slider to the largest size: fewer columns and rows, and
+        // the readout announces the change.
+        slider.adjust(toNormalizedSliderPosition: 1.0)
+        let changed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value CONTAINS 'changing to'"),
+            object: readout
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [changed], timeout: 10), .completed, "The grid readout never reflected the new size.")
+        // The trade-off must point the honest way: bigger font, fewer columns.
+        let spoken = (readout.value as? String) ?? ""
+        let afterColumns = try XCTUnwrap(
+            Self.firstNumber(in: spoken.components(separatedBy: "changing to").last ?? "")
+        )
+        XCTAssertLessThan(afterColumns, beforeColumns, "A bigger font must project fewer columns (\(spoken)).")
+        let chosen = pointsPrefix(of: slider)
+        XCTAssertFalse(chosen.isEmpty, "The slider never spoke a point size.")
+        keepScreenshot(named: "settings-font-size")
+
+        // Persisted per phone: a relaunch keeps the chosen size. The reset
+        // flag must not ride along or it would wipe the very preference
+        // this asserts on.
+        app.terminate()
+        app.launchEnvironment.removeValue(forKey: "MOCHA_DEV_RESET")
+        app.launch()
+        app.buttons["sessions.hostMenu"].tap()
+        XCTAssertTrue(app.buttons["sessions.settings"].waitForExistence(timeout: 5))
+        app.buttons["sessions.settings"].tap()
+        XCTAssertTrue(slider.waitForExistence(timeout: 10))
+        // The slider's accessibility value is exactly what VoiceOver reads;
+        // comparing to the size chosen before the relaunch covers both
+        // persistence and the a11y acceptance criterion in one assert.
+        XCTAssertEqual(pointsPrefix(of: slider), chosen, "The font size did not persist across relaunch.")
+    }
+
+    // "23.5 points, 21 by 14" → "23.5 points": the grid half arrives
+    // asynchronously from the preview surface, so only the size may be
+    // compared across a relaunch.
+    @MainActor
+    private func pointsPrefix(of slider: XCUIElement) -> String {
+        let value = (slider.value as? String) ?? ""
+        guard let range = value.range(of: " points") else { return value }
+        return String(value[..<range.upperBound])
+    }
+
+    private static func firstNumber(in spoken: String) -> Int? {
+        spoken.split(whereSeparator: { !$0.isNumber }).first.flatMap { Int($0) }
     }
 
     // #46: a phone can unpair itself. The Mac stops listing it and the home
@@ -391,10 +472,22 @@ final class MochaUITests: XCTestCase {
         XCTAssertEqual(paired.count, before.count + 1)
 
         app.buttons["sessions.hostMenu"].tap()
-        XCTAssertTrue(app.buttons["sessions.manageAccess"].waitForExistence(timeout: 5))
-        app.buttons["sessions.manageAccess"].tap()
+        XCTAssertTrue(app.buttons["sessions.settings"].waitForExistence(timeout: 5))
+        app.buttons["sessions.settings"].tap()
+        XCTAssertTrue(app.buttons["settings.thisIPhone"].waitForExistence(timeout: 10))
+        app.buttons["settings.thisIPhone"].tap()
         XCTAssertTrue(app.buttons["manageAccess.unpair"].waitForExistence(timeout: 10))
         app.buttons["manageAccess.unpair"].tap()
+
+        // The This iPhone sheet dismisses itself after the unpair; the
+        // Settings sheet under it still covers the home, so close it.
+        let unpairGone = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: app.buttons["manageAccess.unpair"]
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [unpairGone], timeout: 15), .completed)
+        XCTAssertTrue(app.buttons["settings.done"].waitForExistence(timeout: 5))
+        app.buttons["settings.done"].tap()
 
         XCTAssertTrue(
             app.buttons["sessions.scanPairingCode"].waitForExistence(timeout: 15),

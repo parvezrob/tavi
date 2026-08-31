@@ -77,6 +77,7 @@ struct ManageAccessView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
+                        .accessibilityIdentifier("manageAccess.done")
                 }
             }
             .confirmationDialog(

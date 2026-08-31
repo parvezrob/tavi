@@ -13,10 +13,15 @@ struct AgentTerminalView: UIViewRepresentable {
             let runtime = try GhosttyRuntime.shared.get()
             let terminal = try GhosttyTerminalSurfaceView(
                 runtime: runtime,
+                fontSize: TerminalFontPreference.current(),
                 onInput: { data in bridge.receiveTerminalInput(data) },
                 onFailure: onRendererFailure
             )
             terminal.onGridSizeChange = onGridSizeChange
+            terminal.recordsViewport = true
+            terminal.onFontSizeCommit = { size in
+                TerminalFontPreference.save(size)
+            }
             container.install(terminal)
             bridge.installTerminal(
                 outputConsumer: { [weak terminal] data in
