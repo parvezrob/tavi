@@ -43,6 +43,7 @@ struct AgentPresentationTests {
         #expect(summary(agent: "codex").displayName == "Codex")
         #expect(summary(agent: "gemini").displayName == "Gemini CLI")
         #expect(summary(agent: "opencode").displayName == "OpenCode")
+        #expect(summary(agent: "shell").displayName == "Terminal")
         // A kind herdr adds before this map learns it still reads sensibly.
         #expect(summary(agent: "newthing").displayName == "Newthing")
     }

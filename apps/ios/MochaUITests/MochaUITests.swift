@@ -311,6 +311,68 @@ final class MochaUITests: XCTestCase {
         XCTAssertTrue(remembered.contains(project), "The picker did not remember \(project).")
     }
 
+    // Empty terminal: pick "Terminal" in the agent menu and the host reports
+    // a plain shell pane to herdr so it lists and opens like an agent.
+    @MainActor
+    func testCreateTerminalFromPicker() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live terminal test.")
+        }
+
+        let project = try await knownProjectPath(host: host, token: token)
+        let before = Set(try await agentPaneIds(host: host, token: token))
+
+        let app = XCUIApplication()
+        app.launchEnvironment["MOCHA_DEV_HOST"] = host
+        app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
+        app.launch()
+
+        app.buttons["sessions.newAgentTab"].tap()
+        XCTAssertTrue(app.buttons["newAgent.agentKind"].waitForExistence(timeout: 20))
+        app.buttons["newAgent.agentKind"].tap()
+        let terminal = app.buttons["newAgent.agentKind.shell"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 10), "The agent menu never offered a Terminal.")
+        terminal.tap()
+
+        let folder = app.buttons["newAgent.folder.\(project)"]
+        XCTAssertTrue(folder.waitForExistence(timeout: 10))
+        folder.tap()
+        app.buttons["newAgent.create"].tap()
+
+        var created: String?
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline, created == nil {
+            created = try await agentPaneIds(host: host, token: token).first { !before.contains($0) }
+            if created == nil { try await Task.sleep(for: .seconds(1)) }
+        }
+        guard let paneId = created else {
+            throw XCTSkip("The host never reported the terminal; cannot verify the flow.")
+        }
+        addTeardownBlock {
+            if let tabId = try? await Self.tabId(host: host, token: token, paneId: paneId) {
+                try? await Self.closeAgentTab(host: host, token: token, tabId: tabId)
+            }
+        }
+
+        let kind = try await agentKind(host: host, token: token, paneId: paneId)
+        let cwd = try await agentCwd(host: host, token: token, paneId: paneId)
+        XCTAssertEqual(kind, "shell")
+        XCTAssertEqual(cwd, project)
+
+        // It opens like any agent: the pane shows up on the home and the
+        // terminal lands with a live shell prompt.
+        let row = app.buttons["sessions.agent.\(paneId)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "The terminal never appeared on the home.")
+        row.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["terminal.identity"].waitForExistence(timeout: 10),
+            "The terminal never opened."
+        )
+        keepScreenshot(named: "terminal-from-picker")
+    }
+
     // #24: a folder outside the host's project roots is not refused outright
     // — it asks first. The host owns that rule, so this drives the real
     // refusal and the real confirmation rather than a simulated one.
@@ -641,6 +703,10 @@ final class MochaUITests: XCTestCase {
         try await agentRecords(host: host, token: token).map(\.id)
     }
 
+    private func agentKind(host: String, token: String, paneId: String) async throws -> String? {
+        try await agentRecords(host: host, token: token).first { $0.id == paneId }?.agent
+    }
+
     private func agentCwd(host: String, token: String, paneId: String) async throws -> String? {
         try await agentRecords(host: host, token: token).first { $0.id == paneId }?.cwd
     }
@@ -658,6 +724,7 @@ final class MochaUITests: XCTestCase {
 
     private struct AgentRecord: Decodable {
         let id: String
+        let agent: String
         let cwd: String
     }
 

@@ -409,10 +409,15 @@ test("creating an agent requires a real folder and confirmation outside the root
     assert.equal(bogus.status, 400);
     // A real kind that this Mac does not have is refused before herdr sees
     // it — herdr would otherwise hand back a tab whose launch already died.
+    // A plain terminal needs nothing installed and is labelled as one.
+    const terminal = await create({ agent: "shell", cwd: project });
+    assert.equal(terminal.status, 201);
+    assert.deepEqual(created.at(-1), { agent: "shell", cwd: project });
+
     const notInstalled = await create({ agent: "cursor", cwd: project });
     assert.equal(notInstalled.status, 400);
     assert.match(((await notInstalled.json()) as { error: string }).error, /Cursor is not installed/);
-    assert.equal(created.length, 3);
+    assert.equal(created.length, 4);
   } finally {
     await close(server);
   }

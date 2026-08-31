@@ -22,6 +22,7 @@ extension AgentSummary {
     // labels in the picker, this covers agents that were started elsewhere.
     var displayName: String {
         switch agent {
+        case "shell": "Terminal"
         case "claude": "Claude Code"
         case "codex": "Codex"
         case "gemini": "Gemini CLI"

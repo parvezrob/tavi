@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createConnection } from "node:net";
+import { SHELL_KIND } from "./agent-kinds.js";
 import { parsePermissionDialog, type PermissionDialog } from "./dialog.js";
 import type { AgentStatus, AttachCommand, HerdrAgentInfo, HerdrAgentsResult } from "./types.js";
 
@@ -367,7 +368,23 @@ export class HerdrService implements HerdrAgentSource {
       if (!tabId || !paneId) {
         return { created: false, reason: "Herdr did not report the new tab." };
       }
-      if (request.agent) {
+      if (request.agent === SHELL_KIND) {
+        // Nothing to launch — the pane already is a shell. Report it as an
+        // agent so herdr lists it and lets the pty bridge attach; verified
+        // live that herdr keeps the reported state rather than overriding
+        // it from screen detection, so a terminal stays honestly "idle".
+        try {
+          await this.request("pane.report_agent", {
+            pane_id: paneId,
+            source: "mocha",
+            agent: SHELL_KIND,
+            state: "idle",
+          });
+        } catch (reportError) {
+          await this.request("tab.close", { tab_id: tabId }).catch(() => undefined);
+          throw reportError;
+        }
+      } else if (request.agent) {
         try {
           // The fresh pane's shell needs a moment to boot; until then
           // agent.start answers "not an available shell". Retry briefly.

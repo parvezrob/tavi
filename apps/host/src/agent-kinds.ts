@@ -1,11 +1,18 @@
 import { execFile } from "node:child_process";
 
+// Not an agent herdr launches: a plain shell in the chosen folder, which
+// Mocha then *reports* to herdr as an agent so it lists and attaches like
+// one (herdr refuses to attach an unreported pane). Always available — it
+// is the pane's own shell.
+export const SHELL_KIND = "shell";
+
 // Every agent herdr can launch (`herdr agent start --kind`, verified against
 // herdr 0.7.5). The kind doubles as the executable name, which is how both
 // herdr and this file decide whether one is installed. Labels are the
 // product names people recognise; anything herdr adds later still works —
 // it just shows its kind verbatim until a label is added here.
 export const AGENT_KINDS: ReadonlyArray<{ kind: string; label: string }> = [
+  { kind: SHELL_KIND, label: "Terminal" },
   { kind: "claude", label: "Claude Code" },
   { kind: "codex", label: "Codex" },
   { kind: "gemini", label: "Gemini CLI" },
@@ -60,6 +67,7 @@ export class AgentKindDetector {
     if (this.cached && now - this.cached.at < CACHE_MILLISECONDS) return this.cached.kinds;
 
     const installed = await this.detect();
+    installed.add(SHELL_KIND);
     const kinds = AGENT_KINDS.map((entry) => ({ ...entry, installed: installed.has(entry.kind) }));
     this.cached = { at: now, kinds };
     return kinds;
@@ -70,9 +78,9 @@ export class AgentKindDetector {
   // herdr's own pane would resolve the command — without that, anything in
   // ~/.local/bin or a version manager would read as missing.
   private async detect(): Promise<Set<string>> {
-    const script = AGENT_KIND_NAMES.map(
-      (kind) => `command -v ${kind} >/dev/null 2>&1 && echo ${kind}`,
-    ).join("; ");
+    const script = AGENT_KIND_NAMES.filter((kind) => kind !== SHELL_KIND)
+      .map((kind) => `command -v ${kind} >/dev/null 2>&1 && echo ${kind}`)
+      .join("; ");
     try {
       const output = await (this.options.runShell ?? runLoginShell)(this.options.shell, script);
       return new Set(

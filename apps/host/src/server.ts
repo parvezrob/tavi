@@ -6,7 +6,7 @@ import { bearerToken, isAuthorized } from "./auth.js";
 import type { HostConfig } from "./config.js";
 import { VERSION } from "./config.js";
 import { AttachmentStore, type TerminalAttachment, type AttachmentClient } from "./attachment.js";
-import { AGENT_KIND_NAMES, AgentKindDetector } from "./agent-kinds.js";
+import { AGENT_KIND_NAMES, AgentKindDetector, SHELL_KIND } from "./agent-kinds.js";
 import { parseClaudeHookEvent, type AttentionOverlay } from "./attention.js";
 import type { AgentEventSource } from "./herdr-events.js";
 import {
@@ -539,7 +539,7 @@ async function routeRequest(
     const result = await herdr.createTab({
       agent,
       cwd: candidate.path,
-      label: agent ? `mocha ${agent}` : "mocha",
+      label: agent === SHELL_KIND ? "mocha terminal" : agent ? `mocha ${agent}` : "mocha",
     });
     if (!result.created) {
       sendJson(response, 503, { error: result.reason });

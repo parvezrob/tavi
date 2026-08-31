@@ -6,6 +6,7 @@ test("every kind herdr can launch has one entry and the kind is its executable",
   assert.equal(new Set(AGENT_KIND_NAMES).size, AGENT_KINDS.length);
   assert.ok(AGENT_KIND_NAMES.includes("claude"));
   assert.ok(AGENT_KIND_NAMES.includes("codex"));
+  assert.equal(AGENT_KINDS[0]?.kind, "shell");
   for (const { kind, label } of AGENT_KINDS) {
     assert.match(kind, /^[a-z]+$/, `${kind} must be a bare executable name`);
     assert.ok(label.length > 0);
@@ -25,7 +26,9 @@ test("installed kinds come from the login shell, in catalog order, with labels",
   const kinds = await detector.list();
   assert.equal(calls[0]?.shell, "/bin/zsh");
   assert.match(calls[0]?.script ?? "", /command -v claude/);
-  assert.deepEqual(kinds.slice(0, 2), [
+  // Terminal leads the catalog; the launchable agents follow in order.
+  assert.deepEqual(kinds.slice(0, 3), [
+    { kind: "shell", label: "Terminal", installed: true },
     { kind: "claude", label: "Claude Code", installed: true },
     { kind: "codex", label: "Codex", installed: true },
   ]);
@@ -54,6 +57,21 @@ test("detection is cached for a minute, then asked again", async () => {
   assert.equal(runs, 2);
 });
 
+test("the terminal is always available and never probed as an executable", async () => {
+  let script = "";
+  const detector = new AgentKindDetector({
+    shell: "/bin/sh",
+    runShell: async (_shell, s) => {
+      script = s;
+      return "";
+    },
+  });
+  const kinds = await detector.list();
+  assert.equal(kinds.find((entry) => entry.kind === "shell")?.installed, true);
+  assert.equal(kinds.find((entry) => entry.kind === "shell")?.label, "Terminal");
+  assert.doesNotMatch(script, /command -v shell/);
+});
+
 test("a shell that cannot be run claims nothing is installed", async () => {
   const detector = new AgentKindDetector({
     shell: "/nonexistent/shell",
@@ -64,7 +82,7 @@ test("a shell that cannot be run claims nothing is installed", async () => {
 
   const kinds = await detector.list();
   assert.equal(kinds.length, AGENT_KINDS.length);
-  assert.ok(kinds.every((entry) => !entry.installed));
+  assert.ok(kinds.filter((entry) => entry.kind !== "shell").every((entry) => !entry.installed));
 });
 
 test("the real login shell resolves at least the shell itself", async () => {

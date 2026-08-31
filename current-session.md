@@ -6,7 +6,9 @@
 
 ## Next work
 
-**#41 shipped 2026-08-31 (agent kinds):** the picker offers all 21 herdr kinds as a one-row menu; the host detects installed ones via the login shell and refuses uninstalled kinds by name (herdr otherwise hands back a dead tab). Next candidate from the same conversation: **empty terminal in the herdr lane** — feasible, proven live: `herdr pane report-agent <pane> --source mocha --agent shell --state idle` makes a plain pane list as a `shell` agent that the pty bridge attaches to. Open questions before building: whether herdr's screen detection overrides the reported state, and which home section a shell belongs in. Not filed yet.
+**#42 shipped 2026-08-31 (empty terminal):** "Terminal" leads the agent menu; the host creates the tab and `pane.report_agent`s it as `shell/idle` instead of launching anything, so it lists, lands in Recent, and opens to a live shell in the chosen folder. Live test `testCreateTerminalFromPicker`. Not yet known: what herdr does if a real agent is later started by hand inside a reported pane.
+
+**#41 shipped 2026-08-31 (agent kinds):** the picker offers all 21 herdr kinds as a one-row menu; the host detects installed ones via the login shell and refuses uninstalled kinds by name (herdr otherwise hands back a dead tab). Shipped as #42 above.
 
 **#24 is verified and closed.** Both halves are live: host deployed (`service:install`, needed the #21 retry) and the picker driven end to end in the simulator against it. The phone still needs the new app build installed before *it* can create agents — required `cwd` is breaking, so the #23 build on the device gets a 400 on create until then. Everything else on the device keeps working.
 
@@ -31,7 +33,7 @@ Then, in order: #26 (project-grouped home + tmux card removal), #25 (diff glance
 - Open issues: #8 (old PWA, unrelated), #10 (scroll feel), #21 (installer retry), #24–#29 (adopted work), #38 (`POST /api/sessions` bypasses the roots guardrail), #39 (no test seam for `AgentDirectory`'s HTTP calls), #40 (`herdr-events` intermittent failure — was prose in DEVELOPMENT.md, now tracked).
 - **App Store readiness (2026-08):** milestone “App Store review readiness” + epic #37 gate any Apple submission. `codebase-scan.html` (#30) is a second-agent audit whose claims were re-verified against the code — input only, never the tracker.
 - **Security hygiene #31–#36 shipped and closed** (`0a02cf9` host, `b32b9c4` iOS): token in Keychain with one-time migration off AppStorage + truthful storage copy on both connect screens; Claude hook runs `claude-hook-relay.js` so the token never hits argv (reinstalled on the owner Mac); dev env seeding is DEBUG-only; CORS headers deleted; `~/.mocha` forced 0700/0600; AgentDirectory on an ephemeral URLSession.
-- Host and phone both run the #41 build (deployed + installed 2026-08-31).
+- Host and phone both run the #42 build (deployed + installed 2026-08-31).
 - A herdr server was started for the #24 live pass via `tmux -L mocha new-session -d -s herdr-host 'herdr'` (it needs a PTY). Stop with `herdr server stop` if it should not be running.
 - Project roots come from `MOCHA_ROOTS`, defaulting to whichever of `~/Code`, `~/Projects`, `~/Developer`, `~/Documents` exist. They are both the picker's browsable list and the guardrail on where a phone-created agent may start. A host with no roots makes every create require confirmation — deny-by-default, and the picker says so.
 - herdr `agent.read` sources: `recent` (rolling recent output) and `visible` (current viewport). Use `visible` for anything that must reflect the live screen (e.g. dialog detection). Digit keys are select-and-confirm in Claude dialogs; `shift+tab` is the accepted spelling to cycle modes (`S-Tab`/`BTab` are rejected).

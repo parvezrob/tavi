@@ -2,9 +2,9 @@
 
 > Append-only log of completed work sessions, newest first. Each entry is what the *next* agent needs to know about that session: what shipped, what was learned, what was left open. The live starting point is always [`current-session.md`](./current-session.md); prune entries older than a few sessions — git history keeps everything.
 
-## 2026-08-31 (later) — #41 agent kinds, empty-terminal spike
+## 2026-08-31 (later) — #41 agent kinds, #42 empty terminal
 
-**Shipped:** #41 (`6bb38af`) — picker offers every herdr kind (21) via a one-row menu; host serves `agents` on `GET /api/projects` with login-shell installed detection and refuses uninstalled kinds by name.
+**Shipped:** #42 — Terminal in the picker via `pane.report_agent` (`shell/idle`, `source: mocha`); opens through the normal agent terminal. #41 (`6bb38af`) — picker offers every herdr kind (21) via a one-row menu; host serves `agents` on `GET /api/projects` with login-shell installed detection and refuses uninstalled kinds by name.
 
 **Learned:** herdr `agent.start` with an uninstalled kind returns a tab whose launch already died (`agent: ''`, `unknown`, blank) — the host must gate. Login shell (`$SHELL -lc`) is the honest PATH authority under launchd. 21 inline rows broke the picker's layout again (same trap as "Another folder" earlier) — long lists in this sheet must collapse. Empty terminal in the herdr lane is feasible via `pane report-agent` (see current-session.md).
 

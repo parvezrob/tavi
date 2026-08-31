@@ -145,7 +145,7 @@ struct NewAgentSheet: View {
                         Text("Agent")
                             .foregroundStyle(MochaTheme.textPrimary)
                         Spacer()
-                        Text(agentKind.map { label(for: $0, in: catalog) } ?? "None installed")
+                        Text(agentKind.map { label(for: $0, in: catalog) } ?? "None available")
                             .foregroundStyle(agentKind == nil ? MochaTheme.statusBlocked : MochaTheme.textSecondary)
                         Image(systemName: "chevron.up.chevron.down")
                             .font(.caption)

@@ -44,3 +44,9 @@ CLI attach used by the terminal bridge: `herdr agent attach <pane_id>` (option `
 ## Shared-terminal sizing
 
 A pane clamps to the smallest attached client. While a phone (~41 cols) is attached, the pane is narrow on the Mac too — inherent to shared terminals. Mocha's mitigation: on phone detach the held attachment immediately claims a 250×80 grid so the desktop clamp wins within a second, while the v2 resume window stays available (`apps/host/src/attachment.ts`).
+
+## Reported agents (plain terminals)
+
+- herdr will not attach a pane that has no agent (`agent.attach` → `agent_not_found`) and has no shell kind. `pane.report_agent {pane_id, source, agent, state}` lets Mocha declare one: a pane reported as `agent: "shell", state: "idle", source: "mocha"` lists in `agent.list` with that kind and status, and `agent attach` / the host pty bridge accept it. Verified live 2026-08-31.
+- herdr keeps a reported state: running commands in the pane did not flip `idle` to `working`/`done`, and the events feed carries the reported kind. A terminal therefore reads honestly as idle. Not yet verified: what happens if a real agent is later started by hand inside a reported pane.
+
