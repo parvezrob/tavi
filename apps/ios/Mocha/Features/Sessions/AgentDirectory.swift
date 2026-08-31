@@ -13,6 +13,54 @@ struct AgentSummary: Identifiable, Equatable, Sendable, Decodable {
     let focused: Bool
 }
 
+// A folder the New Agent picker can start an agent in (#24). `recent` is the
+// host's merge of folders agents are living in now with the choices this host
+// remembers; `workspaces` is the browsable scan of the configured roots.
+struct ProjectFolder: Identifiable, Equatable, Decodable {
+    let path: String
+    let name: String
+    // An agent is running here right now.
+    let active: Bool
+    // Inside a project root configured on the Mac. A folder outside them
+    // still works, but starting there asks for confirmation first — the
+    // picker says so up front instead of surprising you after a tap. The
+    // host remains the authority: it makes the same judgement on create.
+    let withinRoots: Bool
+
+    var id: String { path }
+}
+
+struct ProjectWorkspace: Identifiable, Equatable, Decodable {
+    let name: String
+    let path: String
+    let git: Bool
+
+    var id: String { path }
+}
+
+struct ProjectCatalog: Equatable, Decodable {
+    let recent: [ProjectFolder]
+    let workspaces: [ProjectWorkspace]
+    // The project roots configured on the Mac. Empty means none were found,
+    // which is worth saying plainly: every folder will then need confirming.
+    let roots: [String]
+}
+
+enum ProjectsFetch: Equatable {
+    case catalog(ProjectCatalog)
+    case failure(String)
+}
+
+// Creating an agent always names a folder. The host owns the rule about
+// which folders are ordinary and which need a second look, so a location
+// outside its configured roots comes back as a confirmation request rather
+// than a failure — the phone asks, then retries with the confirmation.
+enum CreateAgentOutcome: Equatable {
+    case created
+    case needsOutsideRootsConfirmation
+    case failure(String)
+}
+
 // Workspace → tab → agents hierarchy from GET /api/herdr/tree, shown in
 // the terminal's Jump-to sheet. Agents reuse AgentSummary so the sheet
 // speaks the same identity language as the home.
@@ -194,36 +242,78 @@ final class AgentDirectory {
         host != nil && !credential.isEmpty
     }
 
-    // Creates a Herdr tab (optionally launching an agent in it). The new
-    // agent then arrives through the live snapshot feed like any other.
-    func createTab(agent: String?) async -> String? {
-        guard let host, !credential.isEmpty else { return "Connect a host first." }
+    // The folders the New Agent picker offers (#24). One call: recent
+    // choices plus the browsable roots, both ordered by the host.
+    func fetchProjects() async -> ProjectsFetch {
+        guard let host, !credential.isEmpty else { return .failure("Connect a host first.") }
         guard var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else {
-            return "The host address is invalid."
+            return .failure("The host address is invalid.")
+        }
+        components.path = "/api/projects"
+        guard let url = components.url else { return .failure("The host address is invalid.") }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, response) = try await Self.session.data(for: request)
+            guard let status = (response as? HTTPURLResponse)?.statusCode else {
+                return .failure("The host did not answer.")
+            }
+            guard status == 200 else {
+                let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
+                return .failure(message ?? "The host could not list your projects (HTTP \(status)).")
+            }
+            do {
+                return .catalog(try JSONDecoder().decode(ProjectCatalog.self, from: data))
+            } catch {
+                // A shape this client cannot read is a version mismatch, not
+                // a network problem — say which, since retrying never helps.
+                return .failure("This host sent a project list Mocha does not understand. Update the Mocha host and the app to matching versions.")
+            }
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+    }
+
+    // Creates a Herdr tab in a chosen project folder and launches the agent
+    // in it. The new agent then arrives through the live snapshot feed like
+    // any other. `allowOutsideRoots` is the phone confirming a location the
+    // host flagged as outside its project roots — never sent unprompted.
+    func createTab(agent: String?, cwd: String, allowOutsideRoots: Bool = false) async -> CreateAgentOutcome {
+        guard let host, !credential.isEmpty else { return .failure("Connect a host first.") }
+        guard var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else {
+            return .failure("The host address is invalid.")
         }
         components.path = "/api/herdr/tabs"
-        guard let url = components.url else { return "The host address is invalid." }
+        guard let url = components.url else { return .failure("The host address is invalid.") }
+
+        var body: [String: Any] = ["cwd": cwd]
+        if let agent { body["agent"] = agent }
+        if allowOutsideRoots { body["allowOutsideRoots"] = true }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: String] = agent.map { ["agent": $0] } ?? [:]
-        request.httpBody = try? JSONEncoder().encode(body)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         do {
             let (data, response) = try await Self.session.data(for: request)
             guard let status = (response as? HTTPURLResponse)?.statusCode else {
-                return "The host did not answer."
+                return .failure("The host did not answer.")
             }
-            guard status == 201 else {
-                let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
-                return message ?? "The host could not create the tab (HTTP \(status))."
-            }
-            return nil
+            if status == 201 { return .created }
+            let failure = try? JSONDecoder().decode(CreateTabFailure.self, from: data)
+            if failure?.outsideRoots == true { return .needsOutsideRootsConfirmation }
+            return .failure(failure?.error ?? "The host could not create the tab (HTTP \(status)).")
         } catch {
-            return error.localizedDescription
+            return .failure(error.localizedDescription)
         }
+    }
+
+    private struct CreateTabFailure: Decodable {
+        let error: String?
+        let outsideRoots: Bool?
     }
 
     // Reads the live permission dialog on a waiting agent's pane (#23) so the

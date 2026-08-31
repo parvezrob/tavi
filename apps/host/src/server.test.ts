@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { mkdirSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
@@ -8,6 +11,8 @@ import WebSocket from "ws";
 import { AttentionOverlay } from "./attention.js";
 import type { HostConfig } from "./config.js";
 import { TERMINAL_PROTOCOL } from "./protocol.js";
+import type { HerdrAgentSource, HerdrTabRequest } from "./herdr.js";
+import { ProjectHistory } from "./projects.js";
 import { createMochaServer } from "./server.js";
 import type { ServerTerminalMessage, SessionBackend } from "./types.js";
 
@@ -275,6 +280,119 @@ test("decision endpoint fires only when an authority flags the agent as waiting"
   }
 });
 
+test("the project picker serves live agent folders, remembered choices, and roots", async () => {
+  const stateDir = mkdtempSync(path.join(tmpdir(), "mocha-picker-state-"));
+  const root = mkdtempSync(path.join(tmpdir(), "mocha-picker-root-"));
+  // Both folders exist on disk: the picker never offers one that is gone.
+  const api = path.join(root, "api");
+  const web = path.join(root, "web");
+  mkdirSync(api);
+  mkdirSync(web);
+  const projects = new ProjectHistory(stateDir);
+  projects.remember(api);
+
+  const herdr = stubHerdr({ cwd: web });
+  const tmux = {
+    listWorkspaces: async () => [{ name: "api", path: api, git: true }],
+  } as unknown as SessionBackend;
+  const server = await createMochaServer({
+    config: { ...config, roots: [root] },
+    tmux,
+    herdr,
+    projects,
+  });
+  await listen(server);
+
+  try {
+    const address = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/projects`, {
+      headers: { Authorization: `Bearer ${config.token}` },
+    });
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      recent: Array<{ path: string; name: string; active: boolean; withinRoots: boolean }>;
+      workspaces: Array<{ path: string }>;
+      roots: string[];
+    };
+
+    // The folder an agent is living in leads; the remembered one follows.
+    assert.deepEqual(body.recent.map((entry) => entry.path), [web, api]);
+    assert.deepEqual(body.recent.map((entry) => entry.active), [true, false]);
+    assert.equal(body.recent.every((entry) => entry.withinRoots), true);
+    assert.deepEqual(body.workspaces, [{ name: "api", path: api, git: true }]);
+    assert.deepEqual(body.roots, [root]);
+
+    const unauthorized = await fetch(`http://127.0.0.1:${address.port}/api/projects`);
+    assert.equal(unauthorized.status, 401);
+  } finally {
+    await close(server);
+  }
+});
+
+test("creating an agent requires a real folder and confirmation outside the roots", async () => {
+  const stateDir = mkdtempSync(path.join(tmpdir(), "mocha-create-state-"));
+  const root = mkdtempSync(path.join(tmpdir(), "mocha-create-root-"));
+  const project = mkdtempSync(path.join(root, "repo-"));
+  const outside = mkdtempSync(path.join(tmpdir(), "mocha-create-outside-"));
+  const projects = new ProjectHistory(stateDir);
+
+  const created: Array<{ agent?: string | undefined; cwd?: string | undefined }> = [];
+  const herdr = stubHerdr({
+    onCreateTab: (request) => {
+      created.push({ agent: request.agent, cwd: request.cwd });
+    },
+  });
+  const server = await createMochaServer({
+    config: { ...config, roots: [root] },
+    tmux: {} as SessionBackend,
+    herdr,
+    projects,
+  });
+  await listen(server);
+
+  try {
+    const address = server.address() as AddressInfo;
+    const headers = { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" };
+    const create = (body: Record<string, unknown>) =>
+      fetch(`http://127.0.0.1:${address.port}/api/herdr/tabs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+
+    // No folder at all: the old behaviour that born agents in ~ (#24).
+    const homeless = await create({ agent: "claude" });
+    assert.equal(homeless.status, 400);
+
+    const missing = await create({ agent: "claude", cwd: path.join(root, "not-here") });
+    assert.equal(missing.status, 400);
+
+    const relative = await create({ agent: "claude", cwd: "repo" });
+    assert.equal(relative.status, 400);
+
+    // Outside the roots without the extra confirmation.
+    const unconfirmed = await create({ agent: "claude", cwd: outside });
+    assert.equal(unconfirmed.status, 400);
+    assert.equal(((await unconfirmed.json()) as { outsideRoots?: boolean }).outsideRoots, true);
+    assert.deepEqual(created, []);
+    assert.deepEqual(projects.list(), []);
+
+    // Inside a root: allowed with no confirmation, and remembered.
+    const inside = await create({ agent: "claude", cwd: project });
+    assert.equal(inside.status, 201);
+    assert.deepEqual(created, [{ agent: "claude", cwd: project }]);
+    assert.deepEqual(projects.list().map((entry) => entry.path), [project]);
+
+    // Outside a root with the confirmation the phone sends after asking.
+    const confirmed = await create({ agent: "codex", cwd: outside, allowOutsideRoots: true });
+    assert.equal(confirmed.status, 201);
+    assert.deepEqual(created.at(-1), { agent: "codex", cwd: outside });
+    assert.deepEqual(projects.list().map((entry) => entry.path), [outside, project]);
+  } finally {
+    await close(server);
+  }
+});
+
 test("terminal websocket authenticates and bridges typed protocol messages", async () => {
   const terminal = new FakeTerminal();
   const tmux = {
@@ -527,6 +645,40 @@ test("terminal websocket returns not found before spawning a pty", async () => {
     await close(server);
   }
 });
+
+// A herdr double that satisfies the full agent source, with only the pieces
+// a given test cares about overridden.
+function stubHerdr(
+  options: { cwd?: string; onCreateTab?: (request: HerdrTabRequest) => void } = {},
+): HerdrAgentSource {
+  const agent = {
+    id: "wB:p1",
+    agent: "claude",
+    status: "idle" as const,
+    cwd: options.cwd ?? "/work",
+    title: "",
+    workspaceId: "wB",
+    tabId: "wB:t1",
+    focused: false,
+    revision: 1,
+    authority: "herdr" as const,
+  };
+  return {
+    listAgents: async () => ({ provider: "herdr" as const, available: true, protocol: 17, agents: [agent] }),
+    listTree: async () => ({ available: true as const, workspaces: [] }),
+    findAgent: async () => ({ available: true as const, agent }),
+    attachCommand: (paneId: string) => ({ bin: "herdr", args: ["agent", "attach", paneId] }),
+    readAgent: async () => ({ available: true as const, preview: "" }),
+    readDialog: async () => ({ present: false as const }),
+    decideAgent: async () => ({ decided: true as const, sent: "Enter" }),
+    promptAgent: async () => ({ submitted: true as const }),
+    createTab: async (request: HerdrTabRequest) => {
+      options.onCreateTab?.(request);
+      return { created: true as const, paneId: "wB:p9", tabId: "wB:t9" };
+    },
+    closeTab: async () => ({ closed: true as const }),
+  };
+}
 
 async function withServer(run: (origin: string) => Promise<void>): Promise<void> {
   const server = await createMochaServer({ config, tmux: {} as SessionBackend });

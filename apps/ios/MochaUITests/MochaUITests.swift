@@ -246,7 +246,8 @@ final class MochaUITests: XCTestCase {
             throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live jump test.")
         }
 
-        let (paneId, tabId) = try await createAgentTab(host: host, token: token)
+        let project = try await knownProjectPath(host: host, token: token)
+        let (paneId, tabId) = try await createAgentTab(host: host, token: token, cwd: project)
         addTeardownBlock {
             try? await Self.closeAgentTab(host: host, token: token, tabId: tabId)
         }
@@ -316,7 +317,8 @@ final class MochaUITests: XCTestCase {
             throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live needs-you test.")
         }
 
-        let (paneId, tabId) = try await createAgentTab(host: host, token: token)
+        let project = try await knownProjectPath(host: host, token: token)
+        let (paneId, tabId) = try await createAgentTab(host: host, token: token, cwd: project)
         addTeardownBlock {
             try? await Self.closeAgentTab(host: host, token: token, tabId: tabId)
         }
@@ -462,24 +464,58 @@ final class MochaUITests: XCTestCase {
         _ = try await URLSession.shared.data(for: request)
     }
 
+    // The host requires an explicit project folder (#24). These live tests
+    // only need an agent running somewhere real, so they confirm the custom
+    // location outright; the roots gate itself is covered by host tests.
     private func createAgentTab(
         host: String,
         token: String,
-        cwd: String? = nil
+        cwd: String
     ) async throws -> (paneId: String, tabId: String) {
         var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/herdr/tabs")))
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        var body = ["agent": "claude"]
-        if let cwd { body["cwd"] = cwd }
-        request.httpBody = try JSONEncoder().encode(body)
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "agent": "claude",
+            "cwd": cwd,
+            "allowOutsideRoots": true,
+        ])
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 201 else {
             throw XCTSkip("The host could not create a disposable agent tab.")
         }
         let payload = try JSONDecoder().decode([String: String].self, from: data)
         return (try XCTUnwrap(payload["paneId"]), try XCTUnwrap(payload["tabId"]))
+    }
+
+    // A real folder on this Mac to start a disposable agent in, read from
+    // the host's own project catalog rather than hard-coding one machine's
+    // layout. It prefers a folder an agent is already running in, which is
+    // the best available hint that Claude trusts it — but nothing here
+    // proves trust, so callers that need an idle agent must treat a trust
+    // prompt as a skip rather than a failure.
+    private func knownProjectPath(host: String, token: String) async throws -> String {
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/projects")))
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw XCTSkip("The host could not list its projects.")
+        }
+        struct Catalog: Decodable {
+            struct Folder: Decodable { let path: String; let active: Bool }
+            struct Workspace: Decodable { let path: String }
+            let recent: [Folder]
+            let workspaces: [Workspace]
+        }
+        let catalog = try JSONDecoder().decode(Catalog.self, from: data)
+        guard let path = catalog.recent.first(where: \.active)?.path
+            ?? catalog.recent.first?.path
+            ?? catalog.workspaces.first?.path
+        else {
+            throw XCTSkip("This host has no known project folder to start a disposable agent in.")
+        }
+        return path
     }
 
     private func readDialogPresent(host: String, token: String, paneId: String) async throws -> Bool {

@@ -2,7 +2,7 @@
 
 **Status:** current prototype contract
 **Protocol:** `mocha.v1`
-**Updated:** 2026-08-19
+**Updated:** 2026-08-31
 
 This document preserves the transport contract used by the native Mocha client. It is platform-neutral and is the compatibility baseline while the protocol evolves toward versioned capability negotiation.
 
@@ -117,6 +117,51 @@ Stops the tmux session. Returns `204` on success or `404` when it no longer exis
 ```
 
 The host returns configured roots and their immediate visible child directories, with Git roots first.
+
+### `GET /api/projects`
+
+Everything a client needs to choose where a new agent starts.
+
+```json
+{
+  "recent": [
+    {
+      "path": "/Users/example/Projects/api",
+      "name": "api",
+      "lastUsedAt": "2026-08-31T09:12:04.000Z",
+      "active": true,
+      "withinRoots": true
+    }
+  ],
+  "workspaces": [
+    { "name": "api", "path": "/Users/example/Projects/api", "git": true }
+  ],
+  "roots": ["/Users/example/Projects"]
+}
+```
+
+`recent` merges the folders agents are running in right now (`active: true`) with the folders this host has previously launched an agent in. Folders with a live agent come first, then the most recently chosen; `lastUsedAt` is absent for a folder known only from a live agent, and a remembered folder that no longer exists on disk is omitted rather than offered. `name` is the folder's basename. `withinRoots` says whether the folder sits inside `roots`, so a client can mark the folders whose creation will require the confirmation described below instead of discovering it after a failed request. `workspaces` is the same scan as `GET /api/workspaces`.
+
+`roots` may be empty — a host with none of the default project directories and no `MOCHA_ROOTS` configures no roots at all, and then *every* create requires the confirmation below. Path comparison is case- and Unicode-normalization-insensitive, matching the default macOS filesystem.
+
+### `POST /api/herdr/tabs`
+
+Creates a Herdr tab and launches an agent in it.
+
+```json
+{ "agent": "claude", "cwd": "/Users/example/Projects/api", "allowOutsideRoots": false }
+```
+
+`agent` is `claude` or `codex`, or absent for a plain shell tab. `cwd` is **required** and must be an absolute path to an existing directory — the host never starts an agent in an unspecified location. A `cwd` outside the configured roots is refused with `400` and `{ "outsideRoots": true }` unless the request carries `allowOutsideRoots: true`, which clients send only after confirming the custom location with the person.
+
+| Status | Meaning |
+| --- | --- |
+| `201` | Created; body is `{ "paneId", "tabId" }`. The folder is recorded in the recent list above. |
+| `400` | Unknown `agent`, missing or unusable `cwd`, or an unconfirmed location outside the roots (`outsideRoots: true`). |
+| `404` | Herdr is not configured on this host. |
+| `503` | Herdr is configured but could not create the tab. |
+
+**Compatibility.** Requiring `cwd` is a breaking change to this endpoint, made while Mocha is pre-MVP with a single first-party client shipped alongside the host. A client that omits `cwd` gets `400` on every create and must be updated with the host; there is no negotiated fallback. Deploy the host and the app together.
 
 ## Terminal WebSocket
 

@@ -39,4 +39,6 @@ Practical knowledge for building, deploying, and verifying Mocha end-to-end. Pol
 
 - Terminal WS: `/api/sessions/{id}/terminal` or `/api/agents/{pane}/terminal`, subprotocol `mocha.v2` (v1 legacy), Bearer token auth. Resume: `?stream=<epoch>&resume=<offset>`. Full spec: [`../protocol/README.md`](../protocol/README.md).
 - Agent events WS: `/api/events`, subprotocol `mocha.events.v1` — full agent snapshot on connect and on every change.
+- Project picker: `GET /api/projects` (recent folders + root scan + roots); `POST /api/herdr/tabs` requires an absolute existing `cwd` and refuses one outside the roots unless the request confirms with `allowOutsideRoots`. Full shapes: [`../protocol/README.md`](../protocol/README.md).
+- Project roots come from `MOCHA_ROOTS` (comma-separated), defaulting to whichever of `~/Code`, `~/Projects`, `~/Developer`, `~/Documents` exist. They are both the picker's browsable list and the guardrail on where a phone-created agent may start. The host's recent-folder list lives in `~/.mocha/projects.json` (0600) and holds the last 12 folders it launched an agent in.
 - Herdr contract and traps: [`HERDR_INTEGRATION.md`](./HERDR_INTEGRATION.md).

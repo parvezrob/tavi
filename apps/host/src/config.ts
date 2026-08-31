@@ -74,10 +74,15 @@ export function loadConfig(options: LoadConfigOptions = {}): HostConfig {
     ? undefined
     : path.join(homeDirectory, LEGACY_STATE_DIRECTORY);
   const rawPort = Number.parseInt(env.MOCHA_PORT || "8787", 10);
+  // Trim and drop blanks *before* resolving: path.resolve("") is the host
+  // process's own working directory, so a stray trailing comma would
+  // silently widen the roots — and roots now decide where an agent may be
+  // born (#24).
   const configuredRoots = env.MOCHA_ROOTS
     ?.split(",")
-    .map((root) => path.resolve(root.trim()))
-    .filter(Boolean);
+    .map((root) => root.trim())
+    .filter((root) => root.length > 0)
+    .map((root) => path.resolve(root));
 
   return {
     bindHost: env.MOCHA_HOST || "127.0.0.1",

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { mkdtempSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -9,6 +11,7 @@ import type { IPty } from "node-pty";
 import WebSocket from "ws";
 import type { HostConfig } from "./config.js";
 import { OUTPUT_FRAME_HEADER_BYTES, OUTPUT_FRAME_TYPE, TERMINAL_PROTOCOL_V2 } from "./protocol.js";
+import { ProjectHistory } from "./projects.js";
 import { createMochaServer, type MochaServerOptions } from "./server.js";
 import type { ServerTerminalMessage, SessionBackend } from "./types.js";
 
@@ -254,16 +257,19 @@ test("herdr agents are attachable terminal targets with honest failure modes", a
     assert.equal(emptyPrompt.status, 400);
     assert.equal(prompts.length, 1);
 
+    // A real directory inside the configured roots: the host now refuses to
+    // launch an agent anywhere it cannot verify (#24).
+    const project = await mkdtemp(path.join(tmpdir(), "mocha-v2-project-"));
     const tab = await fetch(`http://127.0.0.1:${address.port}/api/herdr/tabs`, {
       method: "POST",
       headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ agent: "claude", cwd: "/Users/dev/project" }),
+      body: JSON.stringify({ agent: "claude", cwd: project }),
     });
     assert.equal(tab.status, 201);
     assert.deepEqual(await tab.json(), { paneId: "wB:p9", tabId: "wB:t9" });
     assert.deepEqual(tabRequests.at(-1), {
       agent: "claude",
-      cwd: "/Users/dev/project",
+      cwd: project,
       label: "mocha claude",
     });
 
@@ -399,6 +405,9 @@ class TerminalHarness {
     const server = await createMochaServer({
       config,
       tmux,
+      // Never the developer's real state directory: creating an agent
+      // records the folder, and that must not leak between test runs.
+      projects: new ProjectHistory(mkdtempSync(path.join(tmpdir(), "mocha-v2-state-"))),
       ...(this.herdr ? { herdr: this.herdr } : {}),
       ...(this.agentEvents ? { agentEvents: this.agentEvents } : {}),
       spawnTerminal: (bin, args) => {

@@ -19,6 +19,12 @@ import {
   TERMINAL_PROTOCOL_V2,
 } from "./protocol.js";
 import type { DialogDecision, HerdrAgentSource } from "./herdr.js";
+import {
+  isWithinRoots,
+  mergeRecentProjects,
+  normalizeProjectPath,
+  ProjectHistory,
+} from "./projects.js";
 import type { AttachCommand, HostInfo, ServerTerminalMessage, SessionBackend } from "./types.js";
 import { InputError, parseCreateSession, safeSessionId } from "./validation.js";
 
@@ -40,6 +46,7 @@ export interface MochaServerOptions {
   herdr?: HerdrAgentSource;
   agentEvents?: AgentEventSource;
   attention?: AttentionOverlay;
+  projects?: ProjectHistory;
   spawnTerminal?: typeof pty.spawn;
   attachmentRetentionMs?: number;
   attachmentBufferBytes?: number;
@@ -56,7 +63,15 @@ interface TerminalTarget {
 }
 
 export async function createMochaServer(options: MochaServerOptions) {
-  const { config, tmux, herdr, agentEvents, attention, spawnTerminal = pty.spawn } = options;
+  const {
+    config,
+    tmux,
+    herdr,
+    agentEvents,
+    attention,
+    projects = new ProjectHistory(config.stateDir),
+    spawnTerminal = pty.spawn,
+  } = options;
   const eventsWss = new WebSocketServer({
     noServer: true,
     handleProtocols(protocols) {
@@ -78,7 +93,7 @@ export async function createMochaServer(options: MochaServerOptions) {
 
   const server = createServer(async (request, response) => {
     try {
-      await routeRequest(request, response, config, tmux, herdr, attention);
+      await routeRequest(request, response, { config, tmux, herdr, attention, projects });
     } catch (error) {
       const status = error instanceof InputError ? 400 : 500;
       const message = error instanceof Error ? error.message : "Unexpected server error.";
@@ -230,14 +245,20 @@ function parseResumeRequest(url: URL): TerminalResumeRequest | undefined {
   return { stream, offset: Number.parseInt(resume, 10) };
 }
 
+interface RouteContext {
+  config: HostConfig;
+  tmux: SessionBackend;
+  projects: ProjectHistory;
+  herdr?: HerdrAgentSource | undefined;
+  attention?: AttentionOverlay | undefined;
+}
+
 async function routeRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  config: HostConfig,
-  tmux: SessionBackend,
-  herdr?: HerdrAgentSource,
-  attention?: AttentionOverlay,
+  context: RouteContext,
 ): Promise<void> {
+  const { config, tmux, herdr, attention, projects } = context;
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
   if (url.pathname === "/api/health" && request.method === "GET") {
@@ -287,6 +308,21 @@ async function routeRequest(
 
   if (url.pathname === "/api/workspaces" && request.method === "GET") {
     sendJson(response, 200, { workspaces: await tmux.listWorkspaces() });
+    return;
+  }
+
+  // Everything the New Agent picker needs in one call (#24): the folders
+  // agents are living in now plus this host's remembered choices, the
+  // browsable roots, and the roots themselves so the phone knows which
+  // custom path will need the extra confirmation.
+  if (url.pathname === "/api/projects" && request.method === "GET") {
+    const agents = herdr ? await herdr.listAgents() : undefined;
+    const agentCwds = agents?.available ? agents.agents.map((agent) => agent.cwd) : [];
+    sendJson(response, 200, {
+      recent: mergeRecentProjects(projects.list(), agentCwds, config.roots),
+      workspaces: await tmux.listWorkspaces(),
+      roots: config.roots,
+    });
     return;
   }
 
@@ -457,20 +493,42 @@ async function routeRequest(
     const body = await readJsonBody(request);
     const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
     const agent = typeof record.agent === "string" ? record.agent : undefined;
-    const cwd = typeof record.cwd === "string" ? record.cwd : undefined;
     if (agent !== undefined && !ALLOWED_TAB_AGENTS.includes(agent)) {
       sendJson(response, 400, { error: "agent must be one of: claude, codex." });
       return;
     }
-    if (cwd !== undefined && (cwd.length > 1_024 || !cwd.startsWith("/"))) {
-      sendJson(response, 400, { error: "cwd must be an absolute path." });
+    // `cwd` is required (#24). It used to be optional, which is exactly how
+    // phone-created agents ended up in the host user's home directory.
+    if (typeof record.cwd !== "string") {
+      sendJson(response, 400, { error: "cwd is required: choose the project folder to work in." });
       return;
     }
-    const result = await herdr.createTab({ agent, cwd, label: agent ? `mocha ${agent}` : "mocha" });
+    const candidate = normalizeProjectPath(record.cwd);
+    if (!candidate.ok) {
+      sendJson(response, 400, { error: candidate.reason });
+      return;
+    }
+    // Outside the configured roots the phone must say so explicitly, which
+    // it only does after asking the person a second time.
+    if (!isWithinRoots(candidate.path, config.roots) && record.allowOutsideRoots !== true) {
+      sendJson(response, 400, {
+        error: "That folder is outside your project roots. Confirm the custom location to continue.",
+        outsideRoots: true,
+      });
+      return;
+    }
+    const result = await herdr.createTab({
+      agent,
+      cwd: candidate.path,
+      label: agent ? `mocha ${agent}` : "mocha",
+    });
     if (!result.created) {
       sendJson(response, 503, { error: result.reason });
       return;
     }
+    // Only a folder that actually launched something earns a place in the
+    // picker's recent list.
+    projects.remember(candidate.path);
     sendJson(response, 201, { paneId: result.paneId, tabId: result.tabId });
     return;
   }

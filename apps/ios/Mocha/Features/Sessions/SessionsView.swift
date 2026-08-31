@@ -16,10 +16,8 @@ struct SessionsView: View {
     @State private var agentDirectory = AgentDirectory()
     @State private var draftHost = ""
     @State private var draftToken = ""
-    @State private var newTabError: String?
-    @State private var newTabInFlight = false
     @State private var showingHostForm = false
-    @State private var showingNewTabPicker = false
+    @State private var showingNewAgent = false
     @State private var decisionAgent: AgentSummary?
     @State private var terminalController = TerminalSessionController()
     @State private var terminalIsPresented = false
@@ -44,9 +42,9 @@ struct SessionsView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("New agent", systemImage: "plus") {
-                        showingNewTabPicker = true
+                        showingNewAgent = true
                     }
-                    .disabled(!agentDirectory.isConfigured || newTabInFlight)
+                    .disabled(!agentDirectory.isConfigured)
                     .accessibilityIdentifier("sessions.newAgentTab")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -58,17 +56,15 @@ struct SessionsView: View {
                     .accessibilityIdentifier("sessions.hostSettings")
                 }
             }
-            .confirmationDialog("New Herdr tab", isPresented: $showingNewTabPicker) {
-                Button("Claude") { createTab(agent: "claude") }
-                Button("Codex") { createTab(agent: "codex") }
-                Button("Cancel", role: .cancel) {}
-            }
             .navigationDestination(isPresented: $terminalIsPresented) {
                 TerminalSessionView(
                     controller: terminalController,
                     agentDirectory: agentDirectory,
                     onSelectAgent: { agent in openAgent(agent) }
                 )
+            }
+            .sheet(isPresented: $showingNewAgent) {
+                NewAgentSheet(directory: agentDirectory)
             }
             .sheet(isPresented: $showingHostForm) {
                 hostForm
@@ -167,12 +163,6 @@ struct SessionsView: View {
 
             if blocked.isEmpty, active.isEmpty, recent.isEmpty {
                 idleStateCard
-            }
-
-            if let newTabError {
-                Text(newTabError)
-                    .font(.caption)
-                    .foregroundStyle(MochaTheme.statusBlocked)
             }
         }
     }
@@ -322,16 +312,6 @@ struct SessionsView: View {
     }
 
     // MARK: - Actions
-
-    private func createTab(agent: String?) {
-        newTabError = nil
-        newTabInFlight = true
-        Task {
-            let failure = await agentDirectory.createTab(agent: agent)
-            newTabInFlight = false
-            newTabError = failure
-        }
-    }
 
     private var hostForm: some View {
         NavigationStack {
