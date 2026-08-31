@@ -40,7 +40,7 @@ Target visuals: [`assets/agent-deck-v1-home-terminal.png`](./assets/agent-deck-v
 1. Sessions home: `Needs you` / `Active` / `Recent` cards with agent identity, host, state colors, freshness, and safe preview — driven by Phase B data with provenance labels.
 2. Focused terminal screen: header with session/host/provider identity, `Jump to` sheet over the Herdr workspace → tab hierarchy.
 3. Multiline composer with deliberate send (the PRD's primary input mode) plus completed quick-key row (Shift-Tab, Ctrl modifier, Enter).
-4. Terminal ergonomics: font-size setting, selection + copy/paste, scroll feel tuning, hardware-keyboard pass.
+4. Terminal ergonomics: **font-size setting (#51 — user-controlled; a smaller phone font also gives the shared herdr pane on the Mac a bigger grid while attached, see #44)**, selection + copy/paste, scroll feel tuning (#10), hardware-keyboard pass.
 
 Adopted 2026-08-26 after a competitor survey (t3code, Happy, Omnara, CodeAgent Mobile — owner decision), extending Phase C:
 

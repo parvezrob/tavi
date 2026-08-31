@@ -14,6 +14,8 @@
 
 **Platform decisions 2026-08-31:** #47 one-command tester install (npm publish + `mocha pair` bootstraps service/serve; absorbs #21) is the real TestFlight gate and goes first. #48 Linux host (systemd unit, herdr-on-Linux verified) after. #49 Windows = WSL2 documented, no native host — later. Android = a second app, not planned.
 
+**#51 settings/font size filed (owner request):** user-controlled terminal font size with the grid shown ("44 × 22 → 58 × 30"); the smaller-font-bigger-Mac-pane trade-off is the user's. Independent of #47; good candidate alongside #26.
+
 **#50 multi-host filed (owner request: one phone → Mac + Linux, home grouped by computer).** Ordered after #47 and #48 (needs a second real host to test). **Constraint on #26:** build project grouping as host → project → agents so #50 does not have to retrofit it.
 
 **TestFlight track (owner decision 2026-08-31), in priority order:** #44 herdr pane sizing (step 1 done; while attached the Mac is still phone-sized — inherent until step 2) → #45/#46 done → **#47 tester install** (owner: tomorrow, once named; absorbs #21) → #48 Linux → #50 multi-host → #37 App Store epic. #26 in between when convenient, host-aware. Then #26, #10, #38, #40/#39, #25; #27–#29 parked. Push notifications (Phase E.1) deliberately deferred until testers ask.
