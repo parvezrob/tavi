@@ -43,7 +43,7 @@ CLI attach used by the terminal bridge: `herdr agent attach <pane_id>` (option `
 
 ## Shared-terminal sizing
 
-A pane clamps to the smallest attached client. While a phone (~41 cols) is attached, the pane is narrow on the Mac too — inherent to shared terminals. Mocha's mitigation: on phone detach the held attachment immediately claims a 250×80 grid so the desktop clamp wins within a second, while the v2 resume window stays available (`apps/host/src/attachment.ts`).
+**Pane size is last-writer-wins, not smallest-client (verified live 2026-08-31, #44).** An external `agent attach` sets the pane's *terminal* size; herdr does not restore it when that client leaves, and its own viewer displays a fixed layout rect onto whatever the terminal is. While a phone (~44 cols) is attached the Mac is phone-sized too — inherent to a shared pty. On detach Mocha resizes the held pty back to the pane's viewer rect (`session.snapshot` → `layouts[].panes[].rect`, e.g. 174×49), which is exactly what the Mac displays. The earlier 250×80 "desktop-scale" claim was wrong here: it left the Mac looking at the top-left of an 80-row terminal with Claude's prompt off-screen. (tmux *does* clamp to the smallest client, so the tmux lane keeps the 250×80 claim.)
 
 ## Reported agents (plain terminals)
 

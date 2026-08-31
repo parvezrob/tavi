@@ -19,7 +19,7 @@ import {
   TERMINAL_PROTOCOL,
   TERMINAL_PROTOCOL_V2,
 } from "./protocol.js";
-import type { DialogDecision, HerdrAgentSource } from "./herdr.js";
+import type { DialogDecision, HerdrAgentSource, TerminalSize } from "./herdr.js";
 import {
   isWithinRoots,
   mergeRecentProjects,
@@ -61,6 +61,8 @@ interface TerminalResumeRequest {
 interface TerminalTarget {
   key: string;
   spawn: () => pty.IPty;
+  // What the desktop shows for this pane; handed back on phone detach (#44).
+  detachedSize?: () => Promise<TerminalSize | undefined>;
 }
 
 export async function createMochaServer(options: MochaServerOptions) {
@@ -172,6 +174,7 @@ export async function createMochaServer(options: MochaServerOptions) {
         target = {
           key: `agent:${paneId}`,
           spawn: () => spawnAttachmentTerminal(herdr.attachCommand(paneId), config, spawnTerminal),
+          detachedSize: () => herdr.paneSize?.(paneId) ?? Promise.resolve(undefined),
         };
       }
 
@@ -643,7 +646,9 @@ function bridgeTerminalV2(
     // trimmed out of the ring) gets a fresh attach: tmux repaints the whole
     // screen, so the client is complete again without replay.
     attachment?.dispose();
-    attachment = attachments.create(target.key, target.spawn());
+    attachment = attachments.create(target.key, target.spawn(), {
+      detachedSize: target.detachedSize,
+    });
     cursor = attachment.endOffset;
   }
   const active = attachment;

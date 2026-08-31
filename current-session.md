@@ -6,7 +6,9 @@
 
 ## Next work
 
-**TestFlight track (owner decision 2026-08-31), in priority order:** #44 herdr pane sizing (step 1: release the attachment on phone detach instead of claiming 250×80) → #45 QR pairing → #46 per-device credentials + revoke → #21 installer flake → #37 App Store epic. Then #26, #10, #38, #40/#39, #25; #27–#29 parked. Push notifications (Phase E.1) deliberately deferred until testers ask.
+**#44 step 1 shipped 2026-08-31 (host only, deployed):** on phone detach the held pty is resized to the pane's herdr viewer rect (`session.snapshot` → `layouts[].panes[].rect`), not 250×80. Finding that changed the fix: **herdr is last-writer-wins on pane size, not smallest-client** — the 250×80 claim was itself what left the Mac cropped. Live-verified: 44×22 while attached → 174×49 after detach. Steps 2 (snapshot rendering, no second PTY) and 3 (herdr viewer-flag ask) stay open on #44. Owner to confirm on the real Mac window: open a pane on the phone, background the app, Claude's prompt should be back within ~2 s.
+
+**TestFlight track (owner decision 2026-08-31), in priority order:** #44 herdr pane sizing (step 1 done; while attached the Mac is still phone-sized — inherent until step 2) → #45 QR pairing → #46 per-device credentials + revoke → #21 installer flake → #37 App Store epic. Then #26, #10, #38, #40/#39, #25; #27–#29 parked. Push notifications (Phase E.1) deliberately deferred until testers ask.
 
 **#42 shipped 2026-08-31 (empty terminal):** "Terminal" leads the agent menu; the host creates the tab and `pane.report_agent`s it as `shell/idle` instead of launching anything, so it lists, lands in Recent, and opens to a live shell in the chosen folder. Live test `testCreateTerminalFromPicker` (also sends a command through the composer — #43 fixed: a shell pane takes the plain-terminal send path, not the prompt endpoint). Not yet known: what herdr does if a real agent is later started by hand inside a reported pane.
 

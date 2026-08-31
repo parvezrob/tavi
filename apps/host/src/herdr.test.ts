@@ -115,6 +115,38 @@ test("composes the workspace → tab → agent tree", async (context) => {
   );
 });
 
+// #44: the size the Mac displays is the pane's rect in herdr's viewer
+// layout, which is what the phone hands back on detach.
+test("pane size comes from the viewer layout rect", async (context) => {
+  const socketPath = temporarySocketPath(context);
+  await startFakeHerdr(context, socketPath, {
+    protocol: 17,
+    agents: [],
+    snapshot: {
+      layouts: [
+        {
+          tab_id: "wB:t1",
+          panes: [
+            { pane_id: "wB:p1", rect: { x: 26, y: 1, width: 174, height: 49 } },
+            { pane_id: "wB:p2", rect: { x: 0, y: 0, width: 0, height: 0 } },
+          ],
+        },
+      ],
+    },
+  });
+  const herdr = new HerdrService({ socketPath });
+
+  assert.deepEqual(await herdr.paneSize("wB:p1"), { cols: 174, rows: 49 });
+  // A zero rect is not a size worth handing back; an unknown pane has none.
+  assert.equal(await herdr.paneSize("wB:p2"), undefined);
+  assert.equal(await herdr.paneSize("wB:p9"), undefined);
+});
+
+test("pane size is unknown when herdr is down", async (context) => {
+  const socketPath = temporarySocketPath(context);
+  assert.equal(await new HerdrService({ socketPath }).paneSize("wB:p1"), undefined);
+});
+
 test("tree degrades to unavailable when herdr is down", async (context) => {
   const socketPath = temporarySocketPath(context);
 
@@ -348,6 +380,7 @@ async function startFakeHerdr(
     workspaces?: unknown[];
     tabs?: unknown[];
     readText?: string;
+    snapshot?: unknown;
     promptError?: string;
     methodCalls?: string[];
     sentKeys?: string[][];
@@ -384,6 +417,8 @@ async function startFakeHerdr(
               ? { type: "tab_list", tabs: behavior.tabs ?? [] }
               : request.method === "agent.read"
                 ? { type: "pane_read", read: { text: behavior.readText ?? "" } }
+                : request.method === "session.snapshot"
+                  ? { type: "session_snapshot", snapshot: behavior.snapshot ?? {} }
                 : request.method === "agent.prompt" || request.method === "agent.send_keys"
                   ? { type: "ok" }
                   : { type: "agent_list", agents: behavior.agents };

@@ -77,8 +77,16 @@ export type HerdrTreeResult =
 
 export type HerdrTabCloseResult = { closed: true } | { closed: false; reason: string };
 
+export interface TerminalSize {
+  cols: number;
+  rows: number;
+}
+
 export interface HerdrAgentSource {
   listAgents(): Promise<HerdrAgentsResult>;
+  // The pane's cell size in herdr's own viewer layout — what the Mac shows.
+  // Optional: a source that cannot report it leaves the pane untouched.
+  paneSize?(paneId: string): Promise<TerminalSize | undefined>;
   listTree(): Promise<HerdrTreeResult>;
   closeTab(tabId: string): Promise<HerdrTabCloseResult>;
   findAgent(paneId: string): Promise<HerdrAgentLookup>;
@@ -175,6 +183,29 @@ export class HerdrService implements HerdrAgentSource {
       };
     } catch (error) {
       return { available: false, reason: describeConnectionFailure(error) };
+    }
+  }
+
+  // Verified live (#44): an external attach sets the pane's *terminal* size
+  // and herdr keeps whatever the last attach said even after that client
+  // leaves — it does not clamp to its own viewer. The viewer's layout rect
+  // (session.snapshot → layouts[].panes[].rect) is the size the Mac actually
+  // displays, so it is the size to hand back on detach.
+  async paneSize(paneId: string): Promise<TerminalSize | undefined> {
+    try {
+      const snapshot = asRecord(asRecord(await this.request("session.snapshot", {})).snapshot);
+      for (const layout of asArray(snapshot.layouts).map(asRecord)) {
+        for (const pane of asArray(layout.panes).map(asRecord)) {
+          if (asString(pane.pane_id) !== paneId) continue;
+          const rect = asRecord(pane.rect);
+          const cols = typeof rect.width === "number" ? rect.width : 0;
+          const rows = typeof rect.height === "number" ? rect.height : 0;
+          return cols > 0 && rows > 0 ? { cols, rows } : undefined;
+        }
+      }
+      return undefined;
+    } catch {
+      return undefined;
     }
   }
 

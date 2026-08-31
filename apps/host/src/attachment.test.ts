@@ -99,12 +99,66 @@ test("claim delivers live output, supersedes the previous client, and release re
   assert.ok(!attachment.isDisposed);
 
   attachment.release(second);
-  // Releasing the live client immediately reclaims a desktop-scale grid so
-  // the pane on the Mac is not stuck phone-sized for the retention window.
+  // Without a desktop size (tmux lane), releasing claims the desktop-scale
+  // grid so tmux's smallest-client clamp lets the Mac win.
   assert.deepEqual(process.resizes.at(-1), { cols: 250, rows: 80 });
   await new Promise((resolve) => setTimeout(resolve, 60));
   assert.ok(attachment.isDisposed);
   assert.ok(process.killed);
+});
+
+test("release hands a herdr pane back to the desktop's own size (#44)", async () => {
+  const process = new FakeProcess();
+  const attachment = new TerminalAttachment(process, {
+    retentionMs: 60_000,
+    detachedSize: async () => ({ cols: 174, rows: 49 }),
+  });
+  const phone = makeClient();
+  attachment.claim(phone);
+  attachment.resize(44, 22);
+
+  attachment.release(phone);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  // Not the 250×80 tmux fallback: herdr keeps whatever size it is told, so
+  // an oversized claim would leave the Mac looking at a cropped terminal.
+  assert.deepEqual(process.resizes.at(-1), { cols: 174, rows: 49 });
+  attachment.dispose();
+});
+
+test("release leaves the size alone when the desktop size is unknown", async () => {
+  const process = new FakeProcess();
+  const attachment = new TerminalAttachment(process, {
+    retentionMs: 60_000,
+    detachedSize: async () => undefined,
+  });
+  const phone = makeClient();
+  attachment.claim(phone);
+  attachment.resize(44, 22);
+
+  attachment.release(phone);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(process.resizes.at(-1), { cols: 44, rows: 22 });
+  attachment.dispose();
+});
+
+test("a phone that re-claims before the desktop size arrives keeps its own size", async () => {
+  const process = new FakeProcess();
+  let resolveSize: (size: { cols: number; rows: number }) => void = () => undefined;
+  const attachment = new TerminalAttachment(process, {
+    retentionMs: 60_000,
+    detachedSize: () => new Promise((resolve) => (resolveSize = resolve)),
+  });
+  const first = makeClient();
+  attachment.claim(first);
+  attachment.release(first);
+  const second = makeClient();
+  attachment.claim(second);
+  attachment.resize(44, 22);
+
+  resolveSize({ cols: 174, rows: 49 });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(process.resizes.at(-1), { cols: 44, rows: 22 });
+  attachment.dispose();
 });
 
 test("unclaimed attachment disposes after retention", async () => {

@@ -6,7 +6,7 @@
 
 **Shipped:** #42 — Terminal in the picker via `pane.report_agent` (`shell/idle`, `source: mocha`); opens through the normal agent terminal. #41 (`6bb38af`) — picker offers every herdr kind (21) via a one-row menu; host serves `agents` on `GET /api/projects` with login-shell installed detection and refuses uninstalled kinds by name.
 
-**Learned:** herdr `agent.start` with an uninstalled kind returns a tab whose launch already died (`agent: ''`, `unknown`, blank) — the host must gate. Login shell (`$SHELL -lc`) is the honest PATH authority under launchd. 21 inline rows broke the picker's layout again (same trap as "Another folder" earlier) — long lists in this sheet must collapse. Empty terminal in the herdr lane is feasible via `pane report-agent` (see current-session.md).
+**Learned (#44):** herdr pane size is last-writer-wins — an external attach sets the pane's terminal size and herdr never restores it; its viewer just shows a fixed rect onto whatever the terminal is. `session.snapshot` exposes that rect per pane. `pane get` has no size fields; `tput cols`×`tput lines` via `pane send-text` + `pane read` is the way to measure. Also: herdr `agent.start` with an uninstalled kind returns a tab whose launch already died (`agent: ''`, `unknown`, blank) — the host must gate. Login shell (`$SHELL -lc`) is the honest PATH authority under launchd. 21 inline rows broke the picker's layout again (same trap as "Another folder" earlier) — long lists in this sheet must collapse. Empty terminal in the herdr lane is feasible via `pane report-agent` (see current-session.md).
 
 ## 2026-08-31 — #24 project picker, host-enforced project roots
 

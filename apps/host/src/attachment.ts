@@ -3,12 +3,20 @@ import { randomUUID } from "node:crypto";
 export const RESUME_BUFFER_BYTES = 1024 * 1024;
 export const DETACHED_RETENTION_MS = 120_000;
 const MAX_BUFFER_CHUNK_BYTES = 64 * 1024;
-// While a phone is attached, the shared terminal clamps to its small grid.
-// The moment it detaches, claim a desktop-scale size so the pane on the Mac
-// snaps back immediately instead of staying phone-sized for the whole
-// retention window (the multiplexer clamps to the smallest live client).
+// tmux clamps a shared session to its smallest live client, so while a
+// phone is attached the Mac is phone-sized too. On detach the held pty
+// claims a desktop-scale grid and the desktop's own clamp wins. This is the
+// fallback for targets that cannot say what the desktop is showing; herdr
+// targets pass `detachedSize` instead (#44) — herdr does *not* clamp, it
+// keeps the last size it was told, so an oversized claim left the Mac
+// looking at the top-left corner of an 80-row terminal.
 export const DETACHED_COLUMNS = 250;
 export const DETACHED_ROWS = 80;
+
+export interface TerminalSize {
+  cols: number;
+  rows: number;
+}
 
 export interface TerminalProcessLike {
   write(data: string): void;
@@ -28,6 +36,10 @@ export interface AttachmentOptions {
   retentionMs?: number | undefined;
   maxBufferBytes?: number | undefined;
   onDispose?: (() => void) | undefined;
+  // The size to hand the terminal back to when the phone detaches: what the
+  // desktop is actually displaying. Resolving `undefined` leaves the size
+  // alone (small but complete beats large and cropped).
+  detachedSize?: (() => Promise<TerminalSize | undefined>) | undefined;
 }
 
 // One pty per session that survives WebSocket drops. Output accumulates in a
@@ -38,6 +50,7 @@ export class TerminalAttachment {
 
   private readonly maxBufferBytes: number;
   private readonly onDispose: () => void;
+  private readonly detachedSize: (() => Promise<TerminalSize | undefined>) | undefined;
   private readonly retentionMs: number;
   private readonly terminal: TerminalProcessLike;
 
@@ -55,6 +68,7 @@ export class TerminalAttachment {
     this.retentionMs = options.retentionMs ?? DETACHED_RETENTION_MS;
     this.maxBufferBytes = options.maxBufferBytes ?? RESUME_BUFFER_BYTES;
     this.onDispose = options.onDispose ?? (() => undefined);
+    this.detachedSize = options.detachedSize;
 
     terminal.onData((data) => {
       this.append(Buffer.from(data, "utf8"));
@@ -119,8 +133,19 @@ export class TerminalAttachment {
     this.client = undefined;
     if (this.disposed) return;
     this.scheduleRetention();
+    if (!this.detachedSize) {
+      this.safeResize({ cols: DETACHED_COLUMNS, rows: DETACHED_ROWS });
+      return;
+    }
+    void this.detachedSize().then((size) => {
+      // A phone may have re-claimed in the meantime; its size then wins.
+      if (size && this.client === undefined && !this.disposed) this.safeResize(size);
+    });
+  }
+
+  private safeResize(size: TerminalSize): void {
     try {
-      this.terminal.resize(DETACHED_COLUMNS, DETACHED_ROWS);
+      this.terminal.resize(size.cols, size.rows);
     } catch {
       // The pty may already be gone; releasing must not throw.
     }
@@ -197,10 +222,15 @@ export class AttachmentStore {
     return this.attachments.get(id);
   }
 
-  create(id: string, terminal: TerminalProcessLike): TerminalAttachment {
+  create(
+    id: string,
+    terminal: TerminalProcessLike,
+    options: Pick<AttachmentOptions, "detachedSize"> = {},
+  ): TerminalAttachment {
     this.get(id)?.dispose();
     const attachment = new TerminalAttachment(terminal, {
       ...this.options,
+      ...options,
       onDispose: () => {
         if (this.attachments.get(id) === attachment) this.attachments.delete(id);
       },
