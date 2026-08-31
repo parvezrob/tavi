@@ -2,6 +2,12 @@
 
 > Append-only log of completed work sessions, newest first. Each entry is what the *next* agent needs to know about that session: what shipped, what was learned, what was left open. The live starting point is always [`current-session.md`](./current-session.md); prune entries older than a few sessions — git history keeps everything.
 
+## 2026-08-31 (later) — #41 agent kinds, empty-terminal spike
+
+**Shipped:** #41 (`6bb38af`) — picker offers every herdr kind (21) via a one-row menu; host serves `agents` on `GET /api/projects` with login-shell installed detection and refuses uninstalled kinds by name.
+
+**Learned:** herdr `agent.start` with an uninstalled kind returns a tab whose launch already died (`agent: ''`, `unknown`, blank) — the host must gate. Login shell (`$SHELL -lc`) is the honest PATH authority under launchd. 21 inline rows broke the picker's layout again (same trap as "Another folder" earlier) — long lists in this sheet must collapse. Empty terminal in the herdr lane is feasible via `pane report-agent` (see current-session.md).
+
 ## 2026-08-31 — #24 project picker, host-enforced project roots
 
 **Shipped (commit `ec8e14a`):** #24 — no more agents born in `~`. `cwd` is now **required** on `POST /api/herdr/tabs`; a location outside the configured roots is refused with `400 {outsideRoots: true}` unless the request confirms with `allowOutsideRoots`. New `GET /api/projects` serves the picker (live agent cwds merged with a persisted MRU, plus the root scan and the roots). `NewAgentSheet` replaces the Claude/Codex confirmation dialog with agent kind + a required folder choice.
