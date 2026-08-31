@@ -36,7 +36,7 @@ tailscale serve --bg 8787
 npm run token
 ```
 
-`tailscale serve` prints a private HTTPS address such as `https://studio-mac.example.ts.net`. The native app will pair with that host using the token printed by `npm run token` until the scan-first pairing protocol replaces the prototype token flow.
+`tailscale serve` prints a private HTTPS address such as `https://studio-mac.example.ts.net`. Then pair the phone: `npm run pair` prints a QR code; in Mocha, tap **Scan pairing code**, confirm the fingerprint matches, and you are in. `npm run devices` lists paired phones and `npm run devices revoke <id>` removes one. (`npm run token` reveals the host's own token, which the CLI uses; phones no longer need it.) This install path is developer-grade for now — see #47 for the one-command tester install.
 
 The automatic background service is currently macOS-only. To run it in the foreground on any supported OS:
 
