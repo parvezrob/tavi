@@ -1,15 +1,5 @@
-import {
-  closeSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { randomBytes } from "node:crypto";
+import { statSync } from "node:fs";
+import { readStateFile, writeStateFile } from "./state-file.js";
 import path from "node:path";
 
 // Where a phone-created agent is allowed to be born (#24). Agents used to
@@ -102,16 +92,13 @@ export class ProjectHistory {
   ) {}
 
   list(): StoredProject[] {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(readFileSync(this.file, "utf8"));
-    } catch (error) {
-      // A first run has no file yet; anything else is worth knowing about.
-      if (!isMissingFile(error)) {
-        this.report(`Mocha could not read the recent-projects list (${this.file}): ${describe(error)}`);
-      }
+    const read = readStateFile(this.file);
+    if (read.status === "missing") return [];
+    if (read.status === "unreadable") {
+      this.report(`Mocha could not read the recent-projects list (${this.file}): ${read.reason}`);
       return [];
     }
+    const parsed = read.value;
 
     const stored = parsed as { version?: unknown; recent?: unknown };
     if (stored?.version !== HISTORY_SCHEMA_VERSION) {
@@ -154,47 +141,15 @@ export class ProjectHistory {
     return path.join(this.stateDir, HISTORY_FILE_NAME);
   }
 
-  // Owner-only like the pairing file (#35): the state directory stays 0700
-  // and this file 0600. The write is flushed and swapped in atomically, so a
-  // crashing process cannot leave a half-written list — but unlike the
-  // pairing file the containing directory is not synced, so a power loss can
-  // still lose the newest entry. That is the right trade for a convenience
-  // list; it is not a durable record of anything.
   private write(recent: StoredProject[]): void {
-    const temporary = path.join(
-      this.stateDir,
-      `.${HISTORY_FILE_NAME}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`,
-    );
-    let descriptor: number | undefined;
     try {
-      mkdirSync(this.stateDir, { recursive: true, mode: 0o700 });
-      descriptor = openSync(temporary, "wx", 0o600);
-      writeFileSync(
-        descriptor,
-        `${JSON.stringify({ version: HISTORY_SCHEMA_VERSION, recent }, null, 2)}\n`,
-        "utf8",
-      );
-      fsyncSync(descriptor);
-      closeSync(descriptor);
-      descriptor = undefined;
-      renameSync(temporary, this.file);
+      writeStateFile(this.file, { version: HISTORY_SCHEMA_VERSION, recent });
     } catch (error) {
       this.report(
         `Mocha could not save the recent-projects list (${this.file}): ${describe(error)}. The agent still started.`,
       );
-    } finally {
-      if (descriptor !== undefined) closeSync(descriptor);
-      try {
-        unlinkSync(temporary);
-      } catch {
-        // Already gone: either the swap succeeded or it was never created.
-      }
     }
   }
-}
-
-function isMissingFile(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 function describe(error: unknown): string {

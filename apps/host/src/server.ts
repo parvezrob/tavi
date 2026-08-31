@@ -3,6 +3,7 @@ import { arch, platform } from "node:os";
 import * as pty from "node-pty";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { bearerToken, isAuthorized } from "./auth.js";
+import { DeviceRegistry, PairingSessions } from "./pairing.js";
 import type { HostConfig } from "./config.js";
 import { VERSION } from "./config.js";
 import { AttachmentStore, type TerminalAttachment, type AttachmentClient } from "./attachment.js";
@@ -48,9 +49,14 @@ export interface MochaServerOptions {
   attention?: AttentionOverlay;
   projects?: ProjectHistory;
   agentKinds?: AgentKindDetector;
+  devices?: DeviceRegistry;
+  pairing?: PairingSessions;
   spawnTerminal?: typeof pty.spawn;
   attachmentRetentionMs?: number;
   attachmentBufferBytes?: number;
+  // How often an open WebSocket re-checks that its credential still exists,
+  // so `mocha devices revoke` cuts a live phone off, not just its next call.
+  authorizationRecheckMs?: number;
 }
 
 interface TerminalResumeRequest {
@@ -74,6 +80,8 @@ export async function createMochaServer(options: MochaServerOptions) {
     attention,
     projects = new ProjectHistory(config.stateDir),
     agentKinds = new AgentKindDetector({ shell: config.shell }),
+    devices = new DeviceRegistry(config.stateDir),
+    pairing = new PairingSessions(),
     spawnTerminal = pty.spawn,
   } = options;
   const eventsWss = new WebSocketServer({
@@ -95,9 +103,39 @@ export async function createMochaServer(options: MochaServerOptions) {
     },
   });
 
+  // One rule for HTTP and WebSocket alike: the host's own token (the CLI and
+  // pre-pairing dev flow) or any paired phone's credential (#46).
+  const credentialAuthorized = (token: string | undefined): boolean =>
+    isAuthorized(token, config.token) || devices.authorize(token ?? "") !== undefined;
+  const authorized = (request: IncomingMessage): boolean => credentialAuthorized(bearerToken(request));
+  const recheckMs = options.authorizationRecheckMs ?? 2_000;
+  // A revoked phone may hold an events stream or a terminal open for hours;
+  // re-check its credential on a short clock and close with a code the app
+  // can tell apart from a network drop.
+  const keepAuthorized = (websocket: WebSocket, request: IncomingMessage): void => {
+    const token = bearerToken(request);
+    const timer = setInterval(() => {
+      if (credentialAuthorized(token)) return;
+      clearInterval(timer);
+      websocket.close(4401, "credential revoked");
+    }, recheckMs);
+    timer.unref?.();
+    websocket.once("close", () => clearInterval(timer));
+  };
+
   const server = createServer(async (request, response) => {
     try {
-      await routeRequest(request, response, { config, tmux, herdr, attention, projects, agentKinds });
+      await routeRequest(request, response, {
+        config,
+        tmux,
+        herdr,
+        attention,
+        projects,
+        agentKinds,
+        devices,
+        pairing,
+        authorized,
+      });
     } catch (error) {
       const status = error instanceof InputError ? 400 : 500;
       const message = error instanceof Error ? error.message : "Unexpected server error.";
@@ -110,7 +148,7 @@ export async function createMochaServer(options: MochaServerOptions) {
     try {
       const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
       if (url.pathname === "/api/events") {
-        if (!isAuthorized(bearerToken(request), config.token)) {
+        if (!authorized(request)) {
           socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
           socket.destroy();
           return;
@@ -121,6 +159,7 @@ export async function createMochaServer(options: MochaServerOptions) {
           return;
         }
         eventsWss.handleUpgrade(request, socket, head, (websocket) => {
+          keepAuthorized(websocket, request);
           serveAgentEvents(websocket, agentEvents);
         });
         return;
@@ -128,7 +167,7 @@ export async function createMochaServer(options: MochaServerOptions) {
 
       const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/terminal$/);
       const agentMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/terminal$/);
-      if ((!sessionMatch && !agentMatch) || !isAuthorized(bearerToken(request), config.token)) {
+      if ((!sessionMatch && !agentMatch) || !authorized(request)) {
         socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
         socket.destroy();
         return;
@@ -180,6 +219,7 @@ export async function createMochaServer(options: MochaServerOptions) {
 
       const resume = parseResumeRequest(url);
       wss.handleUpgrade(request, socket, head, (websocket) => {
+        keepAuthorized(websocket, request);
         wss.emit("connection", websocket, request, target, resume);
       });
     } catch {
@@ -255,6 +295,9 @@ interface RouteContext {
   tmux: SessionBackend;
   projects: ProjectHistory;
   agentKinds: AgentKindDetector;
+  devices: DeviceRegistry;
+  pairing: PairingSessions;
+  authorized: (request: IncomingMessage) => boolean;
   herdr?: HerdrAgentSource | undefined;
   attention?: AttentionOverlay | undefined;
 }
@@ -264,7 +307,7 @@ async function routeRequest(
   response: ServerResponse,
   context: RouteContext,
 ): Promise<void> {
-  const { config, tmux, herdr, attention, projects, agentKinds } = context;
+  const { config, tmux, herdr, attention, projects, agentKinds, devices, pairing, authorized } = context;
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
   if (url.pathname === "/api/health" && request.method === "GET") {
@@ -272,8 +315,49 @@ async function routeRequest(
     return;
   }
 
-  if (url.pathname.startsWith("/api/") && !isAuthorized(bearerToken(request), config.token)) {
+  // The one unauthenticated write: redeeming a pairing secret (#45). The
+  // secret is single-use, 128-bit, and dies in five minutes; the phone gets
+  // its own credential back and the host's token never leaves the Mac.
+  if (url.pathname === "/api/pair" && request.method === "POST") {
+    const body = await readJsonBody(request);
+    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const secret = typeof record.secret === "string" ? record.secret : "";
+    const deviceName = typeof record.deviceName === "string" ? record.deviceName : "";
+    if (!pairing.redeem(secret)) {
+      sendJson(response, 401, { error: "That pairing code is not valid any more. Run `mocha pair` on the Mac for a fresh one." });
+      return;
+    }
+    const { device, credential } = devices.add(deviceName);
+    sendJson(response, 201, {
+      credential,
+      device,
+      host: { name: config.machineName, fingerprint: devices.identity().fingerprint },
+    });
+    return;
+  }
+
+  if (url.pathname.startsWith("/api/") && !authorized(request)) {
     sendJson(response, 401, { error: "Invalid access token." });
+    return;
+  }
+
+  // Minting a pairing code is the host owner's act: only the host token may,
+  // never an already-paired phone.
+  if (url.pathname === "/api/pair/begin" && request.method === "POST") {
+    if (!isAuthorized(bearerToken(request), config.token)) {
+      sendJson(response, 403, { error: "Only the host itself can start pairing." });
+      return;
+    }
+    try {
+      const { secret, expiresAt } = pairing.begin();
+      sendJson(response, 201, {
+        secret,
+        expiresAt,
+        host: { name: config.machineName, fingerprint: devices.identity().fingerprint },
+      });
+    } catch (error) {
+      sendJson(response, 429, { error: error instanceof Error ? error.message : "Could not start pairing." });
+    }
     return;
   }
 
@@ -285,7 +369,7 @@ async function routeRequest(
       version: VERSION,
       tmuxVersion: await tmux.version(),
     };
-    sendJson(response, 200, host);
+    sendJson(response, 200, { ...host, fingerprint: devices.identity().fingerprint });
     return;
   }
 

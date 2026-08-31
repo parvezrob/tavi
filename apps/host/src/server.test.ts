@@ -11,8 +11,9 @@ import WebSocket from "ws";
 import { AgentKindDetector } from "./agent-kinds.js";
 import { AttentionOverlay } from "./attention.js";
 import type { HostConfig } from "./config.js";
-import { TERMINAL_PROTOCOL } from "./protocol.js";
+import { EVENTS_PROTOCOL, TERMINAL_PROTOCOL } from "./protocol.js";
 import type { HerdrAgentSource, HerdrTabRequest } from "./herdr.js";
+import { DeviceRegistry, PairingSessions } from "./pairing.js";
 import { ProjectHistory } from "./projects.js";
 import { createMochaServer } from "./server.js";
 import type { ServerTerminalMessage, SessionBackend } from "./types.js";
@@ -276,6 +277,117 @@ test("decision endpoint fires only when an authority flags the agent as waiting"
 
     const bad = await decide("maybe");
     assert.equal(bad.status, 400);
+  } finally {
+    await close(server);
+  }
+});
+
+test("a phone pairs with a single-use code and gets a credential of its own (#45, #46)", async () => {
+  const stateDir = mkdtempSync(path.join(tmpdir(), "mocha-pair-state-"));
+  const devices = new DeviceRegistry(stateDir, undefined, () => {});
+  const pairing = new PairingSessions();
+  const tmux = { version: async () => "tmux 3.4" } as unknown as SessionBackend;
+  const server = await createMochaServer({ config, tmux, devices, pairing });
+  await listen(server);
+
+  try {
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const json = { "Content-Type": "application/json" };
+
+    // Only the host's own token may mint a code.
+    const forbidden = await fetch(`${base}/api/pair/begin`, { method: "POST" });
+    assert.equal(forbidden.status, 401);
+    const begun = await fetch(`${base}/api/pair/begin`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.token}` },
+    });
+    assert.equal(begun.status, 201);
+    const { secret, host } = (await begun.json()) as { secret: string; host: { name: string; fingerprint: string } };
+    assert.equal(host.name, "test-host");
+    assert.equal(host.fingerprint, devices.identity().fingerprint);
+
+    // A wrong code is refused without authentication being involved.
+    const wrong = await fetch(`${base}/api/pair`, {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ secret: "nope", deviceName: "Intruder" }),
+    });
+    assert.equal(wrong.status, 401);
+
+    const paired = await fetch(`${base}/api/pair`, {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ secret, deviceName: "Parvez's iPhone" }),
+    });
+    assert.equal(paired.status, 201);
+    const grant = (await paired.json()) as {
+      credential: string;
+      device: { id: string; name: string };
+      host: { fingerprint: string };
+    };
+    assert.equal(grant.device.name, "Parvez's iPhone");
+    assert.equal(grant.host.fingerprint, host.fingerprint);
+    assert.notEqual(grant.credential, config.token);
+
+    // The code is spent.
+    const reused = await fetch(`${base}/api/pair`, {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ secret, deviceName: "Again" }),
+    });
+    assert.equal(reused.status, 401);
+
+    // The phone's credential works everywhere the host token does…
+    const asPhone = await fetch(`${base}/api/host`, {
+      headers: { Authorization: `Bearer ${grant.credential}` },
+    });
+    assert.equal(asPhone.status, 200);
+    assert.equal(((await asPhone.json()) as { fingerprint: string }).fingerprint, host.fingerprint);
+    // …except minting more codes.
+    const phoneMints = await fetch(`${base}/api/pair/begin`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${grant.credential}` },
+    });
+    assert.equal(phoneMints.status, 403);
+
+    // Revoking on the host cuts that phone and only that phone.
+    assert.equal(devices.revoke(grant.device.id), true);
+    const revoked = await fetch(`${base}/api/host`, {
+      headers: { Authorization: `Bearer ${grant.credential}` },
+    });
+    assert.equal(revoked.status, 401);
+    const stillHost = await fetch(`${base}/api/host`, {
+      headers: { Authorization: `Bearer ${config.token}` },
+    });
+    assert.equal(stillHost.status, 200);
+  } finally {
+    await close(server);
+  }
+});
+
+test("revoking a phone closes its open event stream within the recheck interval (#46)", async () => {
+  const devices = new DeviceRegistry(mkdtempSync(path.join(tmpdir(), "mocha-revoke-")), undefined, () => {});
+  const { device, credential } = devices.add("phone");
+  const server = await createMochaServer({
+    config,
+    tmux: {} as SessionBackend,
+    devices,
+    authorizationRecheckMs: 20,
+  });
+  await listen(server);
+
+  try {
+    const port = (server.address() as AddressInfo).port;
+    const websocket = new WebSocket(`ws://127.0.0.1:${port}/api/events`, EVENTS_PROTOCOL, {
+      headers: { Authorization: `Bearer ${credential}` },
+    });
+    await once(websocket, "open");
+    const closed = once(websocket, "close");
+
+    devices.revoke(device.id);
+    const [code, reason] = (await closed) as [number, Buffer];
+    assert.equal(code, 4401);
+    assert.equal(reason.toString(), "credential revoked");
   } finally {
     await close(server);
   }

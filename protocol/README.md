@@ -25,7 +25,9 @@ This document preserves the transport contract used by the native Mocha client. 
 
 ## HTTP authentication
 
-Send the token on every `/api/*` request except health:
+Two kinds of bearer credential are accepted everywhere: the host's own token (`~/.mocha/config.json`, shown by `npm run token`; the CLI and pre-pairing dev flow) and any **paired device credential** minted by the pairing exchange below. Only the host token may start a pairing. Revoking a device on the host (`mocha devices revoke <id|name>`) invalidates its credential immediately.
+
+Send the credential on every `/api/*` request except health and `POST /api/pair`:
 
 ```http
 Authorization: Bearer <token>
@@ -48,6 +50,24 @@ Unauthenticated liveness and version check.
 ```json
 { "ok": true, "version": "0.1.0" }
 ```
+
+### `POST /api/pair/begin`
+
+Host-token only. Mints a single-use pairing secret that expires in 5 minutes (at most 5 may be outstanding; `429` beyond that). This is what `mocha pair` calls before printing the QR.
+
+```json
+{ "secret": "…", "expiresAt": "2026-08-31T12:00:00.000Z", "host": { "name": "studio-mac", "fingerprint": "8F2A 19C4 · 7B10 D6E9" } }
+```
+
+### `POST /api/pair`
+
+**Unauthenticated.** Redeems a pairing secret for a device credential. The QR carries `mocha://pair?u=<https url>&s=<secret>&f=<fingerprint>&n=<host name>`; the phone shows `n`/`f` for the person to confirm against the Mac before calling this.
+
+```json
+{ "secret": "…", "deviceName": "Parvez's iPhone" }
+```
+
+`201` → `{ "credential", "device": { "id", "name", "pairedAt" }, "host": { "name", "fingerprint" } }`. The credential is returned exactly once; the host stores only its hash. A client must refuse to keep the credential if `host.fingerprint` differs from the QR's `f`. `401` for an unknown, spent, or expired secret.
 
 ### `GET /api/host`
 

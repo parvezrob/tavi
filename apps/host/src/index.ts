@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { AttentionOverlay, AttentiveAgentEvents } from "./attention.js";
 import { installClaudeHooks } from "./claude-hooks.js";
+import { DeviceRegistry } from "./pairing.js";
+import { resolvePublicUrl, runPairCommand } from "./pair-command.js";
 import { loadConfig, VERSION } from "./config.js";
 import { HerdrService } from "./herdr.js";
 import { HerdrEventFeed } from "./herdr-events.js";
@@ -24,6 +26,36 @@ if (process.argv[2] === "install-service") {
 if (process.argv[2] === "uninstall-service") {
   const plists = await uninstallService();
   console.log(`Mocha service removed: ${plists.join(", ")}`);
+  process.exit(0);
+}
+
+if (process.argv[2] === "pair") {
+  const publicUrl = await resolvePublicUrl(config, process.argv.slice(3));
+  await runPairCommand(config, publicUrl);
+  process.exit(0);
+}
+
+if (process.argv[2] === "devices") {
+  const registry = new DeviceRegistry(config.stateDir);
+  const action = process.argv[3];
+  if (action === "revoke") {
+    const target = process.argv[4] ?? "";
+    if (registry.revoke(target)) {
+      console.log(`Revoked ${target}. That phone can no longer reach this Mac.`);
+    } else {
+      console.error(`No paired device named or numbered ${target}. Run \`mocha devices\` to list them.`);
+      process.exit(1);
+    }
+    process.exit(0);
+  }
+  const devices = registry.list();
+  if (devices.length === 0) {
+    console.log("No phones are paired. Run `mocha pair` to add one.");
+  } else {
+    for (const device of devices) {
+      console.log(`${device.id}  ${device.name}  paired ${device.pairedAt}  last seen ${device.lastSeenAt ?? "never"}`);
+    }
+  }
   process.exit(0);
 }
 
