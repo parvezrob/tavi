@@ -2,6 +2,18 @@
 
 > Append-only log of completed work sessions, newest first. Each entry is what the *next* agent needs to know about that session: what shipped, what was learned, what was left open. The live starting point is always [`current-session.md`](./current-session.md); prune entries older than a few sessions — git history keeps everything.
 
+## 2026-08-31 — #24 project picker, host-enforced project roots
+
+**Shipped (commit `ec8e14a`):** #24 — no more agents born in `~`. `cwd` is now **required** on `POST /api/herdr/tabs`; a location outside the configured roots is refused with `400 {outsideRoots: true}` unless the request confirms with `allowOutsideRoots`. New `GET /api/projects` serves the picker (live agent cwds merged with a persisted MRU, plus the root scan and the roots). `NewAgentSheet` replaces the Claude/Codex confirmation dialog with agent kind + a required folder choice.
+
+**Learned:**
+- **macOS `realpath` does not canonicalize case or Unicode** — it echoes whatever spelling you hand it (verified directly). Path comparison therefore normalizes explicitly (`path.resolve` → NFC → lowercase). Without it, `MOCHA_ROOTS` spelled in a different case would have made *every* create demand the outside-roots confirmation, and one folder would occupy two MRU slots.
+- `path.resolve("")` is the process's own cwd, so `MOCHA_ROOTS` must drop blank entries *before* resolving — a trailing comma silently widened the guardrail.
+- The roots check is a guardrail, not a security boundary: `POST /api/sessions` still accepts an arbitrary `cwd` plus an arbitrary command, and the token is shell access either way. Recorded as #38 rather than quietly expanded into #24.
+- Two Opus verifier passes (host and iOS) found real defects the local gates could not: silent `catch {}` around every history write, an unversioned persisted schema, a test writing into the developer's real `$TMPDIR`, a self-contradicting unit-test assertion, and a client that discarded the very `withinRoots` field the protocol ships to prevent a surprise confirmation. Worth repeating on consequential changes.
+
+**Left open:** **#24 is not closed** — its acceptance ("create Claude in a chosen repo from the phone") still needs a live device pass, which needs the host deployed *and* the new app build installed together. That pairing is mandatory: the change is breaking, so the currently-installed phone build cannot create agents against the new host. Then #26, #25, #10, dogfood gate. Follow-ups filed: #38, #39 (no test seam for `AgentDirectory`'s HTTP calls), #40 (`herdr-events` flake, previously only prose in DEVELOPMENT.md).
+
 ## 2026-08-25 — App Store readiness milestone, security hygiene, #23 approve/deny
 
 **Shipped (commits `8867740` → `3998b89`):**
