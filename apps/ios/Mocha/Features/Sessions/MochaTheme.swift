@@ -64,12 +64,12 @@ extension ButtonStyle where Self == MochaPrimaryButtonStyle {
 }
 
 // Freshness is telemetry unless it carries a decision: show it while work
-// is moving (or waiting on the user), and when a quiet agent has been
-// quiet long enough that "how long?" is the next question. An idle row
-// touched seconds ago stays silent.
+// is moving (or waiting on the user), and for finished work — "did it just
+// finish?" is exactly what the home is asked. Only an idle row touched
+// moments ago stays silent; once it has been quiet a while, "how long?"
+// becomes the question again.
 enum FreshnessRule {
     static func shows(status: String, observedAt: Date, now: Date = Date()) -> Bool {
-        status == "working" || status == "blocked"
-            || now.timeIntervalSince(observedAt) > 5 * 60
+        status != "idle" || now.timeIntervalSince(observedAt) > 5 * 60
     }
 }

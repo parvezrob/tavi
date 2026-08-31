@@ -16,6 +16,13 @@ struct TerminalSessionView: View {
     @State private var composerError: String?
     @State private var composerSending = false
     @State private var inputMode: TerminalInputMode = .compose
+    // The real keyboard signal: the Ghostty surface raises the keyboard
+    // from UIKit (a tap on it becomes first responder) entirely outside
+    // SwiftUI state, so mode flags alone cannot gate the dismiss control.
+    @State private var keyboardUp = false
+    // Trailing fade only while keys are actually off-screen; a permanent
+    // fade reads as a disabled last key.
+    @State private var keyRowHasMore = true
     @FocusState private var composerFocused: Bool
 
     let controller: TerminalSessionController
@@ -58,7 +65,6 @@ struct TerminalSessionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            connectionBanner
             AgentTerminalView(
                 bridge: controller.bridge,
                 isActive: scenePhase == .active,
@@ -77,8 +83,23 @@ struct TerminalSessionView: View {
                 }
             )
             .overlay {
-                if controller.needsConnectionConfiguration {
+                // An ended session keeps its last screen readable — the
+                // quiet bottom bar says what happened; only a session that
+                // never attached (or died unrecoverably) gets the card.
+                if controller.needsConnectionConfiguration, controller.connectionState != .ended {
                     disconnectedPrompt
+                }
+            }
+            // Nominal is silence (#54): the identity dot already says
+            // connected. When something needs saying the banner floats
+            // *over* the surface — in the layout it made the terminal's
+            // height connection-state-dependent, so every reconnect flap
+            // re-flowed the grid and resized the Mac's pty twice. Final
+            // states speak from the bottom bar instead, never over the
+            // transcript.
+            .overlay(alignment: .top) {
+                if !isFinalState, controller.connectionState != .connected || controller.errorMessage != nil {
+                    connectionBanner
                 }
             }
         }
@@ -102,7 +123,20 @@ struct TerminalSessionView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            terminalControls
+            // A final state has nothing to type into: the key row and
+            // composer would be a disabled lie. One quiet bar replaces
+            // them and the transcript becomes the readable artifact (#54).
+            if isFinalState {
+                finalStateBar
+            } else {
+                terminalControls
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            keyboardUp = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+            keyboardUp = false
         }
         .sheet(isPresented: $showingJump) {
             if let agentDirectory, let onSelectAgent {
@@ -132,23 +166,63 @@ struct TerminalSessionView: View {
     }
 
     private func identityHeader(_ agent: AgentSummary) -> some View {
-        let status = AgentStatusStyle.of(agent.status)
+        // In the terminal the dot beside the name is the *connection*:
+        // green means live, and the banner row never has to exist for the
+        // nominal case. Agent status lives on the home; here the transcript
+        // itself shows what the agent is doing.
+        let location = agent.isShell ? HomeGrouping.projectName(of: agent.cwd) : agent.projectName
         return VStack(spacing: 1) {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(status.color)
+                    .fill(connectionColor)
                     .frame(width: 7, height: 7)
                 Text(agent.displayName)
                     .font(.subheadline.weight(.semibold))
             }
-            Text(agent.projectName)
+            Text(location)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .truncationMode(.head)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(agent.displayName), \(agent.projectName), \(status.label)")
+        .accessibilityLabel("\(agent.displayName), \(location), \(controller.connectionState.accessibilityDescription)")
         .accessibilityIdentifier("terminal.identity")
+    }
+
+    // Ended and failed are conclusions, not conditions to report.
+    private var isFinalState: Bool {
+        controller.connectionState == .ended || controller.connectionState == .failed
+    }
+
+    // Ended is not an error: a grey dot and plain words. Red stays
+    // reserved for a session that actually failed.
+    private var finalStateBar: some View {
+        let ended = controller.connectionState == .ended
+        return HStack(spacing: 8) {
+            Circle()
+                .fill(ended ? MochaTheme.statusIdle : MochaTheme.statusBlocked)
+                .frame(width: 7, height: 7)
+            Text(
+                ended
+                    ? "This session ended on your Mac — its last screen stays readable."
+                    : [controller.connectionState.accessibilityDescription, controller.errorMessage]
+                        .compactMap { $0 }
+                        .joined(separator: " — ")
+            )
+            .font(.caption)
+            .foregroundStyle(MochaTheme.textSecondary)
+            .lineLimit(2)
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(MochaTheme.card)
+        .overlay(alignment: .top) {
+            Rectangle().fill(MochaTheme.hairline).frame(height: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("terminal.status")
     }
 
     private var connectionBanner: some View {
@@ -196,7 +270,10 @@ struct TerminalSessionView: View {
         .padding(.horizontal, 12)
         .padding(.top, 10)
         .padding(.bottom, 8)
-        .background(MochaTheme.card)
+        // Liquid Glass chrome (owner call, 2026-09-01): the system
+        // material, not web glassmorphism — the bar reads as glass over
+        // the terminal's black.
+        .background(.ultraThinMaterial)
         .overlay(alignment: .top) {
             Rectangle().fill(MochaTheme.hairline).frame(height: 1)
         }
@@ -204,8 +281,10 @@ struct TerminalSessionView: View {
 
     private var liveTypingRow: some View {
         HStack(spacing: 8) {
+            // Not the "Done" green: live typing armed is an attention
+            // state, and attention is amber.
             Circle()
-                .fill(MochaTheme.statusDone)
+                .fill(MochaTheme.accent)
                 .frame(width: 6, height: 6)
             Text("Live typing — keys go straight to the terminal")
                 .font(.caption)
@@ -278,7 +357,7 @@ struct TerminalSessionView: View {
             if let composerError {
                 Text(composerError)
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(MochaTheme.statusBlocked)
             }
         }
     }
@@ -302,7 +381,9 @@ struct TerminalSessionView: View {
             .accessibilityIdentifier("terminal.keyboard")
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
+                // Clustered like a keyboard (#54): modifier, named keys,
+                // arrows, then actions — grouped by gap, not dividers.
+                HStack(spacing: 14) {
                     Button("ctrl") {
                         controller.toggleControlLatch()
                         refocusAfterKey()
@@ -316,16 +397,18 @@ struct TerminalSessionView: View {
                     )
                     .accessibilityIdentifier("terminal.ctrl")
 
-                    ForEach(TerminalQuickKey.allCases) { key in
-                        Button {
-                            controller.sendQuickKey(key)
-                            refocusAfterKey()
-                        } label: {
-                            keyCapLabel(key)
+                    HStack(spacing: 6) {
+                        ForEach(TerminalQuickKey.commandCluster) { key in
+                            keyButton(key)
                         }
-                        .buttonStyle(TerminalKeyStyle())
-                        .disabled(!controller.connectionState.canSubmitInput)
-                        .accessibilityLabel(quickKeyAccessibilityLabel(key))
+                    }
+
+                    HStack(spacing: 6) {
+                        ForEach(TerminalQuickKey.arrowCluster) { key in
+                            // Arrows repeat on hold, like hardware.
+                            keyButton(key)
+                                .buttonRepeatBehavior(.enabled)
+                        }
                     }
 
                     Button {
@@ -343,17 +426,53 @@ struct TerminalSessionView: View {
                     .accessibilityHint("Reads the clipboard only after you tap")
                 }
             }
-
-            Button {
-                controller.bridge.dismissKeyboard()
-                composerFocused = false
-            } label: {
-                Image(systemName: "keyboard.chevron.compact.down")
+            // The row scrolls; say so — content dissolves at the trailing
+            // edge, but only while keys are actually off-screen there.
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.x + geometry.containerSize.width < geometry.contentSize.width - 4
+            } action: { _, hasMore in
+                keyRowHasMore = hasMore
             }
-            .buttonStyle(TerminalKeyStyle())
-            .accessibilityLabel("Hide keyboard")
-            .accessibilityIdentifier("terminal.dismissKeyboard")
+            .mask(
+                HStack(spacing: 0) {
+                    Rectangle().fill(Color.black)
+                    LinearGradient(
+                        colors: [.black, .clear],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: keyRowHasMore ? 22 : 0)
+                }
+                .animation(.easeOut(duration: 0.15), value: keyRowHasMore)
+            )
+
+            // Offered exactly while a keyboard is up — the one true signal;
+            // mode flags left it dead in live mode after a dismiss and
+            // missing when the surface raised the keyboard from UIKit (#54).
+            if keyboardUp {
+                Button {
+                    controller.bridge.dismissKeyboard()
+                    composerFocused = false
+                } label: {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                }
+                .buttonStyle(TerminalKeyStyle())
+                .accessibilityLabel("Hide keyboard")
+                .accessibilityIdentifier("terminal.dismissKeyboard")
+            }
         }
+    }
+
+    private func keyButton(_ key: TerminalQuickKey) -> some View {
+        Button {
+            controller.sendQuickKey(key)
+            refocusAfterKey()
+        } label: {
+            Text(key.face)
+        }
+        .buttonStyle(TerminalKeyStyle())
+        .disabled(!controller.connectionState.canSubmitInput)
+        .accessibilityLabel(quickKeyAccessibilityLabel(key))
     }
 
     // Quick keys never steal the typing target: they refocus the terminal
@@ -361,23 +480,6 @@ struct TerminalSessionView: View {
     private func refocusAfterKey() {
         if inputMode == .live {
             controller.bridge.focusTerminal()
-        }
-    }
-
-    // Key-cap faces: lowercase words like a hardware keyboard, crisp SF
-    // arrows instead of text glyphs.
-    @ViewBuilder
-    private func keyCapLabel(_ key: TerminalQuickKey) -> some View {
-        switch key {
-        case .escape: Text("esc")
-        case .tab: Text("tab")
-        case .shiftTab: Text("⇧tab")
-        case .enter: Image(systemName: "return")
-        case .interrupt: Text("^C")
-        case .left: Image(systemName: "arrow.left")
-        case .up: Image(systemName: "arrow.up")
-        case .down: Image(systemName: "arrow.down")
-        case .right: Image(systemName: "arrow.right")
         }
     }
 
@@ -461,31 +563,31 @@ private struct TerminalKeyStyle: ButtonStyle {
             .foregroundStyle(faceColor)
             .frame(minWidth: 36, minHeight: 38)
             .padding(.horizontal, 8)
-            .background(
-                RoundedRectangle(cornerRadius: MochaTheme.wellRadius, style: .continuous)
-                    .fill(fillColor(pressed: configuration.isPressed))
+            // Liquid Glass caps (owner call, 2026-09-01): the system glass
+            // with its own interactive press response; the armed ctrl latch
+            // tints the glass amber. Press still seats the cap half a
+            // point — glass with a hint of mechanism.
+            .glassEffect(
+                armed
+                    ? .regular.tint(MochaTheme.accent).interactive()
+                    : .regular.interactive(),
+                in: RoundedRectangle(cornerRadius: MochaTheme.wellRadius, style: .continuous)
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: MochaTheme.wellRadius, style: .continuous)
-                    .strokeBorder(
-                        armed ? Color.clear : Color.white.opacity(isEnabled ? 0.09 : 0.05),
-                        lineWidth: 1
-                    )
-            )
+            .opacity(isEnabled ? 1 : 0.45)
+            .offset(y: configuration.isPressed ? 0.5 : 0)
             .contentShape(RoundedRectangle(cornerRadius: MochaTheme.wellRadius, style: .continuous))
+            // The single cheapest expensive-feeling change in the app: keys
+            // tick when they land.
+            .sensoryFeedback(.impact(weight: .light), trigger: configuration.isPressed) { _, pressed in
+                pressed
+            }
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
             .animation(.easeOut(duration: 0.15), value: armed)
     }
 
     private var faceColor: Color {
-        if armed { return Color.black.opacity(0.85) }
+        if armed { return MochaTheme.accentInk }
         return isEnabled ? MochaTheme.textPrimary : MochaTheme.textPrimary.opacity(0.3)
-    }
-
-    private func fillColor(pressed: Bool) -> Color {
-        if armed { return MochaTheme.statusBlocked }
-        if pressed { return Color.white.opacity(0.18) }
-        return Color.white.opacity(isEnabled ? 0.07 : 0.03)
     }
 }
 

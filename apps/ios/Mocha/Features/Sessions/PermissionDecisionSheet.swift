@@ -43,15 +43,12 @@ struct PermissionDecisionSheet: View {
         .task { await load() }
     }
 
+    // Identity appears once: the eyebrow below carries the agent's name as
+    // attribution for the quoted dialog; the header keeps only the place.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(agent.displayName)
-                .font(.headline)
-                .foregroundStyle(MochaTheme.textPrimary)
-            Text(agent.projectName)
-                .font(.footnote)
-                .foregroundStyle(MochaTheme.textSecondary)
-        }
+        Text(agent.projectName)
+            .font(.footnote)
+            .foregroundStyle(MochaTheme.textSecondary)
     }
 
     @ViewBuilder
@@ -94,10 +91,33 @@ struct PermissionDecisionSheet: View {
     private func dialogBody(_ dialog: PermissionDialog) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             if !dialog.prompt.isEmpty {
+                // The prompt is the agent's own dialog text ("Security
+                // guide", …) quoted verbatim; this line says whose words
+                // they are so a raw heading never reads as Mocha's UI (#54).
+                Text("\(agent.displayName) is asking")
+                    .font(.caption.weight(.semibold))
+                    .kerning(0.8)
+                    .textCase(.uppercase)
+                    .foregroundStyle(MochaTheme.textSecondary)
+                // Visibly quoted, not just attributed: a raw dialog heading
+                // like "Security guide" must never read as Mocha's own UI.
                 Text(dialog.prompt)
                     .font(.callout.weight(.medium))
                     .foregroundStyle(MochaTheme.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(
+                        MochaTheme.well,
+                        in: RoundedRectangle(cornerRadius: MochaTheme.wellRadius, style: .continuous)
+                    )
+                    .overlay(alignment: .leading) {
+                        UnevenRoundedRectangle(
+                            topLeadingRadius: MochaTheme.wellRadius,
+                            bottomLeadingRadius: MochaTheme.wellRadius
+                        )
+                        .fill(MochaTheme.textSecondary.opacity(0.5))
+                        .frame(width: 2)
+                    }
             }
 
             // Every option the dialog offers is its own button and sends that
@@ -111,22 +131,32 @@ struct PermissionDecisionSheet: View {
             }
             .disabled(inFlight != nil)
 
+            // Cancel answers the dialog (it sends Esc) — a real control in
+            // the options' own quiet clothing, subordinate to the amber
+            // default but never dressed as a disabled label (#54).
             Button {
                 Task { await decide(.deny) }
             } label: {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     if inFlight == .deny {
                         ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "xmark")
                     }
-                    Text("Cancel (Esc)").fontWeight(.semibold)
+                    Text("Cancel (Esc)")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(MochaTheme.textPrimary)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
+                .padding(.vertical, 12)
+                .background(
+                    MochaTheme.well,
+                    in: RoundedRectangle(cornerRadius: MochaTheme.wellRadius, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: MochaTheme.wellRadius, style: .continuous)
+                        .strokeBorder(MochaTheme.hairline, lineWidth: 1)
+                )
             }
-            .buttonStyle(.bordered)
-            .tint(MochaTheme.statusBlocked)
+            .buttonStyle(.plain)
             .disabled(inFlight != nil)
             .accessibilityIdentifier("decision.deny")
 
@@ -136,9 +166,11 @@ struct PermissionDecisionSheet: View {
         }
     }
 
+    // Options are neutral surfaces; the dialog's own default carries the
+    // accent, and an option that grants standing access is marked by the
+    // shield and its caption — one accent, no green strokes (#54).
     private func optionButton(_ option: PermissionDialogOption) -> some View {
         let elevated = Self.grantsStandingAccess(option.label)
-        let tint = elevated ? MochaTheme.statusBlocked : MochaTheme.statusDone
         return Button {
             Task { await decide(.option(option.index)) }
         } label: {
@@ -146,22 +178,29 @@ struct PermissionDecisionSheet: View {
                 if inFlight == .option(option.index) {
                     ProgressView().controlSize(.small)
                 } else {
+                    // Amber belongs to the default alone; a consequential
+                    // option is marked by the shield and a full-strength
+                    // caption plus a heavier border — caution keeps its own
+                    // channel instead of borrowing the recommendation's.
                     Image(systemName: elevated ? "exclamationmark.shield" : "\(option.index).circle")
-                        .foregroundStyle(tint)
+                        .foregroundStyle(elevated ? MochaTheme.textPrimary : (option.selected ? MochaTheme.accent : MochaTheme.textSecondary))
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(option.label)
-                        .font(.footnote.weight(.medium))
+                        .font(.subheadline.weight(option.selected ? .semibold : .medium))
                         .foregroundStyle(MochaTheme.textPrimary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if option.selected || elevated {
-                        Text(elevated ? "Grants standing access" : "Default")
+                        Text([
+                            option.selected ? "Default" : nil,
+                            elevated ? "Grants standing access" : nil,
+                        ].compactMap { $0 }.joined(separator: " · "))
                             .font(.caption2)
-                            .foregroundStyle(tint)
+                            .foregroundStyle(elevated ? MochaTheme.textPrimary : MochaTheme.textSecondary)
                     }
                 }
             }
-            .padding(12)
+            .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 MochaTheme.well,
@@ -169,7 +208,12 @@ struct PermissionDecisionSheet: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: MochaTheme.wellRadius, style: .continuous)
-                    .strokeBorder(option.selected ? tint.opacity(0.7) : MochaTheme.hairline, lineWidth: 1)
+                    .strokeBorder(
+                        option.selected
+                            ? MochaTheme.accent.opacity(0.55)
+                            : (elevated ? Color.white.opacity(0.25) : MochaTheme.hairline),
+                        lineWidth: 1
+                    )
             )
         }
         .buttonStyle(.plain)
@@ -202,6 +246,8 @@ struct PermissionDecisionSheet: View {
         .mochaCard(stripe: tint)
     }
 
+    // Last in the hierarchy: the fallback for people who want the whole
+    // screen, styled as a text action so it never outweighs the choices.
     private var openTerminalButton: some View {
         Button {
             dismiss()
@@ -211,11 +257,13 @@ struct PermissionDecisionSheet: View {
                 Image(systemName: "terminal")
                 Text("Open terminal")
             }
+            .font(.subheadline)
+            .foregroundStyle(MochaTheme.textSecondary)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 4)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.bordered)
-        .tint(MochaTheme.textSecondary)
+        .buttonStyle(.plain)
         .accessibilityIdentifier("decision.openTerminal")
     }
 

@@ -662,6 +662,29 @@ enum TerminalQuickKey: String, CaseIterable, Identifiable, Sendable {
 
     var id: Self { self }
 
+    // The key row groups like a keyboard (#54): named keys and the
+    // interrupt in one cluster, arrows in another.
+    static let commandCluster: [TerminalQuickKey] = [.escape, .tab, .shiftTab, .enter, .interrupt]
+    static let arrowCluster: [TerminalQuickKey] = [.left, .up, .down, .right]
+
+    // One key language on the caps: lowercase words, matching the "ctrl"
+    // latch beside them ("⌃C" next to a spelled-out ctrl was the audit's
+    // exact complaint in new notation; "⏎" appears on no iOS keyboard).
+    // Arrows stay arrows — they are their own word.
+    var face: String {
+        switch self {
+        case .escape: "esc"
+        case .tab: "tab"
+        case .shiftTab: "⇧tab"
+        case .enter: "enter"
+        case .interrupt: "ctrl-c"
+        case .left: "←"
+        case .up: "↑"
+        case .down: "↓"
+        case .right: "→"
+        }
+    }
+
     var sequence: String {
         switch self {
         case .escape: "\u{1B}"

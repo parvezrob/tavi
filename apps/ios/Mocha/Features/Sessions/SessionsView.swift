@@ -193,7 +193,14 @@ struct SessionsView: View {
     @ViewBuilder
     private var homeContent: some View {
         if !agentDirectory.isConfigured {
-            noHostCard
+            // The first impression owns the middle of the screen, not the
+            // top edge of an otherwise empty page (#54).
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                noHostCard
+                Spacer(minLength: 0)
+            }
+            .containerRelativeFrame(.vertical) { length, _ in length * 0.7 }
         } else if !agentDirectory.hasLoaded {
             loadingCard
         } else if !agentDirectory.available {
@@ -205,10 +212,18 @@ struct SessionsView: View {
             let layout = homeLayout
 
             if !layout.needsYou.isEmpty {
-                NeedsYouBanner(count: layout.needsYou.count) {
-                    if let first = layout.needsYou.first { decisionAgent = first }
+                // With a single waiting agent the striped card below says
+                // everything the banner would; the banner earns its row only
+                // as a tally of several (#54).
+                // One header, never two: the banner is the section header
+                // when several wait; the eyebrow is when one does.
+                if layout.needsYou.count > 1 {
+                    NeedsYouBanner(count: layout.needsYou.count) {
+                        if let first = layout.needsYou.first { decisionAgent = first }
+                    }
+                } else {
+                    SectionEyebrow(title: "Needs you")
                 }
-                SectionEyebrow(title: "Needs you")
                 // Needs-you is flat and first, across every computer and
                 // project: a waiting agent never hides under a group.
                 // Identity includes the status so a section move always
@@ -280,14 +295,15 @@ struct SessionsView: View {
 
     // MARK: - Empty and degraded states
 
+    // First run leads with the promise, not the absence (#54): what Mocha
+    // is for, then the one step, then the trust line that used to hide in
+    // the pairing sheet's footer.
     private var noHostCard: some View {
         VStack(spacing: 10) {
-            Image(systemName: "desktopcomputer")
-                .font(.title2)
-                .foregroundStyle(MochaTheme.textSecondary)
-            Text("No Paired Computers")
-                .font(.headline)
+            Text("Your Mac's agents, in your pocket")
+                .font(.title3.weight(.semibold))
                 .foregroundStyle(MochaTheme.textPrimary)
+                .multilineTextAlignment(.center)
             Text("Your agents and logins stay on your Mac. Pair it once by scanning the code it shows.")
                 .font(.footnote)
                 .foregroundStyle(MochaTheme.textSecondary)
@@ -298,11 +314,15 @@ struct SessionsView: View {
                 Label("Scan pairing code", systemImage: "qrcode.viewfinder")
             }
             .buttonStyle(.mochaProminent)
-            .padding(.top, 4)
+            .padding(.top, 6)
             .accessibilityIdentifier("sessions.scanPairingCode")
+            Label("No provider login. No public relay.", systemImage: "lock")
+                .font(.caption2)
+                .foregroundStyle(MochaTheme.textSecondary)
+                .padding(.top, 8)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 28)
+        .padding(.vertical, 30)
         .padding(.horizontal, 16)
         .mochaCard()
     }

@@ -77,16 +77,21 @@ struct PairingFlowView: View {
                     .accessibilityIdentifier("pairing.scanError")
             }
 
-            HStack(alignment: .top, spacing: 10) {
+            // Context, not an actor: the instruction reads as a caption
+            // under the field, never a second box competing with it (#54).
+            HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "laptopcomputer")
                     .foregroundStyle(MochaTheme.textSecondary)
-                Text("On your Mac, run **mocha pair** in the host folder (`npm run pair`) and point the camera at the code.")
-                    .font(.footnote)
-                    .foregroundStyle(MochaTheme.textSecondary)
+                Text(
+                    showingManualEntry || !PairingScannerView.isAvailable
+                        ? "On your Mac, run **mocha pair** in the host folder (`npm run pair`) and paste the code it prints."
+                        : "On your Mac, run **mocha pair** in the host folder (`npm run pair`) and point the camera at the code."
+                )
+                .font(.footnote)
+                .foregroundStyle(MochaTheme.textSecondary)
             }
-            .padding(14)
+            .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .mochaCard()
 
             if PairingScannerView.isAvailable {
                 Button(showingManualEntry ? "Scan instead" : "Enter code manually") {

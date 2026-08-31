@@ -45,7 +45,7 @@ final class MochaScreenshotAudit: XCTestCase {
         app.launch()
         let anyCard = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sessions.agent.'")).firstMatch
         XCTAssertTrue(anyCard.waitForExistence(timeout: 30), "The home never showed agents.")
-        _ = app.staticTexts["Needs you"].waitForExistence(timeout: 30)
+        _ = app.buttons["sessions.agent.\(blocked.paneId)"].waitForExistence(timeout: 30)
         keep("audit-03-home")
 
         // 4. The permission decision sheet for the blocked agent.
@@ -86,8 +86,8 @@ final class MochaScreenshotAudit: XCTestCase {
         let shell = try await createAgentTab(host: host, token: token, cwd: "/private/tmp", agent: "shell")
         app.launchEnvironment["MOCHA_DEV_AGENT"] = shell.paneId
         app.launch()
-        let status = app.otherElements["terminal.status"]
-        _ = status.waitForExistence(timeout: 20)
+        // The banner only shows off-nominal now; the surface is the wait.
+        _ = app.descendants(matching: .any)["terminal.surface"].waitForExistence(timeout: 20)
         sleep(3)
         keep("audit-08-terminal")
         let surface = app.otherElements["terminal.surface"]

@@ -31,8 +31,10 @@ final class MochaUITests: XCTestCase {
             app.descendants(matching: .any)["terminal.disconnected"].waitForExistence(timeout: 15),
             "A missing pane never reached the not-attached state."
         )
-        XCTAssertTrue(app.buttons["terminal.keyboard"].exists)
-        XCTAssertFalse(app.buttons["terminal.keyboard"].isEnabled)
+        // A failed session collapses its input chrome entirely (#54): a
+        // disabled key row would be furniture for a terminal that cannot
+        // take input; the bottom bar carries the verdict instead.
+        XCTAssertFalse(app.buttons["terminal.keyboard"].exists)
         let status = app.descendants(matching: .any)["terminal.status"]
         XCTAssertTrue(status.exists)
         XCTAssertTrue(
@@ -756,11 +758,22 @@ final class MochaUITests: XCTestCase {
 
         app.buttons["sessions.newAgentTab"].tap()
 
-        // "Another folder" sits directly under the agent picker, so it is on
-        // screen without scrolling however many projects this Mac has.
+        // "Another folder" closes the sheet below Recent/Projects (#54 —
+        // the common path leads). The List is lazy, so the row does not
+        // exist until scrolled to; the typing helper below still proves it
+        // is genuinely reachable, not hidden under the floating search
+        // field (the #24 lesson).
         let customField = app.textFields["newAgent.customPath"]
-        XCTAssertTrue(customField.waitForExistence(timeout: 20), "The picker never offered a custom path field.")
+        var scrolls = 0
+        while !customField.exists, scrolls < 8 {
+            app.swipeUp()
+            scrolls += 1
+        }
+        XCTAssertTrue(customField.waitForExistence(timeout: 10), "The picker never offered a custom path field.")
         XCTAssertTrue(type(outside, into: customField, in: app), "The custom path field never took focus.")
+        // The section is the last row; with the keyboard up the button can
+        // sit beneath it — scroll it clear before tapping.
+        app.swipeUp()
         app.buttons["newAgent.useCustomPath"].tap()
 
         let create = app.buttons["newAgent.create"]
@@ -915,11 +928,10 @@ final class MochaUITests: XCTestCase {
         app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
         app.launch()
 
-        let banner = app.buttons["sessions.needsYou"]
-        XCTAssertTrue(banner.waitForExistence(timeout: 15), "Blocked agent never reached Needs you.")
-
+        // The banner only renders for 2+ waiting agents (#54); the striped
+        // card is the needs-you signal for a single one.
         let agentRow = app.buttons["sessions.agent.\(paneId)"]
-        XCTAssertTrue(agentRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(agentRow.waitForExistence(timeout: 15), "Blocked agent never reached Needs you.")
         agentRow.tap()
         XCTAssertTrue(app.descendants(matching: .any)["terminal.surface"].waitForExistence(timeout: 10))
 
@@ -933,11 +945,11 @@ final class MochaUITests: XCTestCase {
         // The dialog is still unanswered: Needs you must be back and stay.
         for checkpoint in [5.0, 10.0, 10.0] {
             try await Task.sleep(for: .seconds(checkpoint))
-            if !banner.exists {
+            if !agentRow.exists {
                 let raw = try await agentStatus(host: host, token: token, paneId: paneId)
                 XCTFail(
                     raw == "blocked"
-                        ? "PHONE-SIDE: host still reports blocked but Needs you is gone."
+                        ? "PHONE-SIDE: host still reports blocked but the needs-you card is gone."
                         : "SOURCE FLIP: herdr now reports '\(raw ?? "gone")' while the dialog waits."
                 )
                 return

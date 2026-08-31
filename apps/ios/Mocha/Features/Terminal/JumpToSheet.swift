@@ -52,7 +52,13 @@ struct JumpToSheet: View {
                         tabRows(tab)
                     }
                 } header: {
-                    Text(workspace.label.isEmpty ? workspace.workspaceId : workspace.label)
+                    // Herdr's labels are paths and ids; speak folder names
+                    // ("Home", not a lone "~") like everywhere else (#54).
+                    Text(
+                        workspace.label.isEmpty
+                            ? workspace.workspaceId
+                            : HomeGrouping.projectName(of: workspace.label)
+                    )
                 }
             }
         }
@@ -66,23 +72,26 @@ struct JumpToSheet: View {
     private func tabRows(_ tab: HerdrTreeTab) -> some View {
         if tab.agents.isEmpty {
             HStack {
-                Text(tab.label.isEmpty ? "Tab" : tab.label)
+                Text(tab.label.isEmpty ? "Herdr pane" : tab.label)
                     .foregroundStyle(MochaTheme.textSecondary)
                 Spacer()
-                Text("No agent")
+                Text("Nothing attached")
                     .font(.caption)
                     .foregroundStyle(MochaTheme.textSecondary)
             }
         } else {
             ForEach(tab.agents) { agent in
-                agentRow(agent, tabLabel: tab.label)
+                agentRow(agent)
             }
         }
     }
 
-    private func agentRow(_ agent: AgentSummary, tabLabel: String) -> some View {
+    private func agentRow(_ agent: AgentSummary) -> some View {
         let status = AgentStatusStyle.of(agent.status)
         let isCurrent = agent.id == currentPaneID
+        // The home's naming rules, not herdr's raw tab title: a tab called
+        // "1" or a shell's prompt string never stands in for identity (#54).
+        let location = agent.isShell ? HomeGrouping.projectName(of: agent.cwd) : agent.projectName
         return Button {
             guard !isCurrent else {
                 dismiss()
@@ -99,7 +108,7 @@ struct JumpToSheet: View {
                     Text(agent.displayName)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(MochaTheme.textPrimary)
-                    Text(tabLabel.isEmpty ? agent.projectName : tabLabel)
+                    Text(location)
                         .font(.caption)
                         .foregroundStyle(MochaTheme.textSecondary)
                         .lineLimit(1)
@@ -108,7 +117,7 @@ struct JumpToSheet: View {
                 if isCurrent {
                     Text("Current")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(MochaTheme.statusWorking)
+                        .foregroundStyle(MochaTheme.accent)
                 } else {
                     Text(status.label)
                         .font(.caption)

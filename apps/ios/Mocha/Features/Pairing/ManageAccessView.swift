@@ -20,20 +20,29 @@ struct ManageAccessView: View {
     var body: some View {
         NavigationStack {
             List {
+                // Placeholders never ship ("Name: Unknown" reads broken,
+                // #54): with no pairing record the address stands in as the
+                // name and the empty rows simply don't render.
                 Section("Paired Mac") {
-                    row("Name", record?.hostName ?? "Unknown")
+                    row("Name", HomeGrouping.computerName(pairedName: record?.hostName, hostText: hostAddress))
                     row("Address", hostAddress.replacingOccurrences(of: "https://", with: ""))
-                    row("Fingerprint", record?.fingerprint ?? "—", monospaced: true)
-                }
-                .listRowBackground(MochaTheme.card)
-
-                Section("This iPhone") {
-                    row("Known to the Mac as", record?.deviceName ?? "—")
-                    if let pairedAt = record?.pairedAt {
-                        row("Paired", pairedAt.formatted(date: .abbreviated, time: .shortened))
+                    if let fingerprint = record?.fingerprint {
+                        row("Fingerprint", fingerprint, monospaced: true)
                     }
                 }
                 .listRowBackground(MochaTheme.card)
+
+                if record != nil {
+                    Section("This iPhone") {
+                        if let deviceName = record?.deviceName {
+                            row("Known to the Mac as", deviceName)
+                        }
+                        if let pairedAt = record?.pairedAt {
+                            row("Paired", pairedAt.formatted(date: .abbreviated, time: .shortened))
+                        }
+                    }
+                    .listRowBackground(MochaTheme.card)
+                }
 
                 Section {
                     Button(role: .destructive) {

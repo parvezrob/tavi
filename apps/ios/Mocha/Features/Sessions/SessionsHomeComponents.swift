@@ -75,9 +75,15 @@ struct AgentCard: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(MochaTheme.textPrimary)
                     Spacer(minLength: 8)
-                    Text(status.label)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(status.color)
+                    // A blocked card already says "needs you" twice — the
+                    // amber stripe and its place in the flat list — so the
+                    // word would be a third telling (#54). Running cards
+                    // keep theirs: the dot alone can't say "Working".
+                    if agent.homeSection != .needsYou {
+                        Text(status.label)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(status.color)
+                    }
                 }
 
                 let showsFreshness = observedAt.map {
@@ -196,17 +202,19 @@ struct ComputerHeader: View {
     let computer: HomeComputer
 
     var body: some View {
-        HStack(spacing: 8) {
+        // A landmark, not a headline (#54): the smallest, dimmest label on
+        // the screen — project names carry the hierarchy below it.
+        HStack(spacing: 6) {
             Image(systemName: "desktopcomputer")
-                .font(.caption.weight(.semibold))
+                .font(.caption2)
             Text(computer.name)
-                .font(.caption.weight(.semibold))
-                .kerning(1.1)
+                .font(.caption2.weight(.medium))
+                .kerning(0.8)
                 .textCase(.uppercase)
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
-        .foregroundStyle(MochaTheme.textSecondary)
+        .foregroundStyle(MochaTheme.textSecondary.opacity(0.75))
         .padding(.top, 14)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)

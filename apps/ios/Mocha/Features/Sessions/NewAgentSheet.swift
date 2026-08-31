@@ -155,42 +155,18 @@ struct NewAgentSheet: View {
                 }
                 .accessibilityIdentifier("newAgent.agentKind")
             } footer: {
-                if !catalog.agents.contains(where: \.installed) {
-                    Text("No supported agent is installed on your Mac. Install one (for example Claude Code or Codex) and reopen this sheet.")
-                        .font(.footnote)
-                        .foregroundStyle(MochaTheme.statusBlocked)
-                        .accessibilityIdentifier("newAgent.noAgents")
-                }
-            }
-            .listRowBackground(MochaTheme.card)
-
-            Section {
-                TextField("/Users/you/Projects/thing", text: $customPath)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .font(.footnote.monospaced())
-                    .accessibilityIdentifier("newAgent.customPath")
-                Button("Use this folder") {
-                    select(customPath.trimmingCharacters(in: .whitespacesAndNewlines))
-                }
-                .disabled(customPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityIdentifier("newAgent.useCustomPath")
-            } header: {
-                Text("Another folder")
-            } footer: {
+                // A refusal must land where the user is looking; the
+                // custom-path section's footer can be screens away.
                 if let failure {
                     Text(failure)
                         .font(.footnote)
                         .foregroundStyle(MochaTheme.statusBlocked)
                         .accessibilityIdentifier("newAgent.error")
-                } else if let selectedPath, let agentKind {
-                    Text("Starting \(label(for: agentKind, in: catalog)) in \(selectedPath)")
+                } else if !catalog.agents.contains(where: \.installed) {
+                    Text("No supported agent is installed on your Mac. Install one (for example Claude Code or Codex) and reopen this sheet.")
                         .font(.footnote)
-                        .foregroundStyle(MochaTheme.textSecondary)
-                } else {
-                    Text("Pick the folder this agent should work in.")
-                        .font(.footnote)
-                        .foregroundStyle(MochaTheme.textSecondary)
+                        .foregroundStyle(MochaTheme.statusBlocked)
+                        .accessibilityIdentifier("newAgent.noAgents")
                 }
             }
             .listRowBackground(MochaTheme.card)
@@ -232,6 +208,34 @@ struct NewAgentSheet: View {
                 }
                 .listRowBackground(MochaTheme.card)
             }
+
+            // Last, not first (#54): Recent is the common path; the custom
+            // field led the sheet visually while serving the rare case.
+            Section {
+                TextField("/Users/you/Projects/thing", text: $customPath)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .font(.footnote.monospaced())
+                    .accessibilityIdentifier("newAgent.customPath")
+                Button("Use this folder") {
+                    select(customPath.trimmingCharacters(in: .whitespacesAndNewlines))
+                }
+                .disabled(customPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("newAgent.useCustomPath")
+            } header: {
+                Text("Another folder")
+            } footer: {
+                if let selectedPath, let agentKind {
+                    Text("Starting \(label(for: agentKind, in: catalog)) in \(selectedPath)")
+                        .font(.footnote)
+                        .foregroundStyle(MochaTheme.textSecondary)
+                } else {
+                    Text("Pick the folder this agent should work in.")
+                        .font(.footnote)
+                        .foregroundStyle(MochaTheme.textSecondary)
+                }
+            }
+            .listRowBackground(MochaTheme.card)
         }
         .scrollContentBackground(.hidden)
         // Keep the search field in the navigation bar drawer; left to the
@@ -242,6 +246,9 @@ struct NewAgentSheet: View {
             placement: .navigationBarDrawer(displayMode: .always),
             prompt: "Find a folder"
         )
+        // iOS 26 still floats the field over the sheet's bottom; without
+        // this inset it covers the last rows at rest (#54).
+        .contentMargins(.bottom, 76, for: .scrollContent)
         .accessibilityIdentifier("newAgent.folders")
     }
 
@@ -254,9 +261,9 @@ struct NewAgentSheet: View {
             return "No folder matches “\(query)”."
         }
         if catalog.roots.isEmpty {
-            return "No project folders are configured on your Mac, so every folder needs confirming. Set MOCHA_ROOTS on the host, or type a full path above."
+            return "No project folders are configured on your Mac, so every folder needs confirming. Set MOCHA_ROOTS on the host, or type a full path below."
         }
-        return "No project folders yet. Type a full path above to start somewhere specific."
+        return "No project folders yet. Type a full path below to start somewhere specific."
     }
 
     private func folderRow(
@@ -281,22 +288,27 @@ struct NewAgentSheet: View {
                         .foregroundStyle(MochaTheme.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.head)
+                    // Words in the row, not warning glyphs down the list:
+                    // the alert only comes when the user actually picks it.
+                    if needsConfirmation {
+                        Text("Outside your project folders")
+                            .font(.caption2)
+                            .foregroundStyle(MochaTheme.textSecondary)
+                    }
                 }
                 Spacer(minLength: 8)
-                if needsConfirmation {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(MochaTheme.statusBlocked)
-                }
-                if let badge {
-                    Text(badge)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(MochaTheme.statusWorking)
+                // A quiet dot says "an agent is already running here" —
+                // the blue link-styled word read as a tappable control.
+                if badge != nil {
+                    Circle()
+                        .fill(MochaTheme.statusWorking)
+                        .frame(width: 6, height: 6)
                 }
                 if selectedPath == path {
+                    // Selection, not the "Done" status color.
                     Image(systemName: "checkmark")
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(MochaTheme.statusDone)
+                        .foregroundStyle(MochaTheme.accent)
                 }
             }
             .contentShape(Rectangle())
