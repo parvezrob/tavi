@@ -3,8 +3,8 @@ import SwiftUI
 // Sessions home (ROADMAP Phase C): what needs the user leads, running work
 // follows, finished work drops to a quiet recent list. The mockups in
 // docs/assets are reference; the binding contract is PRD §7.1 and the
-// navigation map. Terminal access always stays reachable, even with no
-// host or Herdr down.
+// navigation map. The home reads computer → project → agents (#26); the
+// raw tmux terminal is a development-build fallback in the Host menu.
 struct SessionsView: View {
     @Environment(\.scenePhase) private var scenePhase
     // Development connection storage; Phase D replaces this with QR pairing
@@ -23,6 +23,10 @@ struct SessionsView: View {
     @State private var decisionAgent: AgentSummary?
     @State private var terminalController = TerminalSessionController()
     @State private var terminalIsPresented = false
+    // What the home calls the paired computer (#26). Held in state rather
+    // than read from defaults on every body pass: the home re-renders on
+    // every status event and every freshness tick.
+    @State private var computerName = ""
 
     var body: some View {
         NavigationStack {
@@ -32,7 +36,6 @@ struct SessionsView: View {
                 // status pill) after a row moved between sections.
                 VStack(alignment: .leading, spacing: 12) {
                     homeContent
-                    terminalFallbackCard
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 2)
@@ -66,6 +69,14 @@ struct SessionsView: View {
                             showingHostForm = true
                         }
                         .accessibilityIdentifier("sessions.hostSettings")
+                        // The tmux lane left the home (#26). It stays
+                        // reachable in development builds as the fallback
+                        // when Herdr is down (ROADMAP Phase C item 8) and
+                        // as the entry point for the terminal UI tests.
+                        Button("Open tmux terminal (dev)", systemImage: "terminal") {
+                            terminalIsPresented = true
+                        }
+                        .accessibilityIdentifier("sessions.openTerminal")
                         #endif
                     } label: {
                         Label("Host", systemImage: "desktopcomputer")
@@ -94,6 +105,7 @@ struct SessionsView: View {
                         deviceName: grant.deviceName,
                         pairedAt: Date()
                     ).save()
+                    refreshComputerName()
                     agentDirectory.configure(hostText: storedHost, credential: storedToken)
                 }
             }
@@ -131,6 +143,7 @@ struct SessionsView: View {
                 }
                 #endif
                 seedFromDevelopmentEnvironmentIfNeeded()
+                refreshComputerName()
                 agentDirectory.configure(hostText: storedHost, credential: storedToken)
                 #if DEBUG
                 // Scripted development runs (simulator automation) jump
@@ -172,58 +185,68 @@ struct SessionsView: View {
             if agentDirectory.isStale {
                 staleBanner
             }
-            let blocked = agents(in: .needsYou)
-            let active = agents(in: .active)
-            let recent = agents(in: .recent)
+            let layout = homeLayout
 
-            if !blocked.isEmpty {
-                NeedsYouBanner(count: blocked.count) {
-                    if let first = blocked.first { decisionAgent = first }
+            if !layout.needsYou.isEmpty {
+                NeedsYouBanner(count: layout.needsYou.count) {
+                    if let first = layout.needsYou.first { decisionAgent = first }
                 }
                 SectionEyebrow(title: "Needs you")
+                // Needs-you is flat and first, across every computer and
+                // project: a waiting agent never hides under a group.
                 // Identity includes the status so a section move always
                 // rebuilds the card instead of reusing a cached one. A
                 // needs-you card opens the decision sheet (approve/deny
-                // without the terminal); other sections open the terminal.
-                ForEach(blocked, id: \.cardIdentity) { agent in
-                    agentCard(agent, action: { decisionAgent = agent })
+                // without the terminal); everything else opens the terminal.
+                ForEach(layout.needsYou, id: \.cardIdentity) { agent in
+                    agentCard(agent, showsLocation: true, action: { decisionAgent = agent })
                 }
             }
 
-            if !active.isEmpty {
-                SectionEyebrow(title: "Active")
-                ForEach(active, id: \.cardIdentity) { agent in
-                    agentCard(agent, action: { openAgent(agent) })
+            // Computer → project → agents (#26). Running work sits as full
+            // cards under its folder; finished and idle work shares one
+            // compact card below them. A blocked agent is only in the flat
+            // list above — its project header counts it, never repeats it.
+            ForEach(layout.computers) { computer in
+                ComputerHeader(computer: computer)
+                ForEach(computer.projects) { project in
+                    ProjectHeader(project: project)
+                    ForEach(project.active, id: \.cardIdentity) { agent in
+                        agentCard(agent, showsLocation: false, action: { openAgent(agent) })
+                    }
+                    if !project.recent.isEmpty {
+                        recentCard(project.recent)
+                    }
                 }
             }
 
-            if !recent.isEmpty {
-                SectionEyebrow(title: "Recent")
-                recentCard(recent)
-            }
-
-            if blocked.isEmpty, active.isEmpty, recent.isEmpty {
+            if layout.isEmpty {
                 idleStateCard
             }
         }
     }
 
-    private func agents(in section: AgentHomeSection) -> [AgentSummary] {
-        agentDirectory.agents.filter { $0.homeSection == section }
+    private var homeLayout: HomeLayout {
+        HomeGrouping.layout(agents: agentDirectory.agents, computer: (id: storedHost, name: computerName))
     }
 
-    private func agentCard(_ agent: AgentSummary, action: @escaping () -> Void) -> some View {
+    private func refreshComputerName() {
+        computerName = HomeGrouping.computerName(pairedName: PairedHostRecord.load()?.hostName, hostText: storedHost)
+    }
+
+    private func agentCard(_ agent: AgentSummary, showsLocation: Bool, action: @escaping () -> Void) -> some View {
         AgentCard(
             agent: agent,
             preview: agentDirectory.previews[agent.id],
             observedAt: agentDirectory.statusObservedAt[agent.id],
+            showsLocation: showsLocation,
             action: action
         )
     }
 
     private func recentCard(_ agents: [AgentSummary]) -> some View {
         VStack(spacing: 0) {
-            ForEach(agents) { agent in
+            ForEach(agents, id: \.cardIdentity) { agent in
                 RecentAgentRow(
                     agent: agent,
                     observedAt: agentDirectory.statusObservedAt[agent.id]
@@ -316,7 +339,7 @@ struct SessionsView: View {
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("sessions.pairAgain")
                 } else {
-                    Text("The terminal below still works.")
+                    Text("Mocha keeps retrying on its own.")
                         .font(.caption)
                         .foregroundStyle(MochaTheme.textSecondary)
                 }
@@ -334,35 +357,6 @@ struct SessionsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
             .mochaCard()
-    }
-
-    private var terminalFallbackCard: some View {
-        Button {
-            terminalIsPresented = true
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "terminal")
-                    .foregroundStyle(MochaTheme.textSecondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Terminal")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(MochaTheme.textPrimary)
-                    Text("Open a tmux session directly")
-                        .font(.caption)
-                        .foregroundStyle(MochaTheme.textSecondary)
-                }
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(MochaTheme.textSecondary)
-            }
-            .padding(14)
-            .contentShape(Rectangle())
-            .mochaCard()
-        }
-        .buttonStyle(.plain)
-        .padding(.top, 8)
-        .accessibilityIdentifier("sessions.openTerminal")
     }
 
     // MARK: - Actions
@@ -395,6 +389,7 @@ struct SessionsView: View {
                     Button("Save") {
                         storedHost = draftHost.trimmingCharacters(in: .whitespacesAndNewlines)
                         persistToken(draftToken.trimmingCharacters(in: .whitespacesAndNewlines))
+                        refreshComputerName()
                         agentDirectory.configure(hostText: storedHost, credential: storedToken)
                         showingHostForm = false
                     }
@@ -433,6 +428,7 @@ struct SessionsView: View {
         persistToken("")
         storedHost = ""
         PairedHostRecord.clear()
+        refreshComputerName()
         agentDirectory.configure(hostText: "", credential: "")
     }
 

@@ -51,9 +51,26 @@ extension AgentSummary {
     // just repeats the agent name (Herdr's default) adds nothing next to
     // displayName, so it falls through to the directory.
     var projectName: String {
-        if !title.isEmpty, title.lowercased() != agent.lowercased() { return title }
-        let directory = URL(fileURLWithPath: cwd).lastPathComponent
-        return directory.isEmpty ? cwd : directory
+        ownTitle ?? HomeGrouping.projectName(of: cwd)
+    }
+
+    // The title the agent set, when it says more than the agent name does.
+    // Herdr titles a tab with the product name ("Claude Code") by default.
+    var ownTitle: String? {
+        let trimmed = title.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return nil }
+        let normalized = trimmed.lowercased()
+        if normalized == agent.lowercased() || normalized == displayName.lowercased() { return nil }
+        return trimmed
+    }
+
+    // Under a project header on the home: a shell titles itself with its
+    // prompt, which repeats the folder already on screen, so only a real
+    // agent's own title earns a line there. Elsewhere (terminal identity,
+    // jump sheet) `projectName` keeps a shell's title, which is what tells
+    // two shells in one folder apart.
+    var meaningfulTitle: String? {
+        isShell ? nil : ownTitle
     }
 }
 
@@ -143,15 +160,7 @@ extension AgentSummary {
     // never let a container reuse one cached under the bare pane id.
     var cardIdentity: String { "\(id)|\(status)" }
 
-    // The working directory with the home prefix folded to "~" — the phone
-    // doesn't know the host's home, so this is a display heuristic only.
-    var abbreviatedPath: String {
-        cwd.replacingOccurrences(
-            of: "^/(?:Users|home)/[^/]+",
-            with: "~",
-            options: .regularExpression
-        )
-    }
+    var abbreviatedPath: String { cwd.abbreviatingHomeDirectory }
 
     func withStatus(_ status: String) -> AgentSummary {
         AgentSummary(

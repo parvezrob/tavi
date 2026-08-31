@@ -2,6 +2,14 @@
 
 > Append-only log of completed work sessions, newest first. Each entry is what the *next* agent needs to know about that session: what shipped, what was learned, what was left open. The live starting point is always [`current-session.md`](./current-session.md); prune entries older than a few sessions — git history keeps everything.
 
+## 2026-08-31 (night) — #26 project-grouped home
+
+**Shipped:** #26 — home is needs-you (flat) then computer → project → agents; tmux card retired to the DEBUG Host menu; `HomeGrouping` model built host-aware for #50. Verified by screenshot on the simulator with agents in three folders, by the live UI test, and installed on the phone.
+
+**Learned:** `Text` only inflects `^[…](inflect: true)` from a literal `LocalizedStringKey` — a computed `String` renders the markup verbatim (seen on screen, not by tests). Herdr's default tab title is the *product name* ("Claude Code"), not the kind, so "title repeats the agent" checks must compare against `displayName` too; a shell's title is its prompt. `URL(fileURLWithPath: "")` resolves against the process cwd — guard empty paths before taking `lastPathComponent`. XCUITest: async calls inside `XCTUnwrap`/`XCTAssert` autoclosures don't compile — hoist them. The two-verifier pass found a latent duplicate-id bug in `group()` that the pre-filtering caller hid; keep invariants inside the function that owns them.
+
+**Left open:** #52 (home polish: identical same-kind rows in one folder, density of single-agent projects, an action on the empty home, UI coverage of the in-group running card). Phase D still owes the decision to restore or delete the tmux lane.
+
 ## 2026-08-31 (evening) — #44 sizing, #45 QR pairing, #46 device credentials
 
 **Shipped:** #44 step 1 (detach → viewer rect); #45 pairing end to end; #46 host side (per-device credentials, list/revoke CLI + API, live-cut on revoke, self-unpair endpoint).

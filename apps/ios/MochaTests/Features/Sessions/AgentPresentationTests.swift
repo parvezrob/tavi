@@ -55,6 +55,15 @@ struct AgentPresentationTests {
         #expect(summary(title: "fix the build").projectName == "fix the build")
         #expect(summary(title: "").projectName == "mocha")
         #expect(summary(agent: "claude", title: "Claude").projectName == "mocha")
+        // Herdr's default tab title is the product name; a shell's is its prompt.
+        #expect(summary(agent: "claude", title: "Claude Code").projectName == "mocha")
+        #expect(summary(agent: "claude", title: "Claude Code").meaningfulTitle == nil)
+        #expect(summary(agent: "claude", title: "Claude Code ").meaningfulTitle == nil)
+        #expect(summary(agent: "claude", title: "fix the build").meaningfulTitle == "fix the build")
+        // A shell's prompt title still names it outside the home, never inside a group.
+        #expect(summary(agent: "shell", title: "dev@mac:~/mocha").projectName == "dev@mac:~/mocha")
+        #expect(summary(agent: "shell", title: "dev@mac:~/mocha").meaningfulTitle == nil)
+        #expect(summary(cwd: "/Users/dev").projectName == "Home")
     }
 
     @Test

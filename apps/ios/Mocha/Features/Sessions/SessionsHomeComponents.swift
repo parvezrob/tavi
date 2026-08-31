@@ -56,6 +56,10 @@ struct AgentCard: View {
     let agent: AgentSummary
     let preview: String?
     let observedAt: Date?
+    // Under a project header the folder is already on screen; the card then
+    // shows only the agent's own title, if it set one. Cards in the flat
+    // needs-you list keep the full location.
+    var showsLocation = true
     let action: () -> Void
 
     private var status: AgentStatusStyle { .of(agent.status) }
@@ -76,26 +80,37 @@ struct AgentCard: View {
                         .foregroundStyle(status.color)
                 }
 
-                HStack(spacing: 8) {
-                    Text(agent.projectName)
-                        .font(.footnote)
-                        .foregroundStyle(MochaTheme.textSecondary)
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    if let observedAt {
-                        FreshnessLabel(observedAt: observedAt)
+                if showsLocation || agent.meaningfulTitle != nil || observedAt != nil {
+                    HStack(spacing: 8) {
+                        if showsLocation {
+                            Text(agent.projectName)
+                                .font(.footnote)
+                                .foregroundStyle(MochaTheme.textSecondary)
+                                .lineLimit(1)
+                        } else if let title = agent.meaningfulTitle {
+                            Text(title)
+                                .font(.footnote)
+                                .foregroundStyle(MochaTheme.textSecondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 8)
+                        if let observedAt {
+                            FreshnessLabel(observedAt: observedAt)
+                        }
                     }
                 }
 
-                HStack(spacing: 5) {
-                    Image(systemName: "folder")
-                        .font(.caption2)
-                    Text(agent.abbreviatedPath)
-                        .font(.system(size: 11, design: .monospaced))
-                        .lineLimit(1)
-                        .truncationMode(.head)
+                if showsLocation {
+                    HStack(spacing: 5) {
+                        Image(systemName: "folder")
+                            .font(.caption2)
+                        Text(agent.abbreviatedPath)
+                            .font(.system(size: 11, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                    }
+                    .foregroundStyle(MochaTheme.textSecondary.opacity(0.8))
                 }
-                .foregroundStyle(MochaTheme.textSecondary.opacity(0.8))
 
                 if let preview, !preview.isEmpty {
                     Text(preview)
@@ -122,6 +137,8 @@ struct AgentCard: View {
 }
 
 // Compact row for done and idle agents; several rows share one card.
+// Always under a project header, so the folder is not repeated; the
+// status word is, because a dot alone cannot tell Done from Idle.
 struct RecentAgentRow: View {
     let agent: AgentSummary
     let observedAt: Date?
@@ -139,17 +156,17 @@ struct RecentAgentRow: View {
                     Text(agent.displayName)
                         .font(.subheadline)
                         .foregroundStyle(MochaTheme.textPrimary)
-                    Text(agent.projectName)
-                        .font(.caption)
-                        .foregroundStyle(MochaTheme.textSecondary)
-                        .lineLimit(1)
-                    Text(agent.abbreviatedPath)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(MochaTheme.textSecondary.opacity(0.7))
-                        .lineLimit(1)
-                        .truncationMode(.head)
+                    if let title = agent.meaningfulTitle {
+                        Text(title)
+                            .font(.caption)
+                            .foregroundStyle(MochaTheme.textSecondary)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 8)
+                Text(status.label)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(status.color)
                 if let observedAt {
                     FreshnessLabel(observedAt: observedAt)
                 }
@@ -166,6 +183,72 @@ struct RecentAgentRow: View {
         .accessibilityLabel("\(agent.displayName), \(agent.projectName), \(status.label)")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("sessions.agent.\(agent.id)")
+    }
+}
+
+// The computer an agent runs on (#26). One paired host today, so this is a
+// single quiet line; when a second host arrives (#50) the same header
+// separates them.
+struct ComputerHeader: View {
+    let computer: HomeComputer
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "desktopcomputer")
+                .font(.caption.weight(.semibold))
+            Text(computer.name)
+                .font(.caption.weight(.semibold))
+                .kerning(1.1)
+                .textCase(.uppercase)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(MochaTheme.textSecondary)
+        .padding(.top, 14)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("sessions.computer.\(computer.id)")
+    }
+}
+
+// A project is a folder agents live in: its name leads, the path is the
+// quiet second line, and the count says how much is going on there.
+struct ProjectHeader: View {
+    let project: HomeProject
+
+    // Plain text on purpose: "^[…](inflect:)" only inflects when the Text
+    // is built from a literal key; a String var takes the verbatim overload
+    // and renders the markup itself. Always the total, then what is going
+    // on, so two headers on one screen count the same thing.
+    private var summary: String {
+        var parts = [project.agentCount == 1 ? "1 agent" : "\(project.agentCount) agents"]
+        if !project.active.isEmpty { parts.append("\(project.active.count) running") }
+        if !project.needsYou.isEmpty { parts.append("\(project.needsYou.count) waiting above") }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(project.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(MochaTheme.textPrimary)
+                    .lineLimit(1)
+                Text(project.abbreviatedPath)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(MochaTheme.textSecondary.opacity(0.8))
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+            Spacer(minLength: 8)
+            Text(summary)
+                .font(.caption)
+                .foregroundStyle(MochaTheme.textSecondary)
+        }
+        .padding(.top, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("sessions.project.\(project.path)")
     }
 }
 

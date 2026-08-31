@@ -53,7 +53,7 @@ Runs an unsupported CLI or ordinary shell. Mocha cannot supply structured status
 - Disconnect is normal.
 - Typing is expensive.
 - Unknown state is better than wrong state.
-- Structured views must always offer terminal fallback.
+- Structured views must always offer terminal fallback: every agent on the home opens its real terminal. (The raw tmux lane is a DEBUG-only development route since #26.)
 - Provider integrations are optional capabilities, never the runtime foundation.
 
 ## 7. V1 release scope
@@ -65,7 +65,7 @@ Runs an unsupported CLI or ordinary shell. Mocha cannot supply structured status
 - iPad-specific layout and interaction optimization is planned after the iPhone V1 and is not an initial release gate.
 - Dark-first, Orca-clean visual baseline: near-black canvas, quiet charcoal groups, restrained borders, system typography, consistent radii, and sparse semantic color. Avoid glow, gradients, ornamental depth, and dashboard spectacle.
 - System-provided Liquid Glass for the functional layer—navigation, toolbars, menus, sheets, and tab surfaces—not custom glass containers in the content layer.
-- V1 visual target is [`assets/agent-deck-v1-home-terminal.png`](./assets/agent-deck-v1-home-terminal.png): an attention-first Home with live resumable session previews, a compact labeled `Sessions | Inbox` glass dock plus separate new-connection action, and a terminal-first Herdr screen with a native `Jump to` workspace/tab sheet.
+- V1 visual target is [`assets/agent-deck-v1-home-terminal.png`](./assets/agent-deck-v1-home-terminal.png) (predates the #26 grouping — see §7.3): an attention-first Home with live resumable session previews, a compact labeled `Sessions | Inbox` glass dock plus separate new-connection action, and a terminal-first Herdr screen with a native `Jump to` workspace/tab sheet.
 - V1 pairing target is [`assets/agent-deck-v1-pairing-flow.png`](./assets/agent-deck-v1-pairing-flow.png): scan first, verify the exact host and fingerprint at the moment of consent, show connection checks progressively, then land on discovered sessions.
 - Opaque terminal and dense content backgrounds.
 - Built-in interactive demo host requiring no external app, account, or network.
@@ -84,14 +84,16 @@ Runs an unsupported CLI or ordinary shell. Mocha cannot supply structured status
 
 ### 7.3 Home and attention queue
 
-- First section: sessions requiring attention.
-- Second section: active and recently completed sessions.
-- Host availability remains visible but secondary.
-- Each session row includes host, project/workspace, provider or foreground process when known, state, state source, recent timestamp, and a short safe preview where appropriate.
+- First section: sessions requiring attention — always flat and on top, across every computer and project, so a waiting agent never hides under a group.
+- Below it (#26): computer → project → agents. A project is the agent's working directory (basename; "Home" for the home folder), nothing to name or maintain. Running agents are full cards under their folder; done/idle agents share a compact card with their status word. A folder whose only agent is waiting keeps its header (it counts the agent) and never repeats it.
+- Host availability remains visible but secondary; the computer header is the host dimension multi-host (#50) nests under.
+- The group headers carry host and project; each row carries provider, state, state source, recent timestamp, and (for running/waiting agents) a short safe preview.
 - One tap resumes the exact session target.
 - Unknown/unclassified sessions are clearly labeled and remain accessible.
 
 ### 7.4 tmux provider
+
+(Since #26 this provider has no release-build entry point: it is the DEBUG Host-menu "Open tmux terminal (dev)" route and the Herdr-down development fallback. It stays specified so Phase D can decide to restore or delete it.)
 
 - Discover existing sessions, windows, and panes.
 - Create a session in a chosen working directory with a selected command.

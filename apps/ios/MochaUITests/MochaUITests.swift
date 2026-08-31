@@ -12,7 +12,10 @@ final class MochaUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["No Paired Computers"].waitForExistence(timeout: 3))
-        app.buttons["sessions.openTerminal"].tap()
+        // The tmux card left the home (#26); it lives in the Host menu of
+        // development builds only.
+        XCTAssertFalse(app.buttons["sessions.openTerminal"].exists)
+        openDevelopmentTerminal(in: app)
 
         XCTAssertTrue(
             app.descendants(matching: .any)["connection.sheet"].waitForExistence(timeout: 10)
@@ -41,8 +44,8 @@ final class MochaUITests: XCTestCase {
         app.launch()
 
         for iteration in 0..<8 {
-            XCTAssertTrue(app.buttons["sessions.openTerminal"].waitForExistence(timeout: 5))
-            app.buttons["sessions.openTerminal"].tap()
+            XCTAssertTrue(app.buttons["sessions.hostMenu"].waitForExistence(timeout: 5))
+            openDevelopmentTerminal(in: app)
             let surface = app.descendants(matching: .any)["terminal.surface"]
             XCTAssertTrue(surface.waitForExistence(timeout: 5))
             Thread.sleep(forTimeInterval: 0.75)
@@ -78,8 +81,8 @@ final class MochaUITests: XCTestCase {
         )
         app.launch()
 
-        XCTAssertTrue(app.buttons["sessions.openTerminal"].waitForExistence(timeout: 5))
-        app.buttons["sessions.openTerminal"].tap()
+        XCTAssertTrue(app.buttons["sessions.hostMenu"].waitForExistence(timeout: 5))
+        openDevelopmentTerminal(in: app)
         let surface = app.descendants(matching: .any)["terminal.surface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 5))
 
@@ -101,8 +104,8 @@ final class MochaUITests: XCTestCase {
         )
         app.launch()
 
-        XCTAssertTrue(app.buttons["sessions.openTerminal"].waitForExistence(timeout: 5))
-        app.buttons["sessions.openTerminal"].tap()
+        XCTAssertTrue(app.buttons["sessions.hostMenu"].waitForExistence(timeout: 5))
+        openDevelopmentTerminal(in: app)
         let surface = app.descendants(matching: .any)["terminal.surface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 5))
 
@@ -545,6 +548,77 @@ final class MochaUITests: XCTestCase {
         keepScreenshot(named: "terminal-from-picker")
     }
 
+    // #26 acceptance: the home reads computer → project → agents. Two
+    // disposable terminals in two different folders must land under two
+    // project headers beneath the paired computer, with no tmux card.
+    @MainActor
+    func testHomeGroupsAgentsByComputerAndProject() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live home-grouping test.")
+        }
+
+        func trimmed(_ path: String) -> String {
+            var path = path
+            while path.count > 1, path.hasSuffix("/") { path.removeLast() }
+            return path
+        }
+        let catalog = try await projectCatalog(host: host, token: token)
+        let first = try await knownProjectPath(host: host, token: token)
+        guard let second = (catalog.recent.filter(\.withinRoots).map(\.path) + catalog.workspaces.map(\.path))
+            .first(where: { trimmed($0) != trimmed(first) })
+        else {
+            throw XCTSkip("This host has only one project folder; the grouping needs two.")
+        }
+
+        let one = try await createAgentTab(host: host, token: token, cwd: first, agent: "shell")
+        addTeardownBlock { try? await Self.closeAgentTab(host: host, token: token, tabId: one.tabId) }
+        let two = try await createAgentTab(host: host, token: token, cwd: second, agent: "shell")
+        addTeardownBlock { try? await Self.closeAgentTab(host: host, token: token, tabId: two.tabId) }
+        // The header is keyed by the cwd the host *reports* for the agent,
+        // which need not be byte-identical to the catalog path we asked for.
+        let firstReported = try await agentCwd(host: host, token: token, paneId: one.paneId)
+        let secondReported = try await agentCwd(host: host, token: token, paneId: two.paneId)
+        let firstPath = trimmed(try XCTUnwrap(firstReported))
+        let secondPath = trimmed(try XCTUnwrap(secondReported))
+        XCTAssertNotEqual(firstPath, secondPath)
+
+        let app = XCUIApplication()
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
+        app.launchEnvironment["MOCHA_DEV_HOST"] = host
+        app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
+        app.launch()
+
+        let firstHeader = app.descendants(matching: .any)["sessions.project.\(firstPath)"]
+        let secondHeader = app.descendants(matching: .any)["sessions.project.\(secondPath)"]
+        XCTAssertTrue(firstHeader.waitForExistence(timeout: 20), "No project header for \(firstPath).")
+        XCTAssertTrue(secondHeader.waitForExistence(timeout: 20), "No project header for \(secondPath).")
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'sessions.computer.'")).firstMatch.exists,
+            "The computer header is missing."
+        )
+        let firstRow = app.buttons["sessions.agent.\(one.paneId)"]
+        let secondRow = app.buttons["sessions.agent.\(two.paneId)"]
+        XCTAssertTrue(firstRow.waitForExistence(timeout: 10))
+        XCTAssertTrue(secondRow.exists)
+
+        // Each terminal sits under its own folder and above the next one:
+        // the row's top lies strictly between its header and the other
+        // header, whichever order the two folders sort in.
+        let headers = [firstHeader, secondHeader].map(\.frame.minY)
+        let rows = [firstRow, secondRow].map(\.frame.minY)
+        for index in 0..<2 {
+            let other = 1 - index
+            XCTAssertLessThan(headers[index], rows[index], "Row \(index) sits above its own header.")
+            if headers[other] > headers[index] {
+                XCTAssertLessThan(rows[index], headers[other], "Row \(index) sits under the other folder's header.")
+            }
+        }
+        XCTAssertFalse(app.buttons["sessions.openTerminal"].exists, "The tmux card is back on the home.")
+        keepScreenshot(named: "home-grouped-by-project")
+    }
+
     // #24: a folder outside the host's project roots is not refused outright
     // — it asks first. The host owns that rule, so this drives the real
     // refusal and the real confirmation rather than a simulated one.
@@ -862,14 +936,15 @@ final class MochaUITests: XCTestCase {
     private func createAgentTab(
         host: String,
         token: String,
-        cwd: String
+        cwd: String,
+        agent: String = "claude"
     ) async throws -> (paneId: String, tabId: String) {
         var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/herdr/tabs")))
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "agent": "claude",
+            "agent": agent,
             "cwd": cwd,
             "allowOutsideRoots": true,
         ])
@@ -1030,6 +1105,14 @@ final class MochaUITests: XCTestCase {
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         _ = try await URLSession.shared.data(for: request)
+    }
+
+    // The raw tmux terminal is a Host-menu item in development builds (#26).
+    @MainActor
+    private func openDevelopmentTerminal(in app: XCUIApplication) {
+        app.buttons["sessions.hostMenu"].tap()
+        XCTAssertTrue(app.buttons["sessions.openTerminal"].waitForExistence(timeout: 5))
+        app.buttons["sessions.openTerminal"].tap()
     }
 
     @MainActor

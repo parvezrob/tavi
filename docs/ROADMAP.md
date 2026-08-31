@@ -29,13 +29,13 @@ All five items shipped and live-verified (issues #15, #16): agents are attachabl
 2. Live attention events: host subscribes to `events.subscribe` (agent status changes) and pushes them to the phone over the WebSocket; no polling, no scraping.
 3. Bounded safe previews via `agent.read` for session cards.
 4. Structured prompt submission via `agent.prompt` (used by the composer in Phase C).
-5. tmux lane remains fully functional as the fallback for non-Herdr sessions; Herdr being down degrades to terminals with `Unknown` state, never an error wall.
+5. tmux lane remains fully functional as the fallback for non-Herdr sessions; Herdr being down degrades to terminals with `Unknown` state, never an error wall. *(Amended by #26, 2026-08-31: the raw tmux lane is reachable only in DEBUG builds — Host menu → "Open tmux terminal (dev)". A release build with Herdr down shows the degraded card and keeps retrying; every agent card still opens a real terminal. Phase D decides whether the lane returns to the product or is deleted.)*
 
 **Exit gate:** From the phone: agent list with live status; tapping an agent lands in its exact pane; a status change (working → blocked) appears on the phone within 2 seconds.
 
 ## Phase C — The real app (iOS product surface)
 
-Target visuals: [`assets/agent-deck-v1-home-terminal.png`](./assets/agent-deck-v1-home-terminal.png).
+Target visuals: [`assets/agent-deck-v1-home-terminal.png`](./assets/agent-deck-v1-home-terminal.png) — the mockup predates #26; the shipped home groups computer → project → agents below the needs-you list.
 
 1. Sessions home: `Needs you` / `Active` / `Recent` cards with agent identity, host, state colors, freshness, and safe preview — driven by Phase B data with provenance labels.
 2. Focused terminal screen: header with session/host/provider identity, `Jump to` sheet over the Herdr workspace → tab hierarchy.
@@ -47,7 +47,7 @@ Adopted 2026-08-26 after a competitor survey (t3code, Happy, Omnara, CodeAgent M
 5. Approve/deny a waiting permission straight from the Needs-you card (#23) — the core intervention loop without entering the terminal.
 6. Project picker for phone-created agents (#24) — recent project directories from the host; no more agents landing in `~`.
 7. Read-only diff glance per agent (#25) — "what did it change", size-bounded, no mutating git operations.
-8. Project-grouped home (cwd-derived, no manual folder manager) and the tmux card leaves the UI (#26). The tmux lane stays dormant behind the dev bootstrap as the Herdr-down fallback; delete in Phase D if never missed.
+8. **Shipped 2026-08-31** — project-grouped home (#26): needs-you stays a flat list on top; below it computer → project (agent `cwd` basename, "Home" for `~`) → running cards, then a compact card of done/idle rows with their status word. Project headers count waiting agents but never repeat them. The tmux card left the home; the lane stays behind the DEBUG Host menu ("Open tmux terminal (dev)") and `MOCHA_DEV_AUTO_OPEN_TERMINAL` as the Herdr-down fallback; delete in Phase D if never missed.
 
 Post-MVP backlog adopted the same day: Inbox (#27), snooze/settle triage (#28), session-handoff cue (#29). Multi-host is Phase D item 3; push notifications remain Phase E item 1. Deliberately rejected: cloud relay/accounts, on-phone code editing or file trees, model catalogs/API keys, phone-side git mutations, task boards, web client, telemetry.
 
@@ -72,6 +72,6 @@ Post-MVP backlog adopted the same day: Inbox (#27), snooze/settle triage (#28), 
 ## Working rules
 
 - Reliability regressions block feature work in any phase.
-- Herdr integration is capability-gated and kill-switchable; the terminal fallback is never allowed to break.
+- Herdr integration is capability-gated and kill-switchable; the terminal fallback is never allowed to break (since #26 that means every agent card opens a real terminal — the raw tmux lane itself is DEBUG-only).
 - Physical-device verification is required for anything touching rendering, input, lifecycle, or networking.
 - When this roadmap and reality disagree, update the roadmap in the same change.
