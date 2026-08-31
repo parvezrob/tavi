@@ -619,13 +619,18 @@ final class AgentDirectory {
     }
 
     // True only on a definite 401 from the host; anything else (offline,
-    // host down) is a transient failure and must keep retrying.
+    // host down) is a transient failure and must keep retrying. Bounded
+    // tightly: this runs on every stream drop, including the ordinary
+    // background→foreground cycle, and with the default 60 s timeout a
+    // half-dead connection after resume held the whole reconnect for a
+    // minute (owner-reported).
     private func credentialIsRejected() async -> Bool {
         guard let host, !credential.isEmpty,
               var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else { return false }
         components.path = "/api/host"
         guard let url = components.url else { return false }
         var request = URLRequest(url: url)
+        request.timeoutInterval = 3
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
         guard let (_, response) = try? await Self.session.data(for: request) else { return false }
         return (response as? HTTPURLResponse)?.statusCode == 401
