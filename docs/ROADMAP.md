@@ -57,7 +57,7 @@ Post-MVP backlog adopted the same day: Inbox (#27), snooze/settle triage (#28), 
 
 1. `mocha pair` on the host: QR with endpoint + fingerprint + single-use secret; scan-first flow per [`assets/agent-deck-v1-pairing-flow.png`](./assets/agent-deck-v1-pairing-flow.png).
 2. Per-device revocable credentials in Keychain; paired-device list and revoke on the host.
-3. Multi-host home with connection health, path, and latency.
+3. Multi-host home with connection health, path, and latency (#50: one phone, several computers, grouped by computer; #26's project grouping nests under it).
 
 **Exit gate:** A fresh phone pairs in under 2 minutes without documentation; revoking a device immediately cuts its access; the dev token flow is deleted.
 
