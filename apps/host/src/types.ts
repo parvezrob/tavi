@@ -1,24 +1,8 @@
-export type AgentKind = "shell" | "codex" | "claude" | "custom";
-
 export interface HostInfo {
   name: string;
   platform: NodeJS.Platform;
   arch: string;
   version: string;
-  tmuxVersion: string;
-}
-
-export interface SessionInfo {
-  id: string;
-  name: string;
-  createdAt: number;
-  activeAt: number;
-  attached: number;
-  windows: number;
-  cwd: string;
-  command: string;
-  managed: boolean;
-  agent: AgentKind;
 }
 
 export interface WorkspaceInfo {
@@ -27,28 +11,10 @@ export interface WorkspaceInfo {
   git: boolean;
 }
 
-export interface CreateSessionInput {
-  name: string;
-  cwd: string;
-  agent: AgentKind;
-  command?: string;
-}
-
+// How to attach a pty to an agent pane: the herdr CLI and its arguments.
 export interface AttachCommand {
   bin: string;
   args: string[];
-}
-
-// The narrow contract the server needs from a session backend. tmux is the
-// only implementation today; alternative multiplexers can slot in behind it.
-export interface SessionBackend {
-  version(): Promise<string>;
-  listSessions(): Promise<SessionInfo[]>;
-  getSession(id: string): Promise<SessionInfo | undefined>;
-  createSession(input: CreateSessionInput): Promise<SessionInfo>;
-  killSession(id: string): Promise<void>;
-  listWorkspaces(): Promise<WorkspaceInfo[]>;
-  attachCommand(id: string): AttachCommand;
 }
 
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";

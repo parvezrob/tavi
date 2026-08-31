@@ -11,12 +11,7 @@ private enum TerminalInputMode {
 
 struct TerminalSessionView: View {
     @Environment(\.scenePhase) private var scenePhase
-    @State private var credential = ""
-    @State private var host = ""
-    @State private var sessionID = ""
-    @State private var showingConnection = true
     @State private var showingJump = false
-    @State private var didApplyDevelopmentBootstrap = false
     @State private var composerText = ""
     @State private var composerError: String?
     @State private var composerSending = false
@@ -24,9 +19,8 @@ struct TerminalSessionView: View {
     @FocusState private var composerFocused: Bool
 
     let controller: TerminalSessionController
-    // Present only when the terminal was opened from the agent home; drives
-    // the identity header and the Jump-to sheet. tmux and development
-    // terminals keep the generic chrome.
+    // The events mirror behind the identity header and the Jump-to sheet;
+    // nil only in previews, which keep the generic chrome.
     private let agentDirectory: AgentDirectory?
     private let onSelectAgent: ((AgentSummary) -> Void)?
     private let developmentBootstrap: TerminalDevelopmentBootstrap
@@ -37,26 +31,16 @@ struct TerminalSessionView: View {
         onSelectAgent: ((AgentSummary) -> Void)? = nil,
         developmentBootstrap: TerminalDevelopmentBootstrap = .launchEnvironment()
     ) {
-        let bootstrap = developmentBootstrap
-        self.developmentBootstrap = bootstrap
+        self.developmentBootstrap = developmentBootstrap
         self.controller = controller
         self.agentDirectory = agentDirectory
         self.onSelectAgent = onSelectAgent
-        _host = State(initialValue: bootstrap.host)
-        _sessionID = State(initialValue: bootstrap.sessionID)
-        _credential = State(initialValue: bootstrap.credential)
-        _showingConnection = State(
-            initialValue: controller.needsConnectionConfiguration
-                && !bootstrap.isComplete
-                && bootstrap.rendererStressChunks == nil
-        )
     }
 
-    // The connected agent's live identity from the events mirror; nil for
-    // tmux targets or when the directory is not available.
+    // The connected pane's live identity from the events mirror; nil while
+    // the list has not caught up with the pane or after the attach failed.
     private var activeAgent: AgentSummary? {
-        guard controller.currentTargetKind == .herdrAgent,
-              let paneID = controller.currentSessionID else { return nil }
+        guard let paneID = controller.currentPaneID else { return nil }
         return agentDirectory?.agents.first { $0.id == paneID }
     }
 
@@ -69,9 +53,7 @@ struct TerminalSessionView: View {
     }
 
     private var canJump: Bool {
-        agentDirectory != nil
-            && onSelectAgent != nil
-            && controller.currentTargetKind == .herdrAgent
+        agentDirectory != nil && onSelectAgent != nil
     }
 
     var body: some View {
@@ -95,8 +77,7 @@ struct TerminalSessionView: View {
                 }
             )
             .overlay {
-                if controller.needsConnectionConfiguration,
-                   developmentBootstrap.rendererStressChunks == nil {
+                if controller.needsConnectionConfiguration {
                     disconnectedPrompt
                 }
             }
@@ -119,55 +100,35 @@ struct TerminalSessionView: View {
                     .accessibilityIdentifier("terminal.jump")
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Connection", systemImage: "network") {
-                    showingConnection = true
-                }
-                .accessibilityIdentifier("terminal.connection")
-            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             terminalControls
-        }
-        .sheet(isPresented: $showingConnection) {
-            connectionSheet
-                .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showingJump) {
             if let agentDirectory, let onSelectAgent {
                 JumpToSheet(
                     agentDirectory: agentDirectory,
-                    currentPaneID: controller.currentSessionID,
+                    currentPaneID: controller.currentPaneID,
                     onSelect: onSelectAgent
                 )
                 .presentationDetents([.medium, .large])
             }
         }
+        #if DEBUG
+        // Renderer stress corpus (MOCHA_DEV_RENDERER_STRESS_CHUNKS): replayed
+        // into the renderer on top of whatever the pane itself prints.
         .task {
-            #if DEBUG
-            if let chunks = developmentBootstrap.rendererStressChunks {
-                while !Task.isCancelled {
-                    for chunk in chunks {
-                        guard !Task.isCancelled else { return }
-                        controller.renderDevelopmentOutput(chunk)
-                        await Task.yield()
-                    }
-                    try? await Task.sleep(for: .milliseconds(10))
+            guard let chunks = developmentBootstrap.rendererStressChunks else { return }
+            while !Task.isCancelled {
+                for chunk in chunks {
+                    guard !Task.isCancelled else { return }
+                    controller.renderDevelopmentOutput(chunk)
+                    await Task.yield()
                 }
-                return
+                try? await Task.sleep(for: .milliseconds(10))
             }
-            #endif
-            guard developmentBootstrap.isComplete,
-                  controller.needsConnectionConfiguration,
-                  !didApplyDevelopmentBootstrap else { return }
-            didApplyDevelopmentBootstrap = true
-            controller.connect(
-                hostText: developmentBootstrap.host,
-                sessionText: developmentBootstrap.sessionID,
-                credential: developmentBootstrap.credential
-            )
-            credential = ""
         }
+        #endif
     }
 
     private func identityHeader(_ agent: AgentSummary) -> some View {
@@ -443,71 +404,19 @@ struct TerminalSessionView: View {
         }
     }
 
+    // The honest not-attached state: the controller gave the pane up (it no
+    // longer exists, the token was refused, the pty exited) and the banner
+    // above carries the reason. Nothing here retries; opening the agent
+    // again from the home starts a fresh attach.
     private var disconnectedPrompt: some View {
         ContentUnavailableView {
-            Label("Connect a terminal", systemImage: "terminal")
+            Label("Not attached", systemImage: "terminal")
         } description: {
-            Text("Attach to a tmux session on your computer to start typing.")
-        } actions: {
-            Button("Open Connection") {
-                showingConnection = true
-            }
-            .buttonStyle(.borderedProminent)
+            Text("This agent's terminal is not attached. Go back and open it again from the home.")
         }
         .foregroundStyle(.white)
         .padding()
         .accessibilityIdentifier("terminal.disconnected")
-    }
-
-    private var connectionSheet: some View {
-        NavigationStack {
-            Form {
-                Section("Development host") {
-                    TextField("https://mac-name.tailnet.ts.net", text: $host)
-                        .textContentType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("connection.host")
-                    TextField("tmux session ID", text: $sessionID)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("connection.session")
-                    SecureField("Host access token", text: $credential)
-                        .textContentType(.password)
-                        .accessibilityIdentifier("connection.token")
-                }
-
-                Section {
-                    Button("Connect") {
-                        controller.connect(
-                            hostText: host,
-                            sessionText: sessionID,
-                            credential: credential
-                        )
-                        credential = ""
-                        showingConnection = false
-                    }
-                    .disabled(host.isEmpty || sessionID.isEmpty || credential.isEmpty)
-                    .accessibilityIdentifier("connection.connect")
-
-                    if controller.connectionState != .idle {
-                        Button("Disconnect", role: .destructive) {
-                            controller.stop()
-                            showingConnection = true
-                        }
-                    }
-                } footer: {
-                    Text("This sheet keeps the token in memory for this connection only. A host connected from the home screen stores its token in this iPhone's Keychain. Anyone with the token can run commands on that Mac. Only Tailscale Serve .ts.net addresses are accepted; keep Funnel disabled.")
-                }
-            }
-            .accessibilityIdentifier("connection.sheet")
-            .navigationTitle("Connection")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { showingConnection = false }
-                }
-            }
-        }
     }
 
     private var connectionColor: Color {

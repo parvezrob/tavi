@@ -12,7 +12,7 @@ Keep this file lean. It routes work and protects shared boundaries; detailed eng
 ## Product and engineering boundaries
 
 - Mocha is a native SwiftUI client plus a local API-only host. Do not reintroduce a web client, hosted relay, or agent harness without an explicit product decision.
-- The universal fallback is a durable tmux terminal over the versioned host protocol. Provider integrations are optional, capability-gated adapters.
+- Every agent is reachable as a real terminal over the versioned host protocol; herdr is the only backend (the tmux lane was removed in #53). Richer semantics are optional, capability-gated adapters on top.
 - Treat pairing credentials as shell access. Never commit or log secrets, tokens, prompts, terminal contents, or private files.
 - Clean, readable, reusable production code is mandatory. Follow SOLID, correct ACID boundaries, strict Swift concurrency, explicit ownership, and the repository definition of done.
 - Reuse before creating. Add a shared abstraction only after a second real consumer proves the boundary.
@@ -30,7 +30,7 @@ Keep this file lean. It routes work and protects shared boundaries; detailed eng
 
 ## Repository structure
 
-- `apps/host/` — local Node host, tmux, PTY, transport, and provider adapters.
+- `apps/host/` — local Node host, herdr adapter, PTY bridge, transport.
 - `apps/ios/` — native Xcode workspace, app, Swift packages, and iOS tests.
 - `protocol/` — cross-client schemas, compatibility fixtures, and protocol documentation.
 - `docs/` — maintained product, architecture, research, and visual decisions only.

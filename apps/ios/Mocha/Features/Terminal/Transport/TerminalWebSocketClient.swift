@@ -142,7 +142,7 @@ actor TerminalWebSocketClient: TerminalTransporting {
         case 401:
             return .authenticationRejected
         case 404:
-            return .sessionNotFound
+            return .agentNotFound
         case 400...499:
             return .handshakeRejected(status: status)
         default:

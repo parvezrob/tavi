@@ -27,15 +27,16 @@ import {
   normalizeProjectPath,
   ProjectHistory,
 } from "./projects.js";
-import type { AttachCommand, HostInfo, ServerTerminalMessage, SessionBackend } from "./types.js";
-import { InputError, parseCreateSession, safeSessionId } from "./validation.js";
+import type { AttachCommand, HostInfo, ServerTerminalMessage, WorkspaceInfo } from "./types.js";
+import { InputError, safeSessionId } from "./validation.js";
+import { scanWorkspaces } from "./workspaces.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_PREVIEW_CHARACTERS = 4_096;
 const MAX_PROMPT_CHARACTERS = 16_384;
 // Small buffers on purpose: when the phone falls behind, pausing the pty
-// quickly means tmux holds fresh frames instead of the connection replaying a
-// large backlog of stale screen paints.
+// quickly means the pane holds fresh frames instead of the connection
+// replaying a large backlog of stale screen paints.
 const WEBSOCKET_HIGH_WATER_BYTES = 64 * 1024;
 const WEBSOCKET_LOW_WATER_BYTES = 16 * 1024;
 const MAX_PENDING_OUTPUT_BYTES = 256 * 1024;
@@ -43,8 +44,10 @@ const BACKPRESSURE_POLL_MILLISECONDS = 25;
 
 export interface MochaServerOptions {
   config: HostConfig;
-  tmux: SessionBackend;
   herdr?: HerdrAgentSource;
+  // The folder scan behind `/api/projects`; injectable so tests need no
+  // real directory tree.
+  listWorkspaces?: (roots: string[]) => Promise<WorkspaceInfo[]>;
   agentEvents?: AgentEventSource;
   attention?: AttentionOverlay;
   projects?: ProjectHistory;
@@ -74,8 +77,8 @@ interface TerminalTarget {
 export async function createMochaServer(options: MochaServerOptions) {
   const {
     config,
-    tmux,
     herdr,
+    listWorkspaces = scanWorkspaces,
     agentEvents,
     attention,
     projects = new ProjectHistory(config.stateDir),
@@ -127,8 +130,8 @@ export async function createMochaServer(options: MochaServerOptions) {
     try {
       await routeRequest(request, response, {
         config,
-        tmux,
         herdr,
+        listWorkspaces,
         attention,
         projects,
         agentKinds,
@@ -165,9 +168,8 @@ export async function createMochaServer(options: MochaServerOptions) {
         return;
       }
 
-      const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/terminal$/);
       const agentMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/terminal$/);
-      if ((!sessionMatch && !agentMatch) || !authorized(request)) {
+      if (!agentMatch || !authorized(request)) {
         socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
         socket.destroy();
         return;
@@ -178,44 +180,30 @@ export async function createMochaServer(options: MochaServerOptions) {
         return;
       }
 
-      let target: TerminalTarget;
-      if (sessionMatch) {
-        const id = safeSessionId(sessionMatch[1] || "");
-        if (!(await tmux.getSession(id))) {
-          socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
-          socket.destroy();
-          return;
-        }
-        target = {
-          key: id,
-          spawn: () => spawnAttachmentTerminal(tmux.attachCommand(id), config, spawnTerminal),
-        };
-      } else {
-        // Herdr agents are terminal targets only when Herdr itself confirms
-        // them; a down Herdr degrades honestly instead of guessing.
-        const paneId = safeSessionId(agentMatch?.[1] || "");
-        if (!herdr) {
-          socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
-          socket.destroy();
-          return;
-        }
-        const lookup = await herdr.findAgent(paneId);
-        if (!lookup.available) {
-          socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
-          socket.destroy();
-          return;
-        }
-        if (!lookup.agent) {
-          socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
-          socket.destroy();
-          return;
-        }
-        target = {
-          key: `agent:${paneId}`,
-          spawn: () => spawnAttachmentTerminal(herdr.attachCommand(paneId), config, spawnTerminal),
-          detachedSize: () => herdr.paneSize?.(paneId) ?? Promise.resolve(undefined),
-        };
+      // Herdr agents are terminal targets only when Herdr itself confirms
+      // them; a down Herdr degrades honestly instead of guessing.
+      const paneId = safeSessionId(agentMatch[1] || "");
+      if (!herdr) {
+        socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+        return;
       }
+      const lookup = await herdr.findAgent(paneId);
+      if (!lookup.available) {
+        socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      if (!lookup.agent) {
+        socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      const target: TerminalTarget = {
+        key: `agent:${paneId}`,
+        spawn: () => spawnAttachmentTerminal(herdr.attachCommand(paneId), config, spawnTerminal),
+        detachedSize: () => herdr.paneSize?.(paneId) ?? Promise.resolve(undefined),
+      };
 
       const resume = parseResumeRequest(url);
       wss.handleUpgrade(request, socket, head, (websocket) => {
@@ -292,7 +280,7 @@ function parseResumeRequest(url: URL): TerminalResumeRequest | undefined {
 
 interface RouteContext {
   config: HostConfig;
-  tmux: SessionBackend;
+  listWorkspaces: (roots: string[]) => Promise<WorkspaceInfo[]>;
   projects: ProjectHistory;
   agentKinds: AgentKindDetector;
   devices: DeviceRegistry;
@@ -307,7 +295,7 @@ async function routeRequest(
   response: ServerResponse,
   context: RouteContext,
 ): Promise<void> {
-  const { config, tmux, herdr, attention, projects, agentKinds, devices, pairing, authorized } = context;
+  const { config, herdr, listWorkspaces, attention, projects, agentKinds, devices, pairing, authorized } = context;
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
   if (url.pathname === "/api/health" && request.method === "GET") {
@@ -401,37 +389,8 @@ async function routeRequest(
       platform: platform(),
       arch: arch(),
       version: VERSION,
-      tmuxVersion: await tmux.version(),
     };
     sendJson(response, 200, { ...host, fingerprint: devices.identity().fingerprint });
-    return;
-  }
-
-  if (url.pathname === "/api/sessions" && request.method === "GET") {
-    sendJson(response, 200, { sessions: await tmux.listSessions() });
-    return;
-  }
-
-  if (url.pathname === "/api/sessions" && request.method === "POST") {
-    const body = parseCreateSession(await readJsonBody(request));
-    sendJson(response, 201, { session: await tmux.createSession(body) });
-    return;
-  }
-
-  const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
-  if (sessionMatch && request.method === "DELETE") {
-    const id = safeSessionId(sessionMatch[1] || "");
-    if (!(await tmux.getSession(id))) {
-      sendJson(response, 404, { error: "Session not found." });
-      return;
-    }
-    await tmux.killSession(id);
-    response.writeHead(204).end();
-    return;
-  }
-
-  if (url.pathname === "/api/workspaces" && request.method === "GET") {
-    sendJson(response, 200, { workspaces: await tmux.listWorkspaces() });
     return;
   }
 
@@ -443,7 +402,7 @@ async function routeRequest(
   if (url.pathname === "/api/projects" && request.method === "GET") {
     const [agents, workspaces, kinds] = await Promise.all([
       herdr ? herdr.listAgents() : undefined,
-      tmux.listWorkspaces(),
+      listWorkspaces(config.roots),
       agentKinds.list(),
     ]);
     const agentCwds = agents?.available ? agents.agents.map((agent) => agent.cwd) : [];
@@ -761,8 +720,8 @@ function bridgeTerminalV2(
     resumed = true;
   } else {
     // A resume miss (no attachment, epoch mismatch, or the offset already
-    // trimmed out of the ring) gets a fresh attach: tmux repaints the whole
-    // screen, so the client is complete again without replay.
+    // trimmed out of the ring) gets a fresh attach: herdr repaints the whole
+    // pane, so the client is complete again without replay.
     attachment?.dispose();
     attachment = attachments.create(target.key, target.spawn(), {
       detachedSize: target.detachedSize,

@@ -8,7 +8,6 @@ import { HerdrService } from "./herdr.js";
 import { HerdrEventFeed } from "./herdr-events.js";
 import { createMochaServer } from "./server.js";
 import { installService, uninstallService } from "./service.js";
-import { TmuxService } from "./tmux.js";
 
 const config = loadConfig();
 
@@ -69,22 +68,13 @@ if (process.argv[2] === "install-claude-hooks") {
   process.exit(0);
 }
 
-const tmux = new TmuxService({ bin: config.tmuxBin, shell: config.shell, roots: config.roots });
-
-try {
-  await tmux.version();
-} catch {
-  console.error(`Mocha requires tmux. Could not run: ${config.tmuxBin} -V`);
-  process.exit(1);
-}
-
 const herdr = new HerdrService({ socketPath: config.herdrSocket });
 const attention = new AttentionOverlay();
 const agentEvents = new AttentiveAgentEvents(
   new HerdrEventFeed(herdr, { socketPath: config.herdrSocket }),
   attention,
 );
-const server = await createMochaServer({ config, tmux, herdr, agentEvents, attention });
+const server = await createMochaServer({ config, herdr, agentEvents, attention });
 server.listen(config.port, config.bindHost, () => {
   console.log(`Mocha ${VERSION} is running on http://${config.bindHost}:${config.port}`);
   console.log(`Machine: ${config.machineName}`);

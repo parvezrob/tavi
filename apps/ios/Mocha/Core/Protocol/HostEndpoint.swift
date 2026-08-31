@@ -29,12 +29,11 @@ struct HostEndpoint: Equatable, Hashable, Sendable {
         self.baseURL = baseURL
     }
 
-    func terminalURL(for session: SessionIdentifier) throws -> URL {
-        try websocketURL(path: "/api/sessions/\(session.rawValue)/terminal")
-    }
-
-    func agentTerminalURL(for pane: SessionIdentifier) throws -> URL {
-        try websocketURL(path: "/api/agents/\(pane.rawValue)/terminal")
+    // The only terminal route: a herdr agent pane (#53). Pane ids come from
+    // the host's own agent list, so the path needs no validation of its
+    // own beyond the percent-encoding URLComponents applies.
+    func agentTerminalURL(forPane paneID: String) throws -> URL {
+        try websocketURL(path: "/api/agents/\(paneID)/terminal")
     }
 
     func eventsURL() throws -> URL {
@@ -80,35 +79,5 @@ enum HostEndpointError: Error, Equatable, LocalizedError {
         case .tailscaleServeRequired:
             "Enter a Tailscale Serve hostname ending in .ts.net."
         }
-    }
-}
-
-struct SessionIdentifier: Equatable, Hashable, Sendable {
-    let rawValue: String
-
-    init(rawValue: String) throws {
-        guard (1...128).contains(rawValue.count), rawValue.unicodeScalars.allSatisfy(Self.isAllowed) else {
-            throw SessionIdentifierError.invalidValue
-        }
-        self.rawValue = rawValue
-    }
-
-    private static func isAllowed(_ scalar: Unicode.Scalar) -> Bool {
-        switch scalar.value {
-        case 48...57, 65...90, 97...122:
-            true
-        case 45, 46, 58, 95:
-            true
-        default:
-            false
-        }
-    }
-}
-
-enum SessionIdentifierError: Error, Equatable, LocalizedError {
-    case invalidValue
-
-    var errorDescription: String? {
-        "Enter a valid tmux session identifier."
     }
 }

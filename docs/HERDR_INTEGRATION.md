@@ -43,7 +43,7 @@ CLI attach used by the terminal bridge: `herdr agent attach <pane_id>` (option `
 
 ## Shared-terminal sizing
 
-**Pane size is last-writer-wins, not smallest-client (verified live 2026-08-31, #44).** An external `agent attach` sets the pane's *terminal* size; herdr does not restore it when that client leaves, and its own viewer displays a fixed layout rect onto whatever the terminal is. While a phone (~44 cols) is attached the Mac is phone-sized too — inherent to a shared pty. On detach Mocha resizes the held pty back to the pane's viewer rect (`session.snapshot` → `layouts[].panes[].rect`, e.g. 174×49), which is exactly what the Mac displays. The earlier 250×80 "desktop-scale" claim was wrong here: it left the Mac looking at the top-left of an 80-row terminal with Claude's prompt off-screen. (tmux *does* clamp to the smallest client, so the tmux lane keeps the 250×80 claim.)
+**Pane size is last-writer-wins, not smallest-client (verified live 2026-08-31, #44).** An external `agent attach` sets the pane's *terminal* size; herdr does not restore it when that client leaves, and its own viewer displays a fixed layout rect onto whatever the terminal is. While a phone (~44 cols) is attached the Mac is phone-sized too — inherent to a shared pty. On detach Mocha resizes the held pty back to the pane's viewer rect (`session.snapshot` → `layouts[].panes[].rect`, e.g. 174×49), which is exactly what the Mac displays. The earlier 250×80 "desktop-scale" claim was wrong here: it left the Mac looking at the top-left of an 80-row terminal with Claude's prompt off-screen. When herdr cannot say what the Mac shows, the size is left alone (#53 removed the old 250×80 tmux claim with the tmux lane).
 
 ## Reported agents (plain terminals)
 

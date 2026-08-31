@@ -5,35 +5,54 @@ final class MochaUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    // Every terminal is a herdr agent pane (#53). A pane that does not
+    // exist must land on the honest not-attached state instead of a spinner
+    // or a fake prompt: the overlay is up, the keyboard key is disabled, and
+    // the banner says the connection failed.
     @MainActor
-    func testPresentsTheHonestTerminalDevelopmentJourney() throws {
+    func testShowsAnHonestNotAttachedTerminalForAMissingAgent() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live missing-agent test.")
+        }
+
         let app = XCUIApplication()
         app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
+        app.launchEnvironment["MOCHA_DEV_HOST"] = host
+        app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
+        app.launchEnvironment["MOCHA_DEV_AGENT"] = "mocha-ui-missing-pane"
         app.launch()
 
-        XCTAssertTrue(app.staticTexts["No Paired Computers"].waitForExistence(timeout: 3))
-        // The tmux card left the home (#26); it lives in the Host menu of
-        // development builds only.
-        XCTAssertFalse(app.buttons["sessions.openTerminal"].exists)
-        openDevelopmentTerminal(in: app)
-
         XCTAssertTrue(
-            app.descendants(matching: .any)["connection.sheet"].waitForExistence(timeout: 10)
+            app.descendants(matching: .any)["terminal.surface"].waitForExistence(timeout: 10)
         )
-        XCTAssertTrue(app.secureTextFields["connection.token"].exists)
-        app.buttons["Done"].tap()
-
         XCTAssertTrue(
-            app.descendants(matching: .any)["terminal.surface"].waitForExistence(timeout: 5)
+            app.descendants(matching: .any)["terminal.disconnected"].waitForExistence(timeout: 15),
+            "A missing pane never reached the not-attached state."
         )
-        XCTAssertTrue(app.descendants(matching: .any)["terminal.disconnected"].exists)
         XCTAssertTrue(app.buttons["terminal.keyboard"].exists)
         XCTAssertFalse(app.buttons["terminal.keyboard"].isEnabled)
-        XCTAssertTrue(app.staticTexts["Not connected"].exists)
+        let status = app.descendants(matching: .any)["terminal.status"]
+        XCTAssertTrue(status.exists)
+        XCTAssertTrue(
+            status.label.contains("Connection failed") || app.staticTexts["Connection failed"].exists,
+            "The banner did not say the connection failed: \(status.label)"
+        )
     }
 
+    // Renderer stress: open and close the same shell pane's terminal eight
+    // times with the injected corpus replaying into every fresh surface, a
+    // real attach underneath, and one background/foreground cycle midway.
     @MainActor
-    func testRepeatedlyFeedsCreatesAndDestroysTerminalSurface() throws {
+    func testRepeatedlyFeedsCreatesAndDestroysTerminalSurface() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live renderer stress test.")
+        }
+        let paneId = try await createDisposableShell(host: host, token: token)
+
         let app = XCUIApplication()
         let corpusData = try JSONEncoder().encode(try rendererStressChunks())
         app.launchEnvironment["MOCHA_DEV_RENDERER_STRESS_CHUNKS"] = String(
@@ -41,14 +60,17 @@ final class MochaUITests: XCTestCase {
             as: UTF8.self
         )
         app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
+        app.launchEnvironment["MOCHA_DEV_HOST"] = host
+        app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
         app.launch()
 
+        let row = app.buttons["sessions.agent.\(paneId)"]
         for iteration in 0..<8 {
-            XCTAssertTrue(app.buttons["sessions.hostMenu"].waitForExistence(timeout: 5))
-            openDevelopmentTerminal(in: app)
+            XCTAssertTrue(row.waitForExistence(timeout: 20), "The shell pane never appeared on the home.")
+            row.tap()
             let surface = app.descendants(matching: .any)["terminal.surface"]
             XCTAssertTrue(surface.waitForExistence(timeout: 5))
-            Thread.sleep(forTimeInterval: 0.75)
+            try await Task.sleep(for: .seconds(0.75))
             XCTAssertTrue((surface.value as? String)?.contains("streamed output line") == true)
 
             surface.tap()
@@ -63,28 +85,27 @@ final class MochaUITests: XCTestCase {
                 )
             }
 
-            let backButton = app.navigationBars["Terminal"].buttons.element(boundBy: 0)
+            let backButton = app.navigationBars.buttons.element(boundBy: 0)
             XCTAssertTrue(backButton.waitForExistence(timeout: 3))
             backButton.tap()
         }
 
-        XCTAssertTrue(app.staticTexts["No Paired Computers"].exists)
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
     }
 
     @MainActor
-    func testTerminalKeyboardLayout() throws {
-        let app = XCUIApplication()
-        let corpusData = try JSONEncoder().encode(try rendererStressChunks())
-        app.launchEnvironment["MOCHA_DEV_RENDERER_STRESS_CHUNKS"] = String(
-            decoding: corpusData,
-            as: UTF8.self
-        )
-        app.launch()
+    func testTerminalKeyboardLayout() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live keyboard layout test.")
+        }
+        let paneId = try await createDisposableShell(host: host, token: token)
+        let app = launchIntoAgent(paneId, host: host, token: token)
 
-        XCTAssertTrue(app.buttons["sessions.hostMenu"].waitForExistence(timeout: 5))
-        openDevelopmentTerminal(in: app)
         let surface = app.descendants(matching: .any)["terminal.surface"]
-        XCTAssertTrue(surface.waitForExistence(timeout: 5))
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForTranscript(of: surface, timeout: 10) { !$0.isEmpty })
 
         surface.tap()
         surface.typeText("echo mocha")
@@ -94,20 +115,27 @@ final class MochaUITests: XCTestCase {
         keepScreenshot(named: "Terminal without keyboard")
     }
 
+    // The injected corpus keeps the renderer busy while a burst of live
+    // typing goes to the real shell; the controls must stay reachable.
     @MainActor
-    func testSustainedTypingRemainsInteractiveUnderOutputLoad() throws {
-        let app = XCUIApplication()
+    func testSustainedTypingRemainsInteractiveUnderOutputLoad() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live sustained typing test.")
+        }
+        let paneId = try await createDisposableShell(host: host, token: token)
         let corpusData = try JSONEncoder().encode(try rendererStressChunks())
-        app.launchEnvironment["MOCHA_DEV_RENDERER_STRESS_CHUNKS"] = String(
-            decoding: corpusData,
-            as: UTF8.self
+        let app = launchIntoAgent(
+            paneId,
+            host: host,
+            token: token,
+            environment: ["MOCHA_DEV_RENDERER_STRESS_CHUNKS": String(decoding: corpusData, as: UTF8.self)]
         )
-        app.launch()
 
-        XCTAssertTrue(app.buttons["sessions.hostMenu"].waitForExistence(timeout: 5))
-        openDevelopmentTerminal(in: app)
         let surface = app.descendants(matching: .any)["terminal.surface"]
-        XCTAssertTrue(surface.waitForExistence(timeout: 5))
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForTranscript(of: surface, timeout: 10) { !$0.isEmpty })
 
         surface.tap()
         surface.typeText(String(repeating: "mocha123 ", count: 20))
@@ -115,7 +143,8 @@ final class MochaUITests: XCTestCase {
         let dismissKeyboard = app.buttons["terminal.dismissKeyboard"]
         XCTAssertTrue(dismissKeyboard.waitForExistence(timeout: 3))
         dismissKeyboard.tap()
-        XCTAssertTrue(app.navigationBars["Terminal"].exists)
+        XCTAssertTrue(app.navigationBars.firstMatch.exists)
+        XCTAssertTrue(surface.exists)
     }
 
     // Reproduces the live typing loop against a real host: keystrokes must
@@ -124,24 +153,14 @@ final class MochaUITests: XCTestCase {
     // connection, so it skips unless TEST_RUNNER_MOCHA_DEV_* variables are
     // set on the xcodebuild invocation.
     @MainActor
-    func testLiveTypingEchoesToTheScreenWhileKeyboardIsUp() throws {
+    func testLiveTypingEchoesToTheScreenWhileKeyboardIsUp() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let host = environment["MOCHA_DEV_HOST"],
-              let session = environment["MOCHA_DEV_SESSION"],
               let token = environment["MOCHA_DEV_TOKEN"] else {
-            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/SESSION/TOKEN to run the live echo test.")
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live echo test.")
         }
-
-        let app = XCUIApplication()
-        // Start from nothing persisted, then seed from the environment: a
-        // credential left by an earlier run (a pairing test, say) must never
-        // decide what this test connects with.
-        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
-        app.launchEnvironment["MOCHA_DEV_HOST"] = host
-        app.launchEnvironment["MOCHA_DEV_SESSION"] = session
-        app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
-        app.launchEnvironment["MOCHA_DEV_AUTO_OPEN_TERMINAL"] = "1"
-        app.launch()
+        let paneId = try await createDisposableShell(host: host, token: token)
+        let app = launchIntoAgent(paneId, host: host, token: token)
 
         let surface = app.descendants(matching: .any)["terminal.surface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
@@ -163,39 +182,28 @@ final class MochaUITests: XCTestCase {
     }
 
     // Issue #9: keyboard show/hide during continuous output must not leave
-    // stale rows or mis-scaled frames. The test drives the keyboard toggles
-    // with long settle windows; visual verification happens through simulator
-    // screenshots taken by the harness while it runs, and the transcript
-    // assertion proves streaming survived both transitions.
+    // stale rows or mis-scaled frames. The test starts an output loop in its
+    // own shell pane, drives the keyboard toggles with long settle windows,
+    // and proves streaming survived both transitions through the transcript.
     @MainActor
-    func testKeyboardToggleDuringLiveStreamingKeepsReceivingOutput() throws {
+    func testKeyboardToggleDuringLiveStreamingKeepsReceivingOutput() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let host = environment["MOCHA_DEV_HOST"],
-              let session = environment["MOCHA_DEV_SESSION"],
               let token = environment["MOCHA_DEV_TOKEN"] else {
-            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/SESSION/TOKEN to run the live resize test.")
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live resize test.")
         }
-
-        let app = XCUIApplication()
-        // Start from nothing persisted, then seed from the environment: a
-        // credential left by an earlier run (a pairing test, say) must never
-        // decide what this test connects with.
-        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
-        app.launchEnvironment["MOCHA_DEV_HOST"] = host
-        app.launchEnvironment["MOCHA_DEV_SESSION"] = session
-        app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
-        app.launchEnvironment["MOCHA_DEV_AUTO_OPEN_TERMINAL"] = "1"
-        app.launch()
+        let paneId = try await createDisposableShell(host: host, token: token)
+        let app = launchIntoAgent(paneId, host: host, token: token)
 
         let surface = app.descendants(matching: .any)["terminal.surface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
         XCTAssertTrue(waitForTranscript(of: surface, timeout: 10) { !$0.isEmpty })
 
-        surface.tap()
-        Thread.sleep(forTimeInterval: 10)
+        startOutputLoop(on: surface)
+        try await Task.sleep(for: .seconds(10))
 
         app.buttons["terminal.dismissKeyboard"].tap()
-        Thread.sleep(forTimeInterval: 8)
+        try await Task.sleep(for: .seconds(8))
 
         let before = (surface.value as? String) ?? ""
         XCTAssertTrue(
@@ -209,37 +217,48 @@ final class MochaUITests: XCTestCase {
     // screenshots during the settle windows; the assertions prove the
     // gesture leaves the surface healthy and still receiving output.
     @MainActor
-    func testTouchScrollLeavesStreamingHealthy() throws {
+    func testTouchScrollLeavesStreamingHealthy() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let host = environment["MOCHA_DEV_HOST"],
-              let session = environment["MOCHA_DEV_SESSION"],
               let token = environment["MOCHA_DEV_TOKEN"] else {
-            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/SESSION/TOKEN to run the live scroll test.")
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live scroll test.")
         }
-
-        let app = XCUIApplication()
-        // Start from nothing persisted, then seed from the environment: a
-        // credential left by an earlier run (a pairing test, say) must never
-        // decide what this test connects with.
-        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
-        app.launchEnvironment["MOCHA_DEV_HOST"] = host
-        app.launchEnvironment["MOCHA_DEV_SESSION"] = session
-        app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
-        app.launchEnvironment["MOCHA_DEV_AUTO_OPEN_TERMINAL"] = "1"
-        app.launch()
+        let paneId = try await createDisposableShell(host: host, token: token)
+        let app = launchIntoAgent(paneId, host: host, token: token)
 
         let surface = app.descendants(matching: .any)["terminal.surface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
         XCTAssertTrue(waitForTranscript(of: surface, timeout: 10) { !$0.isEmpty })
 
-        surface.swipeDown()
-        surface.swipeDown()
-        Thread.sleep(forTimeInterval: 6)
+        startOutputLoop(on: surface)
+        app.buttons["terminal.dismissKeyboard"].tap()
+        try await Task.sleep(for: .seconds(4))
 
-        surface.swipeUp()
-        surface.swipeUp()
-        surface.swipeUp()
-        Thread.sleep(forTimeInterval: 4)
+        surface.swipeDown()
+        surface.swipeDown()
+        try await Task.sleep(for: .seconds(6))
+
+        // Scrolled into history, herdr's attach viewer — like tmux before it
+        // — freezes the frame and sends nothing until the next event; that
+        // is scrollback working, not a broken stream. Flick back down until
+        // the live tail streams again. Each flick's momentum keeps producing
+        // wheel events for about a second and every event round-trips to the
+        // host for a redraw, so the check first lets that burst die down and
+        // then demands two spaced spontaneous updates — a lone straggler
+        // redraw can never satisfy it.
+        var atLiveTail = false
+        var flicks = 0
+        while !atLiveTail, flicks < 15 {
+            surface.swipeUp()
+            flicks += 1
+            try await Task.sleep(for: .seconds(2.5))
+            let parked = (surface.value as? String) ?? ""
+            guard waitForTranscript(of: surface, timeout: 2, until: { $0 != parked }) else { continue }
+            let changedOnce = (surface.value as? String) ?? ""
+            atLiveTail = waitForTranscript(of: surface, timeout: 2) { $0 != changedOnce }
+        }
+        XCTAssertTrue(atLiveTail, "Flicking back down never returned the viewport to the live tail.")
+        try await Task.sleep(for: .seconds(4))
 
         let before = (surface.value as? String) ?? ""
         XCTAssertTrue(
@@ -550,7 +569,7 @@ final class MochaUITests: XCTestCase {
 
     // #26 acceptance: the home reads computer → project → agents. Two
     // disposable terminals in two different folders must land under two
-    // project headers beneath the paired computer, with no tmux card.
+    // project headers beneath the paired computer.
     @MainActor
     func testHomeGroupsAgentsByComputerAndProject() async throws {
         let environment = ProcessInfo.processInfo.environment
@@ -615,7 +634,6 @@ final class MochaUITests: XCTestCase {
                 XCTAssertLessThan(rows[index], headers[other], "Row \(index) sits under the other folder's header.")
             }
         }
-        XCTAssertFalse(app.buttons["sessions.openTerminal"].exists, "The tmux card is back on the home.")
         keepScreenshot(named: "home-grouped-by-project")
     }
 
@@ -734,11 +752,16 @@ final class MochaUITests: XCTestCase {
         XCTAssertTrue(
             app.descendants(matching: .any)["terminal.jumpSheet"].waitForExistence(timeout: 5)
         )
+        // The tree lists every workspace and tab on the host; the current
+        // pane's row can sit below the sheet's medium detent, so scroll the
+        // sheet until its badge is on screen.
         let currentBadge = app.staticTexts["Current"]
-        XCTAssertTrue(
-            currentBadge.waitForExistence(timeout: 5),
-            "The Jump sheet never badged the current pane."
-        )
+        var badgeVisible = currentBadge.waitForExistence(timeout: 5)
+        for _ in 0 ..< 6 where !badgeVisible {
+            app.descendants(matching: .any)["terminal.jumpSheet"].swipeUp()
+            badgeVisible = currentBadge.waitForExistence(timeout: 2)
+        }
+        XCTAssertTrue(badgeVisible, "The Jump sheet never badged the current pane.")
         app.buttons["Done"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["terminal.surface"].waitForExistence(timeout: 3))
 
@@ -1107,12 +1130,47 @@ final class MochaUITests: XCTestCase {
         _ = try await URLSession.shared.data(for: request)
     }
 
-    // The raw tmux terminal is a Host-menu item in development builds (#26).
+    // The terminal tests run in a shell pane of their own (#42) inside a real
+    // project folder, closed again in teardown — the owner's live agents are
+    // never touched.
+    private func createDisposableShell(host: String, token: String) async throws -> String {
+        let project = try await knownProjectPath(host: host, token: token)
+        let (paneId, tabId) = try await createAgentTab(host: host, token: token, cwd: project, agent: "shell")
+        addTeardownBlock {
+            try? await Self.closeAgentTab(host: host, token: token, tabId: tabId)
+        }
+        return paneId
+    }
+
+    // Launch straight into one pane's terminal (MOCHA_DEV_AGENT), starting
+    // from nothing persisted: a credential left by an earlier run must never
+    // decide what this test connects with.
     @MainActor
-    private func openDevelopmentTerminal(in app: XCUIApplication) {
-        app.buttons["sessions.hostMenu"].tap()
-        XCTAssertTrue(app.buttons["sessions.openTerminal"].waitForExistence(timeout: 5))
-        app.buttons["sessions.openTerminal"].tap()
+    private func launchIntoAgent(
+        _ paneId: String,
+        host: String,
+        token: String,
+        environment: [String: String] = [:]
+    ) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
+        app.launchEnvironment["MOCHA_DEV_HOST"] = host
+        app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
+        app.launchEnvironment["MOCHA_DEV_AGENT"] = paneId
+        for (key, value) in environment {
+            app.launchEnvironment[key] = value
+        }
+        app.launch()
+        return app
+    }
+
+    // A shell pane prints nothing on its own. Typing a loop into it keeps
+    // the screen changing for the rest of the test; closing the tab in
+    // teardown ends the loop.
+    @MainActor
+    private func startOutputLoop(on surface: XCUIElement) {
+        surface.tap()
+        surface.typeText("while true; do echo streamed output line $RANDOM; sleep 0.2; done\n")
     }
 
     @MainActor

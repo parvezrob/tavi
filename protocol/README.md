@@ -21,7 +21,6 @@ This document preserves the transport contract used by the native Mocha client. 
 - On first start, a valid legacy `~/.agent-deck/config.json` token is copied atomically into `~/.mocha/config.json`; the legacy file remains as a rollback source.
 - Conflicting current and legacy credentials stop startup with an actionable error. The host never guesses which shell-access credential is authoritative.
 - Legacy `DECK_*` environment variables are rejected. Reinstall the service or rename the variables explicitly.
-- Existing `deck-*` tmux sessions remain discoverable and attachable, while every new managed session uses the `mocha-*` prefix.
 
 ## HTTP authentication
 
@@ -81,66 +80,9 @@ Host-token only: list paired devices (`{ "devices": [{ "id", "name", "pairedAt",
   "platform": "darwin",
   "arch": "arm64",
   "version": "0.1.0",
-  "tmuxVersion": "tmux 3.5a"
+  "fingerprint": "99F5 7AF0 · E678 C534"
 }
 ```
-
-### `GET /api/sessions`
-
-Returns `{ "sessions": SessionInfo[] }`, ordered by most recent activity.
-
-```json
-{
-  "sessions": [
-    {
-      "id": "mocha-api-work-a1b2c3",
-      "name": "api work",
-      "createdAt": 1787086800000,
-      "activeAt": 1787086860000,
-      "attached": 1,
-      "windows": 2,
-      "cwd": "/Users/example/Projects/api",
-      "command": "codex",
-      "managed": true,
-      "agent": "codex"
-    }
-  ]
-}
-```
-
-`agent` is one of `shell`, `codex`, `claude`, or `custom`. It is inferred from the tmux pane command and is descriptive, not proof of semantic agent state.
-
-### `POST /api/sessions`
-
-Request:
-
-```json
-{
-  "name": "API work",
-  "cwd": "/Users/example/Projects/api",
-  "agent": "codex"
-}
-```
-
-`name` is 1–80 characters, `cwd` must be an accessible absolute directory, and `agent` must be a supported value. A `custom` agent requires a non-empty `command`; other agents may also supply a command override. Commands are limited to 4,096 characters.
-
-Returns `{ "session": SessionInfo }` with status `201`.
-
-### `DELETE /api/sessions/{id}`
-
-Stops the tmux session. Returns `204` on success or `404` when it no longer exists. Session IDs are limited to 1–128 characters from `A-Z`, `a-z`, `0-9`, `_`, `.`, `:`, and `-`.
-
-### `GET /api/workspaces`
-
-```json
-{
-  "workspaces": [
-    { "name": "api", "path": "/Users/example/Projects/api", "git": true }
-  ]
-}
-```
-
-The host returns configured roots and their immediate visible child directories, with Git roots first.
 
 ### `GET /api/projects`
 
@@ -170,7 +112,7 @@ Everything a client needs to choose where a new agent starts.
 
 `agents` is every agent kind the host's herdr can launch, in the host's preferred order, with a display label and whether the executable resolves on the Mac's login-shell PATH. Clients offer only installed kinds for creation; the rest are listed so a missing agent is explainable rather than absent.
 
-`recent` merges the folders agents are running in right now (`active: true`) with the folders this host has previously launched an agent in. Folders with a live agent come first, then the most recently chosen; `lastUsedAt` is absent for a folder known only from a live agent, and a remembered folder that no longer exists on disk is omitted rather than offered. `name` is the folder's basename. `withinRoots` says whether the folder sits inside `roots`, so a client can mark the folders whose creation will require the confirmation described below instead of discovering it after a failed request. `workspaces` is the same scan as `GET /api/workspaces`.
+`recent` merges the folders agents are running in right now (`active: true`) with the folders this host has previously launched an agent in. Folders with a live agent come first, then the most recently chosen; `lastUsedAt` is absent for a folder known only from a live agent, and a remembered folder that no longer exists on disk is omitted rather than offered. `name` is the folder's basename. `withinRoots` says whether the folder sits inside `roots`, so a client can mark the folders whose creation will require the confirmation described below instead of discovering it after a failed request. `workspaces` is the configured roots and their immediate visible child directories, Git roots first.
 
 `roots` may be empty — a host with none of the default project directories and no `MOCHA_ROOTS` configures no roots at all, and then *every* create requires the confirmation below. Path comparison is case- and Unicode-normalization-insensitive, matching the default macOS filesystem.
 
@@ -198,8 +140,10 @@ Creates a Herdr tab and launches an agent in it.
 Connect to:
 
 ```text
-wss://<tailnet-host>/api/sessions/{id}/terminal
+wss://<tailnet-host>/api/agents/{paneId}/terminal
 ```
+
+`paneId` is a herdr pane id from `GET /api/agents` (1–128 characters from `A-Z`, `a-z`, `0-9`, `_`, `.`, `:`, `-`). The host attaches through `herdr agent attach`; herdr owns the durable pane and its process.
 
 Send the access token in the standard authorization header:
 
@@ -207,7 +151,7 @@ Send the access token in the standard authorization header:
 Authorization: Bearer <token>
 ```
 
-Offer only the `mocha.v1` WebSocket subprotocol. The server must select that exact protocol; a missing or unsupported protocol returns HTTP `400` before session lookup or PTY creation. Authentication failure returns `401`, and an unknown session returns `404` before upgrade.
+Offer only the `mocha.v1` WebSocket subprotocol. The server must select that exact protocol; a missing or unsupported protocol returns HTTP `400` before pane lookup or PTY creation. Authentication failure returns `401`, an unknown pane returns `404`, and a Herdr that is not running returns `503` before upgrade.
 
 Every application frame is a UTF-8 JSON text frame no larger than 64 KiB. Binary frames return an error and close with code `1003`; oversized client frames return an error and close with code `1009`. The host chunks large PTY output into bounded frames and pauses the temporary PTY attachment when the WebSocket send buffer crosses its high-water mark. On connection the host creates the attachment using `TERM=xterm-256color` and true color.
 
@@ -257,7 +201,7 @@ Connection liveness probe:
 { "type": "error", "message": "Invalid terminal message." }
 ```
 
-`signal` is optional. Unknown or malformed messages return an `error` without writing to the PTY. A normal PTY exit closes the socket with code `1000`. Failure to open the terminal closes with code `1011`. Closing the socket kills only the temporary attachment PTY; tmux continues to own the durable session and its child process.
+`signal` is optional. Unknown or malformed messages return an `error` without writing to the PTY. A normal PTY exit closes the socket with code `1000`. Failure to open the terminal closes with code `1011`. Closing the socket ends only the temporary attachment PTY; herdr continues to own the durable pane and its child process.
 
 The shared compatibility fixtures live in [`fixtures/terminal-v1/`](./fixtures/terminal-v1/). They are synthetic and contain no captured prompts, terminal contents, credentials, or private paths.
 
@@ -280,10 +224,10 @@ The v2 `ready` message carries the stream epoch and the client's starting offset
 To resume after a drop, reconnect with query parameters:
 
 ```text
-wss://<host>/api/sessions/{id}/terminal?stream=<epoch>&resume=<offset>
+wss://<host>/api/agents/{paneId}/terminal?stream=<epoch>&resume=<offset>
 ```
 
-where `offset` is the absolute offset one past the last byte the client has rendered. On a hit (`resumed: true`) the host replays exactly the missed bytes — no gap, no duplication. On any miss (attachment gone or exited, epoch mismatch, offset trimmed out of the ring) the host discards the old attachment, spawns a fresh attach (tmux repaints the full screen), and answers `resumed: false` with a new `stream` and `offset` — the client must reset its offset counter to `offset`.
+where `offset` is the absolute offset one past the last byte the client has rendered. On a hit (`resumed: true`) the host replays exactly the missed bytes — no gap, no duplication. On any miss (attachment gone or exited, epoch mismatch, offset trimmed out of the ring) the host discards the old attachment, spawns a fresh attach (herdr repaints the full pane), and answers `resumed: false` with a new `stream` and `offset` — the client must reset its offset counter to `offset`.
 
 ### Binary output frames
 

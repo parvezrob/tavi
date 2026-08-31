@@ -16,9 +16,9 @@ Build the pinned custom-I/O GhosttyKit dependency before working on the terminal
 
 The script downloads checksum-verified Zig 0.15.2, checks out Ghostty commit `91fe505e60bbe72ff08c881d2882acad6a56cb9f`, applies Mocha's reviewed downstream patches, and creates a local ignored `Frameworks/GhosttyKit.xcframework` symlink. The binary is intentionally not committed. Xcode 26 requires its separately distributed Metal Toolchain; if it is missing, install it with `xcodebuild -downloadComponent MetalToolchain`.
 
-For the Phase 1 development route, start the host with `npm run dev:host`, open **Open terminal**, and enter the Tailscale Serve HTTPS origin, an existing tmux session ID, and the host token. Debug builds also accept `MOCHA_DEV_HOST`, `MOCHA_DEV_SESSION`, and `MOCHA_DEV_TOKEN` as transient launch-environment values for automated simulator qualification. Never add the token to a shared scheme, source file, test fixture, command log, or committed configuration.
+Every terminal is a herdr agent pane reached through the host's agent route. Debug builds accept `MOCHA_DEV_HOST` and `MOCHA_DEV_TOKEN` as transient launch-environment values for automated simulator qualification, and `MOCHA_DEV_AGENT=<paneId>` opens that pane's terminal straight from launch. Never add the token to a shared scheme, source file, test fixture, command log, or committed configuration.
 
-The terminal connection requires a Tailscale Serve `.ts.net` HTTPS/WSS origin, rejects credentials embedded in URLs, sends the token through the standard `Authorization` header, retains it only in process memory for reconnect, and never automatically replays input whose delivery is uncertain. Mocha cannot determine from the hostname whether Funnel is enabled, so keep Funnel disabled. Closing the mobile attachment does not kill the tmux-owned session.
+The terminal connection requires a Tailscale Serve `.ts.net` HTTPS/WSS origin, rejects credentials embedded in URLs, sends the token through the standard `Authorization` header, retains it only in process memory for reconnect, and never automatically replays input whose delivery is uncertain. Mocha cannot determine from the hostname whether Funnel is enabled, so keep Funnel disabled. Closing the mobile attachment does not kill the herdr-owned pane.
 
 Build and test the baseline on the current iPhone simulator runtime:
 

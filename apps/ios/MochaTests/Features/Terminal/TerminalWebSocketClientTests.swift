@@ -15,7 +15,7 @@ struct TerminalWebSocketClientTests {
         try await client.connect(configuration: connectionConfiguration(), resume: nil)
         #expect(await client.receive() == .failed(.authenticationRejected))
         try await client.connect(configuration: connectionConfiguration(), resume: nil)
-        #expect(await client.receive() == .failed(.sessionNotFound))
+        #expect(await client.receive() == .failed(.agentNotFound))
 
         #expect(unauthorized.cancelCodes == [.goingAway])
         #expect(missing.cancelCodes == [.goingAway])
@@ -111,7 +111,7 @@ struct TerminalWebSocketClientTests {
     private func connectionConfiguration() throws -> TerminalConnectionConfiguration {
         try TerminalConnectionConfiguration(
             host: HostEndpoint(baseURL: #require(URL(string: "https://mac.tailnet.ts.net"))),
-            sessionID: SessionIdentifier(rawValue: "fixture"),
+            paneID: "fixture",
             credential: "secret"
         )
     }

@@ -3,15 +3,6 @@ import { randomUUID } from "node:crypto";
 export const RESUME_BUFFER_BYTES = 1024 * 1024;
 export const DETACHED_RETENTION_MS = 120_000;
 const MAX_BUFFER_CHUNK_BYTES = 64 * 1024;
-// tmux clamps a shared session to its smallest live client, so while a
-// phone is attached the Mac is phone-sized too. On detach the held pty
-// claims a desktop-scale grid and the desktop's own clamp wins. This is the
-// fallback for targets that cannot say what the desktop is showing; herdr
-// targets pass `detachedSize` instead (#44) — herdr does *not* clamp, it
-// keeps the last size it was told, so an oversized claim left the Mac
-// looking at the top-left corner of an 80-row terminal.
-export const DETACHED_COLUMNS = 250;
-export const DETACHED_ROWS = 80;
 
 export interface TerminalSize {
   cols: number;
@@ -37,8 +28,10 @@ export interface AttachmentOptions {
   maxBufferBytes?: number | undefined;
   onDispose?: (() => void) | undefined;
   // The size to hand the terminal back to when the phone detaches: what the
-  // desktop is actually displaying. Resolving `undefined` leaves the size
-  // alone (small but complete beats large and cropped).
+  // desktop is actually displaying (#44). herdr keeps the last size it was
+  // told, so an oversized guess would leave the Mac cropped; resolving
+  // `undefined` — or having no way to ask — leaves the size alone (small but
+  // complete beats large and cropped).
   detachedSize?: (() => Promise<TerminalSize | undefined>) | undefined;
 }
 
@@ -133,10 +126,7 @@ export class TerminalAttachment {
     this.client = undefined;
     if (this.disposed) return;
     this.scheduleRetention();
-    if (!this.detachedSize) {
-      this.safeResize({ cols: DETACHED_COLUMNS, rows: DETACHED_ROWS });
-      return;
-    }
+    if (!this.detachedSize) return;
     void this.detachedSize().then((size) => {
       // A phone may have re-claimed in the meantime; its size then wins.
       if (size && this.client === undefined && !this.disposed) this.safeResize(size);

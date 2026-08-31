@@ -24,7 +24,6 @@ const LEGACY_ENVIRONMENT_KEYS = [
   "DECK_TOKEN",
   "DECK_STATE_DIR",
   "DECK_MACHINE_NAME",
-  "DECK_TMUX_BIN",
   "DECK_SHELL",
   "DECK_ROOTS",
 ] as const;
@@ -43,7 +42,6 @@ export interface HostConfig {
   port: number;
   token: string;
   shell: string;
-  tmuxBin: string;
   herdrSocket: string;
   roots: string[];
   stateDir: string;
@@ -89,7 +87,6 @@ export function loadConfig(options: LoadConfigOptions = {}): HostConfig {
     port: Number.isFinite(rawPort) && rawPort > 0 && rawPort < 65_536 ? rawPort : 8787,
     token: env.MOCHA_TOKEN || getOrCreateToken(stateDir, legacyStateDir),
     shell: env.MOCHA_SHELL || env.SHELL || (operatingSystem === "win32" ? "powershell.exe" : "/bin/sh"),
-    tmuxBin: env.MOCHA_TMUX_BIN || "tmux",
     herdrSocket:
       env.MOCHA_HERDR_SOCKET || path.join(homeDirectory, ".config", "herdr", "herdr.sock"),
     roots: configuredRoots?.length ? configuredRoots : defaultRoots(homeDirectory),

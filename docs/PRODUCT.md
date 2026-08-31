@@ -19,7 +19,7 @@ When away from a computer, open one fast surface, see every active coding sessio
 - Pair and switch between multiple computers.
 - Discover configured project folders.
 - Launch Codex, Claude Code, a shell, or a custom command.
-- List and attach to existing tmux sessions.
+- List and attach to existing Herdr agents.
 - Preserve terminal state across mobile disconnects.
 - Reconnect automatically after network changes.
 - Provide a multiline prompt composer and terminal control row.

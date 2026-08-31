@@ -4,13 +4,19 @@ import Testing
 
 struct HostEndpointTests {
     @Test
-    func buildsSecureTerminalURL() throws {
+    func buildsSecureAgentTerminalURL() throws {
         let endpoint = try HostEndpoint(baseURL: #require(URL(string: "https://studio.tailnet.ts.net")))
-        let session = try SessionIdentifier(rawValue: "mocha-api-work-a1b2c3")
 
-        let terminalURL = try endpoint.terminalURL(for: session)
+        let terminalURL = try endpoint.agentTerminalURL(forPane: "wB:p1")
 
-        #expect(terminalURL.absoluteString == "wss://studio.tailnet.ts.net/api/sessions/mocha-api-work-a1b2c3/terminal")
+        #expect(terminalURL.absoluteString == "wss://studio.tailnet.ts.net/api/agents/wB:p1/terminal")
+    }
+
+    @Test
+    func buildsSecureEventsURL() throws {
+        let endpoint = try HostEndpoint(baseURL: #require(URL(string: "https://studio.tailnet.ts.net")))
+
+        #expect(try endpoint.eventsURL().absoluteString == "wss://studio.tailnet.ts.net/api/events")
     }
 
     @Test(arguments: [
@@ -26,13 +32,6 @@ struct HostEndpointTests {
 
         #expect(throws: HostEndpointError.self) {
             try HostEndpoint(baseURL: url)
-        }
-    }
-
-    @Test(arguments: ["", "contains space", "slash/not-allowed", String(repeating: "a", count: 129)])
-    func rejectsInvalidSessionIdentifiers(_ value: String) {
-        #expect(throws: SessionIdentifierError.invalidValue) {
-            try SessionIdentifier(rawValue: value)
         }
     }
 }

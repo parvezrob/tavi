@@ -67,23 +67,16 @@ final class TerminalSessionController {
         }
     }
 
-    func connect(
-        hostText: String,
-        sessionText: String,
-        credential: String,
-        target: TerminalTargetKind = .tmuxSession
-    ) {
+    func connect(hostText: String, paneID: String, credential: String) {
         do {
             guard let url = URL(string: hostText) else {
                 throw HostEndpointError.invalidURL
             }
             let host = try HostEndpoint(baseURL: url)
-            let sessionID = try SessionIdentifier(rawValue: sessionText)
             let configuration = try TerminalConnectionConfiguration(
                 host: host,
-                sessionID: sessionID,
-                credential: credential,
-                target: target
+                paneID: paneID,
+                credential: credential
             )
             self.configuration = configuration
             errorMessage = nil
@@ -146,14 +139,10 @@ final class TerminalSessionController {
         configuration == nil
     }
 
-    // Identity of the connected target, for the terminal header and the
+    // Identity of the connected pane, for the terminal header and the
     // Jump-to sheet's "Current" badge.
-    var currentSessionID: String? {
-        configuration?.sessionID.rawValue
-    }
-
-    var currentTargetKind: TerminalTargetKind? {
-        configuration?.target
+    var currentPaneID: String? {
+        configuration?.paneID
     }
 
     func sendQuickKey(_ key: TerminalQuickKey) {

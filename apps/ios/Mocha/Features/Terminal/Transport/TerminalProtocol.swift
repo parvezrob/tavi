@@ -16,33 +16,19 @@ struct TerminalResumePoint: Sendable, Equatable {
     let offset: UInt64
 }
 
-enum TerminalTargetKind: Sendable, Equatable {
-    case tmuxSession
-    case herdrAgent
-}
-
+// A terminal is always one herdr agent pane on one host (#53).
 struct TerminalConnectionConfiguration: Sendable {
     let endpoint: URL
     let credential: String
-    let sessionID: SessionIdentifier
-    let target: TerminalTargetKind
+    let paneID: String
 
-    init(
-        host: HostEndpoint,
-        sessionID: SessionIdentifier,
-        credential: String,
-        target: TerminalTargetKind = .tmuxSession
-    ) throws {
+    init(host: HostEndpoint, paneID: String, credential: String) throws {
         guard !credential.isEmpty else {
             throw TerminalTransportError.missingCredential
         }
-        self.endpoint = switch target {
-        case .tmuxSession: try host.terminalURL(for: sessionID)
-        case .herdrAgent: try host.agentTerminalURL(for: sessionID)
-        }
+        self.endpoint = try host.agentTerminalURL(forPane: paneID)
         self.credential = credential
-        self.sessionID = sessionID
-        self.target = target
+        self.paneID = paneID
     }
 }
 
@@ -135,6 +121,7 @@ enum TerminalTransportEvent: Sendable, Equatable {
 }
 
 enum TerminalTransportError: Error, LocalizedError, Sendable, Equatable {
+    case agentNotFound
     case alreadyConnected
     case authenticationRejected
     case deliveryUncertain
@@ -144,10 +131,11 @@ enum TerminalTransportError: Error, LocalizedError, Sendable, Equatable {
     case notConnected
     case oversizedFrame
     case protocolMismatch
-    case sessionNotFound
 
     var errorDescription: String? {
         switch self {
+        case .agentNotFound:
+            "That agent pane no longer exists on the host."
         case .alreadyConnected:
             "A terminal connection is already active."
         case .authenticationRejected:
@@ -166,15 +154,13 @@ enum TerminalTransportError: Error, LocalizedError, Sendable, Equatable {
             "The terminal message exceeded the safety limit."
         case .protocolMismatch:
             "The host does not support Mocha's terminal protocol version."
-        case .sessionNotFound:
-            "That tmux session no longer exists on the host."
         }
     }
 
     var isPermanentConnectionFailure: Bool {
         switch self {
-        case .authenticationRejected, .handshakeRejected, .invalidFrame,
-             .oversizedFrame, .protocolMismatch, .sessionNotFound:
+        case .agentNotFound, .authenticationRejected, .handshakeRejected,
+             .invalidFrame, .oversizedFrame, .protocolMismatch:
             true
         case .alreadyConnected, .deliveryUncertain, .missingCredential, .notConnected:
             false

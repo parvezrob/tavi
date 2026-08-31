@@ -13,7 +13,7 @@ Mocha has two persistent roots—**Sessions** and **Inbox**—plus a separate **
 ## 2. Locked navigation principles
 
 1. **Two destinations, not a dashboard taxonomy.** The bottom dock contains `Sessions` and `Inbox`; the separate `+` button opens actions and is not a third tab.
-2. **Terminal is focused and full-screen.** Opening a terminal hides the root dock. Minimizing returns to the originating screen and never kills tmux, Herdr, or the CLI.
+2. **Terminal is focused and full-screen.** Opening a terminal hides the root dock. Minimizing returns to the originating screen and never kills Herdr or the CLI.
 3. **Management is contextual.** Hosts, diagnostics, paired devices, and settings live behind the connection-health control rather than permanent root tabs.
 4. **Hierarchy appears where it is useful.** The Home does not flatten host → server session → workspace → tab → pane. `Jump to` exposes that hierarchy inside the terminal.
 5. **Structured context never traps the user.** Every trustworthy request detail offers `Open Terminal`; unsupported or ambiguous sessions open the terminal directly.
@@ -111,7 +111,6 @@ flowchart TD
 `T1` adapts without changing the surrounding terminal:
 
 - **Herdr:** workspace → tab, with Current and trustworthy attention state.
-- **tmux:** session → window → pane.
 - **Generic terminal:** hide `Jump` when there is no meaningful alternate target.
 
 ## 6. Host management and settings
@@ -231,7 +230,7 @@ The terminal is presented from the app coordinator rather than owned by one tab,
 - A terminal-only session reaches the exact PTY with one tap from Home.
 - Request detail always identifies host, session, freshness, and state provenance.
 - Terminal minimize, app background, and navigation back never terminate host work.
-- Jump selects the correct Herdr or tmux target and restores expected focus before input.
+- Jump selects the correct Herdr target and restores expected focus before input.
 - Offline, revoked, expired, and ambiguous-input states fail safely without dead ends.
 - VoiceOver, Dynamic Type, Reduce Motion, Increase Contrast, camera-denial fallback, and hardware keyboard paths are covered in the navigation prototype.
 

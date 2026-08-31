@@ -18,17 +18,16 @@ Native iPhone app
    Tailscale Serve
         │ localhost only
         ▼
- Mocha host ── node-pty ── tmux ── codex / claude / shell / anything
+ Mocha host ── node-pty ── herdr ── codex / claude / shell / anything
 ```
 
-`tmux` owns process lifetime, so an agent keeps running when the phone locks, changes networks, or disconnects. The host only translates terminal input/output to a small WebSocket protocol. There is no cloud relay and no agent-specific orchestration layer.
+[herdr](https://herdr.dev) owns process lifetime, so an agent keeps running when the phone locks, changes networks, or disconnects. The host only translates terminal input/output to a small WebSocket protocol. There is no cloud relay and no agent-specific orchestration layer.
 
 ## Quick start on macOS
 
-Requirements: Node.js 20+, `tmux`, and Tailscale on both the computer and phone.
+Requirements: Node.js 20+, [herdr](https://herdr.dev) (the terminal workspace the agents run in), and Tailscale on both the computer and phone.
 
 ```bash
-brew install tmux
 npm install
 npm run build
 npm run service:install
@@ -89,7 +88,6 @@ Copy [`.env.example`](./.env.example) or set environment variables before runnin
 | `MOCHA_PORT` | `8787` | Local host port. |
 | `MOCHA_TOKEN` | generated | Pairing token. Existing prototype credentials migrate atomically to `~/.mocha/config.json`. |
 | `MOCHA_ROOTS` | common folders in home | Comma-separated roots shown in the project launcher. |
-| `MOCHA_TMUX_BIN` | `tmux` | tmux executable or absolute path. |
 | `MOCHA_SHELL` | login shell | Shell used to identify shell sessions. |
 | `MOCHA_MACHINE_NAME` | hostname | Display name sent to the phone. |
 
@@ -103,10 +101,10 @@ If you change configuration after installing the macOS service, run `npm run ser
 - Treat the token as shell access. Anyone who has it and can reach the service can execute commands as your user.
 - Do not use Tailscale Funnel or expose port `8787` directly to the public internet.
 
-Tailscale documents that Serve proxies a localhost service over tailnet-only HTTPS and applies tailnet access rules: [Tailscale Serve documentation](https://tailscale.com/docs/features/tailscale-serve). The host terminal layer uses [node-pty](https://github.com/microsoft/node-pty) and [tmux sessions](https://man7.org/linux/man-pages/man1/tmux.1.html); the native client standardizes on a pinned GhosttyKit/Metal renderer.
+Tailscale documents that Serve proxies a localhost service over tailnet-only HTTPS and applies tailnet access rules: [Tailscale Serve documentation](https://tailscale.com/docs/features/tailscale-serve). The host terminal layer uses [node-pty](https://github.com/microsoft/node-pty) over `herdr agent attach`; the native client standardizes on a pinned GhosttyKit/Metal renderer.
 
 ## Current boundary
 
-Mocha can attach to any tmux session and can launch any CLI. It cannot take over an arbitrary process that was started in a normal terminal or inside a vendor's GUI app; that process must already be in tmux, or be resumed from a new CLI session using the vendor's own resume command.
+Mocha can attach to any herdr pane and can launch any CLI herdr knows. It cannot take over an arbitrary process that was started in a normal terminal or inside a vendor's GUI app; that process must already be running in herdr, or be resumed from a new CLI session using the vendor's own resume command.
 
 That boundary is intentional. The universal primitive is the terminal, which preserves vendor independence and avoids maintaining a brittle adapter for every agent.

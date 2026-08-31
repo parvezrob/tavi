@@ -65,7 +65,7 @@ struct TerminalConnectionTests {
 
         controller.connect(
             hostText: "https://mac.tailnet.ts.net",
-            sessionText: "fixture",
+            paneID: "fixture",
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
@@ -99,7 +99,7 @@ struct TerminalConnectionTests {
 
         controller.connect(
             hostText: "https://mac.tailnet.ts.net",
-            sessionText: "fixture",
+            paneID: "fixture",
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
@@ -134,7 +134,7 @@ struct TerminalConnectionTests {
 
         controller.connect(
             hostText: "https://mac.tailnet.ts.net",
-            sessionText: "fixture",
+            paneID: "fixture",
             credential: "valid-token"
         )
         #expect(controller.connectionState == .connecting)
@@ -163,7 +163,7 @@ struct TerminalConnectionTests {
 
         controller.connect(
             hostText: "https://mac.tailnet.ts.net",
-            sessionText: "fixture",
+            paneID: "fixture",
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-a", offset: 0, resumed: false)))
@@ -216,7 +216,7 @@ struct TerminalConnectionTests {
 
         controller.connect(
             hostText: "https://mac.tailnet.ts.net",
-            sessionText: "fixture",
+            paneID: "fixture",
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
@@ -239,7 +239,7 @@ struct TerminalConnectionTests {
 
         controller.connect(
             hostText: "https://mac.tailnet.ts.net",
-            sessionText: "fixture",
+            paneID: "fixture",
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
@@ -263,7 +263,7 @@ struct TerminalConnectionTests {
 
         controller.connect(
             hostText: "https://mac.tailnet.ts.net",
-            sessionText: "fixture",
+            paneID: "fixture",
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
@@ -292,7 +292,7 @@ struct TerminalConnectionTests {
 
         controller.connect(
             hostText: "https://mac.tailnet.ts.net",
-            sessionText: "fixture",
+            paneID: "fixture",
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
@@ -315,14 +315,14 @@ struct TerminalConnectionTests {
 
     @Test
     @MainActor
-    func reattachingTheRendererRequestsATmuxRedraw() async throws {
+    func reattachingTheRendererRequestsARedraw() async throws {
         let transport = ScriptedTerminalTransport()
         let controller = TerminalSessionController(client: transport)
         let resize = TerminalClientMessage.resize(columns: 80, rows: 24)
 
         controller.connect(
             hostText: "https://mac.tailnet.ts.net",
-            sessionText: "fixture",
+            paneID: "fixture",
             credential: "valid-token"
         )
         controller.terminalGridDidChange(TerminalGridSize(columns: 80, rows: 24))
@@ -348,7 +348,7 @@ struct TerminalConnectionTests {
 
         controller.connect(
             hostText: "https://mac.tailnet.ts.net",
-            sessionText: "fixture",
+            paneID: "fixture",
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
@@ -387,7 +387,7 @@ struct TerminalConnectionTests {
 
         controller.connect(
             hostText: "https://mac.tailnet.ts.net",
-            sessionText: "fixture",
+            paneID: "fixture",
             credential: "wrong-token"
         )
         try await waitUntil { controller.connectionState == .failed }
@@ -421,7 +421,7 @@ struct TerminalConnectionTests {
 
         controller.connect(
             hostText: "https://mac.tailnet.ts.net",
-            sessionText: "fixture",
+            paneID: "fixture",
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
@@ -458,7 +458,7 @@ struct TerminalConnectionTests {
 
         controller.connect(
             hostText: "https://mac.tailnet.ts.net",
-            sessionText: "fixture",
+            paneID: "fixture",
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
@@ -501,7 +501,7 @@ struct TerminalConnectionTests {
 
         controller.connect(
             hostText: "https://mac.tailnet.ts.net",
-            sessionText: "fixture",
+            paneID: "fixture",
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))

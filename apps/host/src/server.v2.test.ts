@@ -10,18 +10,18 @@ import test from "node:test";
 import type { IPty } from "node-pty";
 import WebSocket from "ws";
 import type { HostConfig } from "./config.js";
+import type { HerdrAgentSource } from "./herdr.js";
 import { OUTPUT_FRAME_HEADER_BYTES, OUTPUT_FRAME_TYPE, TERMINAL_PROTOCOL_V2 } from "./protocol.js";
 import { AgentKindDetector } from "./agent-kinds.js";
 import { ProjectHistory } from "./projects.js";
 import { createMochaServer, type MochaServerOptions } from "./server.js";
-import type { ServerTerminalMessage, SessionBackend } from "./types.js";
+import type { ServerTerminalMessage } from "./types.js";
 
 const config: HostConfig = {
   bindHost: "127.0.0.1",
   port: 0,
   token: "test-token-that-is-long-enough",
   shell: "/bin/zsh",
-  tmuxBin: "tmux",
   herdrSocket: path.join(tmpdir(), "mocha-v2-test-herdr.sock"),
   roots: [tmpdir()],
   stateDir: tmpdir(),
@@ -355,7 +355,7 @@ class FakeTerminal {
     pid: 1,
     cols: 100,
     rows: 30,
-    process: "tmux",
+    process: "herdr",
     handleFlowControl: true,
     onData: (listener: (data: string) => void) => {
       this.dataListener = listener;
@@ -388,6 +388,36 @@ class FakeTerminal {
   }
 }
 
+// The bridge's backend when a test does not bring its own herdr: one pane,
+// "fixture", attached through the herdr CLI.
+function fixtureHerdr(): HerdrAgentSource {
+  const agent = {
+    id: "fixture",
+    agent: "claude",
+    status: "idle" as const,
+    cwd: "/work",
+    title: "",
+    workspaceId: "wB",
+    tabId: "wB:t1",
+    focused: false,
+    revision: 1,
+    authority: "herdr" as const,
+  };
+  return {
+    listAgents: async () => ({ provider: "herdr" as const, available: true, protocol: 17, agents: [agent] }),
+    listTree: async () => ({ available: true as const, workspaces: [] }),
+    closeTab: async () => ({ closed: true as const }),
+    findAgent: async (paneId: string) =>
+      paneId === agent.id ? { available: true as const, agent } : { available: true as const },
+    attachCommand: (paneId: string) => ({ bin: "herdr", args: ["agent", "attach", paneId] }),
+    readAgent: async () => ({ available: true as const, preview: "" }),
+    readDialog: async () => ({ present: false as const }),
+    decideAgent: async () => ({ decided: true as const, sent: "Enter" }),
+    promptAgent: async () => ({ submitted: true as const }),
+    createTab: async () => ({ created: true as const, paneId: "wB:p9", tabId: "wB:t9" }),
+  };
+}
+
 class TerminalHarness {
   readonly terminals: FakeTerminal[] = [];
   agentEvents: MochaServerOptions["agentEvents"];
@@ -399,18 +429,13 @@ class TerminalHarness {
   }
 
   async startServer(): Promise<Server> {
-    const tmux = {
-      getSession: async () => ({ id: "fixture" }),
-      attachCommand: (id: string) => ({ bin: "tmux", args: ["attach-session", "-t", id] }),
-    } as unknown as SessionBackend;
     const server = await createMochaServer({
       config,
-      tmux,
       // Never the developer's real state directory: creating an agent
       // records the folder, and that must not leak between test runs.
       projects: new ProjectHistory(mkdtempSync(path.join(tmpdir(), "mocha-v2-state-"))),
       agentKinds: new AgentKindDetector({ shell: "/bin/sh", runShell: async () => "claude\n" }),
-      ...(this.herdr ? { herdr: this.herdr } : {}),
+      herdr: this.herdr ?? fixtureHerdr(),
       ...(this.agentEvents ? { agentEvents: this.agentEvents } : {}),
       spawnTerminal: (bin, args) => {
         this.recordSpawn?.(bin as string, args as string[]);
@@ -430,7 +455,7 @@ class TerminalHarness {
   async openSocket(
     server: Server,
     query = "",
-    path = "/api/sessions/fixture/terminal",
+    path = "/api/agents/fixture/terminal",
   ): Promise<V2Socket> {
     const address = server.address() as AddressInfo;
     const suffix = query ? `?${query}` : "";

@@ -427,7 +427,7 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
 
     // Ghostty drops mouse reports whose cursor position was never set (the
     // embedded default is off-viewport), so the position must be fed before
-    // scroll events for tmux mouse-wheel reporting to work.
+    // scroll events for mouse-wheel reporting to a TUI in mouse mode to work.
     private func updateMousePosition(_ location: CGPoint) {
         guard let surface else { return }
         ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)

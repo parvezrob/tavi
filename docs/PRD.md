@@ -8,7 +8,7 @@
 
 ## 1. Product summary
 
-Mocha is a native mobile control plane for terminal coding agents running on computers the user controls. It aggregates durable tmux and Herdr sessions across hosts, identifies sessions needing attention when a trustworthy signal exists, resumes the exact terminal, and enables short, safe interventions from a phone.
+Mocha is a native mobile control plane for terminal coding agents running on computers the user controls. It aggregates durable Herdr agent sessions across hosts, identifies sessions needing attention when a trustworthy signal exists, resumes the exact terminal, and enables short, safe interventions from a phone.
 
 Mocha does not run models, proxy provider API calls, or replace Codex, Claude Code, or other official CLIs.
 
@@ -35,7 +35,7 @@ Enable a user away from their computer to identify, inspect, and unblock the rig
 
 ### User A: single-machine mobile intervention
 
-Starts Codex or Claude Code in tmux/Herdr on a Mac, leaves the desk, receives or notices a waiting session, reads the immediate context, sends an answer, and disconnects.
+Starts Codex or Claude Code in Herdr on a Mac, leaves the desk, receives or notices a waiting session, reads the immediate context, sends an answer, and disconnects.
 
 ### User B: multi-host supervisor
 
@@ -53,7 +53,7 @@ Runs an unsupported CLI or ordinary shell. Mocha cannot supply structured status
 - Disconnect is normal.
 - Typing is expensive.
 - Unknown state is better than wrong state.
-- Structured views must always offer terminal fallback: every agent on the home opens its real terminal. (The raw tmux lane is a DEBUG-only development route since #26.)
+- Structured views must always offer terminal fallback: every agent on the home opens its real terminal.
 - Provider integrations are optional capabilities, never the runtime foundation.
 
 ## 7. V1 release scope
@@ -80,7 +80,7 @@ Runs an unsupported CLI or ordinary shell. Mocha cannot supply structured status
 - Name, reorder, reconnect, edit, and remove hosts.
 - Display connection health, last seen, round-trip latency, and path classification when detectable.
 - Support private HTTPS endpoints; Tailscale Serve is the recommended remote path.
-- Pairing completion explicitly states that closing or disconnecting the phone does not stop tmux/Herdr sessions.
+- Pairing completion explicitly states that closing or disconnecting the phone does not stop Herdr sessions.
 
 ### 7.3 Home and attention queue
 
@@ -93,15 +93,7 @@ Runs an unsupported CLI or ordinary shell. Mocha cannot supply structured status
 
 ### 7.4 tmux provider
 
-(Since #26 this provider has no release-build entry point: it is the DEBUG Host-menu "Open tmux terminal (dev)" route and the Herdr-down development fallback. It stays specified so Phase D can decide to restore or delete it.)
-
-- Discover existing sessions, windows, and panes.
-- Create a session in a chosen working directory with a selected command.
-- Attach/detach without ending the process.
-- Resize PTY with device rotation and keyboard changes.
-- Resume exact session/window/pane.
-- Kill or rename only through explicit confirmation.
-- Do not claim semantic `working`, `blocked`, or `done` state without a separate trustworthy signal.
+Removed (#53, 2026-08-31). Herdr is the only backend; there is no separate multiplexer lane. Kept as a heading so cross-references resolve.
 
 ### 7.5 Herdr provider
 
@@ -117,7 +109,7 @@ Runs an unsupported CLI or ordinary shell. Mocha cannot supply structured status
 
 - GhosttyKit terminal engine rendered with Metal, supplied through a pinned, reproducibly built XCFramework.
 - Terminal integration isolated behind `AgentTerminalView`; Ghostty upgrades require physical-device qualification and an explicit version decision.
-- VT/xterm-compatible rendering suitable for Codex, Claude Code, shells, tmux, and Herdr.
+- VT/xterm-compatible rendering suitable for Codex, Claude Code, shells, and Herdr.
 - True color, Unicode, emoji, combining characters, and wide glyphs.
 - Low-latency streaming and resize.
 - Selection, copy, paste, and OSC 52 clipboard support with a security preference.
@@ -144,7 +136,7 @@ Runs an unsupported CLI or ordinary shell. Mocha cannot supply structured status
 
 ### 7.8 Reliability
 
-- tmux/Herdr owns process lifetime; the phone connection never owns agent lifetime.
+- Herdr owns process lifetime; the phone connection never owns agent lifetime.
 - Automatically reconnect after brief network loss, app foreground, and endpoint changes.
 - Resume with an explicit stale/offline indicator until the latest state is confirmed.
 - Apply backpressure and bound terminal scrollback/memory.
@@ -195,7 +187,7 @@ Runs an unsupported CLI or ordinary shell. Mocha cannot supply structured status
 | --- | --- | --- | --- |
 | FR-001 | Pair a host through QR | Must | New device receives a revocable credential without manual token copying. |
 | FR-002 | List multiple hosts | Must | Online/offline/unknown states and last seen are correct after refresh. |
-| FR-003 | List tmux sessions | Must | Existing sessions appear without changing or restarting them. |
+| FR-003 | List Herdr agents | Must | Existing agents appear without changing or restarting them. |
 | FR-004 | List Herdr workspaces/agents | Must | Hierarchy, status, and provenance match Herdr's documented output. |
 | FR-005 | Exact one-tap resume | Must | Card opens the correct host and terminal target. |
 | FR-006 | Native interactive terminal | Must | Reference TUI corpus renders and accepts input on physical iPhone. |
@@ -256,7 +248,7 @@ Session becomes stale → app prevents ambiguous send → reconnect with backoff
 
 ### Leave safely
 
-Observe the state transition or fresh output → detach or background the app → tmux/Herdr continues to own the process → return later to the same exact target.
+Observe the state transition or fresh output → detach or background the app → Herdr continues to own the process → return later to the same exact target.
 
 ### Recover from an offline or untrusted state
 
@@ -270,7 +262,7 @@ Show cached context as stale → display last seen and path diagnostics → with
 | Working | Agent is actively processing or executing. | Herdr lifecycle authority, provider protocol, declared screen manifest with provenance. |
 | Done / ready to review | Work completed since the user last viewed it. | Herdr rollup/event or provider protocol. |
 | Idle | Session exists and is not known to be active/blocked. | Multiplexer plus authority-specific state. |
-| Unknown | Session exists but semantic state is unavailable or stale. | Default for generic tmux/terminal sessions. |
+| Unknown | Session exists but semantic state is unavailable or stale. | Default for a pane without a trustworthy status source (e.g. a plain shell). |
 | Offline | Host cannot currently be reached. | Connection layer. |
 
 ## 15. Success criteria

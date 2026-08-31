@@ -8,18 +8,19 @@ Practical knowledge for building, deploying, and verifying Mocha end-to-end. Pol
 - **Deploying host changes:** the service runs `dist/`, not watch mode. From `apps/host`: `npm run build && npm run service:install` (install boots the old instance out and kickstarts the new one). `npm run dev` remains available for iteration but is not how the phone connects.
 - Pair a phone: `npm run pair` in `apps/host` prints a QR (needs the service running and Tailscale Serve up; `-- --url https://…` overrides the detected address). `npm run devices` lists paired phones; `npm run devices revoke <id|name>` cuts one immediately. State: `~/.mocha/devices.json` (credential hashes only) and `~/.mocha/identity.json` (the host fingerprint key).
 - Reveal the host's own token: `npm run token` in `apps/host` — the CLI/dev credential, never handed to a phone once pairing is in use.
-- The launchd plist sets a UTF-8 `LANG` deliberately: without a locale, tmux sanitizes the `\x1f` list-format field separator to `_` and session parsing breaks.
+- The launchd plist sets a UTF-8 `LANG` deliberately: launchd provides no locale, and agents, the pty bridge, and herdr's NDJSON all assume UTF-8.
 - Host tests: `npm test` in `apps/host`. `herdr-events.test.ts` has a rare timing flake — rerun before trusting a failure.
 
 ## iOS
 
 - Simulator verification loop (no taps needed):
   1. `xcodebuild -scheme Mocha -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build`
-  2. Launch with the DEBUG bootstrap: `SIMCTL_CHILD_MOCHA_DEV_HOST=<https tailscale url> SIMCTL_CHILD_MOCHA_DEV_SESSION=<tmux session> SIMCTL_CHILD_MOCHA_DEV_TOKEN=$(npm run -s token) SIMCTL_CHILD_MOCHA_DEV_AUTO_OPEN_TERMINAL=1 xcrun simctl launch <sim udid> com.parvezrob.mocha`
-  3. Inject from outside via `tmux -L mocha send-keys`, verify with `xcrun simctl io <udid> screenshot` and `log show --info --predicate 'subsystem == "com.parvezrob.mocha"'`.
-- The raw tmux terminal is not on the home since #26. In DEBUG builds it is Host menu → **"Open tmux terminal (dev)"** (accessibility id `sessions.openTerminal`); `MOCHA_DEV_AUTO_OPEN_TERMINAL=1` still opens it without taps. The tmux-lane UI tests reach it through `openDevelopmentTerminal(in:)`. Release builds have no tmux route at all.
+  2. Pick a pane: `GET /api/agents` lists them, or create a shell pane with `POST /api/herdr/tabs` body `{"agent":"shell","cwd":"<abs dir>"}` (returns `paneId`/`tabId`; `DELETE /api/herdr/tabs/{tabId}` closes it).
+  3. Launch with the DEBUG bootstrap: `SIMCTL_CHILD_MOCHA_DEV_HOST=<https tailscale url> SIMCTL_CHILD_MOCHA_DEV_TOKEN=$(npm run -s token) SIMCTL_CHILD_MOCHA_DEV_AGENT=<paneId> xcrun simctl launch <sim udid> com.parvezrob.mocha` — the app opens that pane's terminal straight away.
+  4. Inject output by typing in the pane (herdr on the Mac, or the simulator's own keyboard into the surface); verify with `xcrun simctl io <udid> screenshot` and `log show --info --predicate 'subsystem == "com.parvezrob.mocha"'`.
+- Every terminal is a herdr agent pane (#53); there is no other terminal route. `MOCHA_DEV_AGENT` is the only way to open one without a tap, and a pane id that does not exist lands on the honest not-attached surface (`terminal.disconnected`).
 - **`MOCHA_DEV_HOST` must be the Tailscale Serve HTTPS URL.** The app enforces HTTPS + `.ts.net`; `http://127.0.0.1` fails as "Connection failed" and makes every live UI test fail with a misleading "output did not reach the screen".
-- Live UI tests need `TEST_RUNNER_MOCHA_DEV_HOST/SESSION/TOKEN` **exported** (CLI assignments to xcodebuild do not reach the runner). `testTouchScrollLeavesStreamingHealthy` needs an ambient output loop running in the target session; it generates none itself.
+- Live UI tests need `TEST_RUNNER_MOCHA_DEV_HOST/TOKEN` **exported** (CLI assignments to xcodebuild do not reach the runner). The terminal tests create their own shell pane in `knownProjectPath` (`createDisposableShell`), open it through `MOCHA_DEV_AGENT` (`launchIntoAgent`), and close the tab in teardown; the streaming tests type their own output loop into that pane (`startOutputLoop`).
 - UI-test failure details: `xcrun xcresulttool get test-results tests --path <latest .xcresult under DerivedData/.../Logs/Test>`.
 - Physical device install: `xcrun devicectl device install app --device <udid> <DerivedData>/Build/Products/Debug-iphoneos/Mocha.app` — the phone must be unlocked and plugged in; "unavailable" resolves by unlocking and retrying.
 - **"App no longer available" on the phone = the development profile expired.** The owner's signing team is a free Apple ID, whose profiles last **7 days**; the app then refuses to launch even though nothing changed. Fix: rebuild with `xcodebuild … -allowProvisioningUpdates build` (mints a fresh profile) and reinstall. Check the current expiry with `security cms -D -i <Mocha.app>/embedded.mobileprovision` → `ExpirationDate`. A paid Apple Developer account (needed for TestFlight anyway) removes the 7-day limit.
@@ -33,11 +34,10 @@ Practical knowledge for building, deploying, and verifying Mocha end-to-end. Pol
 - Join key: the hook's `session_id` equals herdr's `agent_session.value` (`sessionRef` on the wire). Agents without a session ref are never overlaid.
 - Verified live 2026-08-26: permission ask → `blocked · claude-hook` on `/api/agents` and the events feed within seconds, persists while unanswered, clears on approval via `PostToolUse`.
 
-## tmux lane
+## Running herdr on the host
 
-- No release-build UI reaches this lane since #26 (DEBUG Host menu only). It remains the Herdr-down development fallback.
-- Everything runs on the dedicated socket `tmux -L mocha`. Managed sessions get `escape-time 10`, `focus-events on`, `status off`, `mouse on`.
-- Test sessions in use: `mocha-phone` (owner's), `mocha-sim`, `mocha-uitest` (kill leftover streaming loops with `C-c` before reuse).
+- herdr's server needs a PTY to start. On the owner's Mac it currently runs inside a detached tmux session (`tmux -L mocha new-session -d -s herdr-host 'herdr'`); that is an ops convenience on that machine only — Mocha itself no longer uses or requires tmux (#53). Running herdr as a service is part of the one-command install (#47).
+- Stop it with `herdr server stop`. When it is down the phone shows the degraded card and keeps retrying; there is no other terminal route.
 
 ## Transport quick reference
 

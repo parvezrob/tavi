@@ -16,14 +16,13 @@ import type { HerdrAgentSource, HerdrTabRequest } from "./herdr.js";
 import { DeviceRegistry, PairingSessions } from "./pairing.js";
 import { ProjectHistory } from "./projects.js";
 import { createMochaServer } from "./server.js";
-import type { ServerTerminalMessage, SessionBackend } from "./types.js";
+import type { ServerTerminalMessage } from "./types.js";
 
 const config: HostConfig = {
   bindHost: "127.0.0.1",
   port: 0,
   token: "test-token-that-is-long-enough",
   shell: "/bin/sh",
-  tmuxBin: "tmux",
   herdrSocket: "/tmp/mocha-test-herdr.sock",
   roots: [],
   stateDir: "/tmp",
@@ -78,7 +77,7 @@ test("agents endpoint serves herdr state and degrades honestly without it", asyn
       ],
     }),
   };
-  const server = await createMochaServer({ config, tmux: {} as SessionBackend, herdr });
+  const server = await createMochaServer({ config, herdr });
   await listen(server);
 
   try {
@@ -114,7 +113,7 @@ test("agents endpoint serves herdr state and degrades honestly without it", asyn
     await close(server);
   }
 
-  const bareServer = await createMochaServer({ config, tmux: {} as SessionBackend });
+  const bareServer = await createMochaServer({ config });
   await listen(bareServer);
   try {
     const address = bareServer.address() as AddressInfo;
@@ -162,7 +161,7 @@ test("claude hook events overlay blocked status with hook authority", async () =
     readDialog: async () => ({ present: false as const }),
     decideAgent: async () => ({ decided: true as const, sent: "Enter" }),
   };
-  const server = await createMochaServer({ config, tmux: {} as SessionBackend, herdr, attention });
+  const server = await createMochaServer({ config, herdr, attention });
   await listen(server);
 
   try {
@@ -242,7 +241,7 @@ test("decision endpoint fires only when an authority flags the agent as waiting"
     promptAgent: async () => ({ submitted: true as const }),
     createTab: async () => ({ created: true as const, paneId: "wB:p9", tabId: "wB:t9" }),
   };
-  const server = await createMochaServer({ config, tmux: {} as SessionBackend, herdr, attention });
+  const server = await createMochaServer({ config, herdr, attention });
   await listen(server);
 
   try {
@@ -286,8 +285,7 @@ test("a phone pairs with a single-use code and gets a credential of its own (#45
   const stateDir = mkdtempSync(path.join(tmpdir(), "mocha-pair-state-"));
   const devices = new DeviceRegistry(stateDir, undefined, () => {});
   const pairing = new PairingSessions();
-  const tmux = { version: async () => "tmux 3.4" } as unknown as SessionBackend;
-  const server = await createMochaServer({ config, tmux, devices, pairing });
+  const server = await createMochaServer({ config, devices, pairing });
   await listen(server);
 
   try {
@@ -400,7 +398,6 @@ test("revoking a phone closes its open event stream within the recheck interval 
   const { device, credential } = devices.add("phone");
   const server = await createMochaServer({
     config,
-    tmux: {} as SessionBackend,
     devices,
     authorizationRecheckMs: 20,
   });
@@ -435,12 +432,9 @@ test("the project picker serves live agent folders, remembered choices, and root
   projects.remember(api);
 
   const herdr = stubHerdr({ cwd: web });
-  const tmux = {
-    listWorkspaces: async () => [{ name: "api", path: api, git: true }],
-  } as unknown as SessionBackend;
   const server = await createMochaServer({
     config: { ...config, roots: [root] },
-    tmux,
+    listWorkspaces: async () => [{ name: "api", path: api, git: true }],
     herdr,
     projects,
     agentKinds: new AgentKindDetector({ shell: "/bin/sh", runShell: async () => "codex\n" }),
@@ -493,7 +487,6 @@ test("creating an agent requires a real folder and confirmation outside the root
   });
   const server = await createMochaServer({
     config: { ...config, roots: [root] },
-    tmux: {} as SessionBackend,
     herdr,
     projects,
     agentKinds: new AgentKindDetector({
@@ -567,20 +560,17 @@ test("creating an agent requires a real folder and confirmation outside the root
 
 test("terminal websocket authenticates and bridges typed protocol messages", async () => {
   const terminal = new FakeTerminal();
-  const tmux = {
-    getSession: async () => ({ id: "fixture" }),
-    attachCommand: (id: string) => ({ bin: "tmux", args: ["-L", "mocha", "attach-session", "-t", id] }),
-  } as unknown as SessionBackend;
+  const herdr = terminalHerdr();
   const server = await createMochaServer({
     config,
-    tmux,
+    herdr,
     spawnTerminal: () => terminal.pty,
   });
   await listen(server);
 
   const address = server.address() as AddressInfo;
   const websocket = new WebSocket(
-    `ws://127.0.0.1:${address.port}/api/sessions/fixture/terminal`,
+    `ws://127.0.0.1:${address.port}/api/agents/fixture/terminal`,
     [TERMINAL_PROTOCOL],
     { headers: { Authorization: `Bearer ${config.token}` } },
   );
@@ -695,13 +685,10 @@ test("terminal attach uses the backend attach command without pty flow control",
   let spawnedFile = "";
   let spawnedArgs: string[] = [];
   let spawnedOptions: Record<string, unknown> = {};
-  const tmux = {
-    getSession: async () => ({ id: "fixture" }),
-    attachCommand: (id: string) => ({ bin: "tmux", args: ["-L", "mocha", "attach-session", "-t", id] }),
-  } as unknown as SessionBackend;
+  const herdr = terminalHerdr();
   const server = await createMochaServer({
     config,
-    tmux,
+    herdr,
     spawnTerminal: (file, args, options) => {
       spawnedFile = file;
       spawnedArgs = [...(args as string[])];
@@ -713,7 +700,7 @@ test("terminal attach uses the backend attach command without pty flow control",
 
   const address = server.address() as AddressInfo;
   const websocket = new WebSocket(
-    `ws://127.0.0.1:${address.port}/api/sessions/fixture/terminal`,
+    `ws://127.0.0.1:${address.port}/api/agents/fixture/terminal`,
     [TERMINAL_PROTOCOL],
     { headers: { Authorization: `Bearer ${config.token}` } },
   );
@@ -721,8 +708,8 @@ test("terminal attach uses the backend attach command without pty flow control",
   try {
     await once(websocket, "open");
     await waitUntil(() => spawnedFile !== "");
-    assert.equal(spawnedFile, "tmux");
-    assert.deepEqual(spawnedArgs, ["-L", "mocha", "attach-session", "-t", "fixture"]);
+    assert.equal(spawnedFile, "herdr");
+    assert.deepEqual(spawnedArgs, ["agent", "attach", "fixture"]);
     assert.equal("handleFlowControl" in spawnedOptions, false);
   } finally {
     await closeWebSocket(websocket);
@@ -735,7 +722,6 @@ test("terminal websocket rejects missing credentials before spawning a pty", asy
   let spawnCount = 0;
   const server = await createMochaServer({
     config,
-    tmux: {} as SessionBackend,
     spawnTerminal: (..._args) => {
       spawnCount += 1;
       return new FakeTerminal().pty;
@@ -746,7 +732,7 @@ test("terminal websocket rejects missing credentials before spawning a pty", asy
   try {
     const address = server.address() as AddressInfo;
     const status = await rejectedUpgradeStatus(
-      `ws://127.0.0.1:${address.port}/api/sessions/fixture/terminal`,
+      `ws://127.0.0.1:${address.port}/api/agents/fixture/terminal`,
     );
     assert.equal(status, 401);
     assert.equal(spawnCount, 0);
@@ -755,18 +741,13 @@ test("terminal websocket rejects missing credentials before spawning a pty", asy
   }
 });
 
-test("terminal websocket rejects an unsupported protocol before session lookup", async () => {
+test("terminal websocket rejects an unsupported protocol before pane lookup", async () => {
   let lookupCount = 0;
   let spawnCount = 0;
-  const tmux = {
-    getSession: async () => {
-      lookupCount += 1;
-      return { id: "fixture" };
-    },
-  } as unknown as SessionBackend;
+  const herdr = terminalHerdr({ onLookup: () => { lookupCount += 1; } });
   const server = await createMochaServer({
     config,
-    tmux,
+    herdr,
     spawnTerminal: (..._args) => {
       spawnCount += 1;
       return new FakeTerminal().pty;
@@ -777,7 +758,7 @@ test("terminal websocket rejects an unsupported protocol before session lookup",
   try {
     const address = server.address() as AddressInfo;
     const status = await rejectedUpgradeStatus(
-      `ws://127.0.0.1:${address.port}/api/sessions/fixture/terminal`,
+      `ws://127.0.0.1:${address.port}/api/agents/fixture/terminal`,
       ["unsupported.v1"],
       { Authorization: `Bearer ${config.token}` },
     );
@@ -791,12 +772,10 @@ test("terminal websocket rejects an unsupported protocol before session lookup",
 
 test("terminal websocket returns not found before spawning a pty", async () => {
   let spawnCount = 0;
-  const tmux = {
-    getSession: async () => undefined,
-  } as unknown as SessionBackend;
+  const herdr = terminalHerdr({ known: [] });
   const server = await createMochaServer({
     config,
-    tmux,
+    herdr,
     spawnTerminal: (..._args) => {
       spawnCount += 1;
       return new FakeTerminal().pty;
@@ -807,7 +786,7 @@ test("terminal websocket returns not found before spawning a pty", async () => {
   try {
     const address = server.address() as AddressInfo;
     const status = await rejectedUpgradeStatus(
-      `ws://127.0.0.1:${address.port}/api/sessions/missing/terminal`,
+      `ws://127.0.0.1:${address.port}/api/agents/missing/terminal`,
       [TERMINAL_PROTOCOL],
       { Authorization: `Bearer ${config.token}` },
     );
@@ -852,8 +831,25 @@ function stubHerdr(
   };
 }
 
+// A herdr that knows the given pane ids and attaches through the herdr CLI
+// — the terminal bridge's only backend.
+function terminalHerdr(options: { known?: string[]; onLookup?: () => void } = {}): HerdrAgentSource {
+  const known = options.known ?? ["fixture"];
+  const base = stubHerdr();
+  return {
+    ...base,
+    findAgent: async (paneId: string) => {
+      options.onLookup?.();
+      const agent = (await base.listAgents()).agents[0];
+      return known.includes(paneId) && agent
+        ? { available: true as const, agent: { ...agent, id: paneId } }
+        : { available: true as const };
+    },
+  };
+}
+
 async function withServer(run: (origin: string) => Promise<void>): Promise<void> {
-  const server = await createMochaServer({ config, tmux: {} as SessionBackend });
+  const server = await createMochaServer({ config });
   await listen(server);
 
   try {
@@ -869,20 +865,17 @@ async function openTerminalSocket(terminal: FakeTerminal): Promise<{
   websocket: WebSocket;
   messages: AsyncGenerator<ServerTerminalMessage>;
 }> {
-  const tmux = {
-    getSession: async () => ({ id: "fixture" }),
-    attachCommand: (id: string) => ({ bin: "tmux", args: ["-L", "mocha", "attach-session", "-t", id] }),
-  } as unknown as SessionBackend;
+  const herdr = terminalHerdr();
   const server = await createMochaServer({
     config,
-    tmux,
+    herdr,
     spawnTerminal: () => terminal.pty,
   });
   await listen(server);
 
   const address = server.address() as AddressInfo;
   const websocket = new WebSocket(
-    `ws://127.0.0.1:${address.port}/api/sessions/fixture/terminal`,
+    `ws://127.0.0.1:${address.port}/api/agents/fixture/terminal`,
     [TERMINAL_PROTOCOL],
     { headers: { Authorization: `Bearer ${config.token}` } },
   );
@@ -969,7 +962,7 @@ class FakeTerminal {
     pid: 1,
     cols: 100,
     rows: 30,
-    process: "tmux",
+    process: "herdr",
     handleFlowControl: true,
     onData: (listener: (data: string) => void) => {
       this.dataListener = listener;

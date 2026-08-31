@@ -3,8 +3,8 @@ import SwiftUI
 // Sessions home (ROADMAP Phase C): what needs the user leads, running work
 // follows, finished work drops to a quiet recent list. The mockups in
 // docs/assets are reference; the binding contract is PRD §7.1 and the
-// navigation map. The home reads computer → project → agents (#26); the
-// raw tmux terminal is a development-build fallback in the Host menu.
+// navigation map. The home reads computer → project → agents (#26), and
+// every terminal is one herdr agent pane (#53).
 struct SessionsView: View {
     @Environment(\.scenePhase) private var scenePhase
     // Development connection storage; Phase D replaces this with QR pairing
@@ -69,14 +69,6 @@ struct SessionsView: View {
                             showingHostForm = true
                         }
                         .accessibilityIdentifier("sessions.hostSettings")
-                        // The tmux lane left the home (#26). It stays
-                        // reachable in development builds as the fallback
-                        // when Herdr is down (ROADMAP Phase C item 8) and
-                        // as the entry point for the terminal UI tests.
-                        Button("Open tmux terminal (dev)", systemImage: "terminal") {
-                            terminalIsPresented = true
-                        }
-                        .accessibilityIdentifier("sessions.openTerminal")
                         #endif
                     } label: {
                         Label("Host", systemImage: "desktopcomputer")
@@ -146,10 +138,13 @@ struct SessionsView: View {
                 refreshComputerName()
                 agentDirectory.configure(hostText: storedHost, credential: storedToken)
                 #if DEBUG
-                // Scripted development runs (simulator automation) jump
-                // straight to the terminal without a tap.
-                if ProcessInfo.processInfo.environment["MOCHA_DEV_AUTO_OPEN_TERMINAL"] == "1" {
-                    terminalIsPresented = true
+                // Scripted development runs and the terminal UI tests jump
+                // straight into one agent's terminal without a tap. The
+                // pane is attached by id because the agent list may not
+                // have loaded yet; a pane that does not exist fails
+                // honestly on the terminal itself.
+                if let paneID = TerminalDevelopmentBootstrap.launchEnvironment().agentPaneID {
+                    openAgent(paneID: paneID)
                 }
                 #endif
             }
@@ -399,13 +394,12 @@ struct SessionsView: View {
     }
 
     private func openAgent(_ agent: AgentSummary) {
+        openAgent(paneID: agent.id)
+    }
+
+    private func openAgent(paneID: String) {
         terminalController.stop()
-        terminalController.connect(
-            hostText: storedHost,
-            sessionText: agent.id,
-            credential: storedToken,
-            target: .herdrAgent
-        )
+        terminalController.connect(hostText: storedHost, paneID: paneID, credential: storedToken)
         terminalIsPresented = true
     }
 

@@ -38,7 +38,7 @@ Priority labels:
 | --- | --- | --- | --- |
 | Direct private network path | Tailscale documents direct connections as lowest-latency/highest-throughput; user observed a major difference. | Tailscale Serve recommended; LAN/private HTTPS supported; no mandatory relay. | Now |
 | Connection-path visibility | Tailscale can report direct, DERP relay, or peer relay. | Show path and latency when detectable; never imply direct when unknown. | Now |
-| Durable multiplexer sessions | tmux appears across Orca, Moshi, Agentmux, Remux, Happy/Happier; Herdr adds agent semantics. | tmux and Herdr first-class providers. | Now |
+| Durable multiplexer sessions | tmux appears across Orca, Moshi, Agentmux, Remux, Happy/Happier; Herdr adds agent semantics. | Herdr is the only provider (tmux lane removed, #53). | Now |
 | Safe automatic reconnect | Every serious mobile terminal claims reconnect or session recovery. | Treat backgrounding and network switching as normal; resubscribe and resize safely. | Now |
 | Mosh roaming/local echo | Mosh and Moshi emphasize responsiveness under loss and IP changes. | Re-evaluate after native WS reconnect benchmark; do not add second transport prematurely. | Later |
 | Hosted fallback relay | Orca/T3/Happy-style systems improve reachability at cost of infrastructure and trust surface. | Only after measuring how many users cannot form a usable direct/peer-relay path. | Later |
@@ -129,7 +129,7 @@ Priority labels:
 ### Release 1: private native control plane
 
 - QR pairing and multi-host home.
-- tmux and Herdr providers.
+- Herdr provider (tmux lane removed, #53).
 - Needs attention, active, recent, unknown.
 - Exact resume and native terminal.
 - Direct-path diagnostics.

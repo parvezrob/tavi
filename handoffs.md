@@ -2,6 +2,14 @@
 
 > Append-only log of completed work sessions, newest first. Each entry is what the *next* agent needs to know about that session: what shipped, what was learned, what was left open. The live starting point is always [`current-session.md`](./current-session.md); prune entries older than a few sessions — git history keeps everything.
 
+## 2026-08-31 (late night) — #53 tmux lane deleted
+
+**Shipped:** #53 — tmux removed from host, app, tests, and docs; herdr is the only backend. Owner decision: delete rather than maintain a dormant fallback. Host deployed; old routes 404; all ported live UI tests green against the deployed cutover.
+
+**Learned:** the terminal-bridge tests didn't care about tmux at all — they ported to a stub herdr by swapping the fixture (`terminalHerdr`/`fixtureHerdr`), evidence the bridge/backends seam was real. herdr's attach viewer freezes the frame while scrolled into history (like tmux copy-mode) — flick-until-live-again is the honest streaming probe. #21's install-service first-attempt crash reproduced on this deploy; still needs a root cause.
+
+**Left open:** #47 owns running herdr as a service (it still needs a PTY; the owner's Mac starts it inside a detached tmux session as an ops convenience). #21 root cause. #52 home polish.
+
 ## 2026-08-31 (night) — #26 project-grouped home
 
 **Shipped:** #26 — home is needs-you (flat) then computer → project → agents; tmux card retired to the DEBUG Host menu; `HomeGrouping` model built host-aware for #50. Verified by screenshot on the simulator with agents in three folders, by the live UI test, and installed on the phone.

@@ -347,7 +347,7 @@ Measure whether users can identify the next session to open in under five second
 | Technical identity | Locked | Product/target/module `Mocha`, bundle identifier `com.parvezrob.mocha`, and durable internal `mocha` namespace. Active runtime identifiers are migrated; legacy state and tmux names remain supported only through explicit, tested compatibility paths. |
 | Android later | Locked | Preserve protocol now; avoid splitting product discovery and terminal-engine work. |
 | Tailscale direct-first | Locked | Strong firsthand result and external evidence for direct-path performance; no mandatory hosted relay. |
-| tmux + Herdr | Locked | tmux supplies universal durability; Herdr supplies richer attention semantics. |
+| Herdr only | Locked (revised 2026-08-31, #53) | Herdr supplies durability and attention semantics; the tmux lane was built, then removed as unused. |
 | No new agent harness | Locked | Official CLIs remain the runtime and authentication boundary. |
 | Attention-first information architecture | Locked | “Needs attention” remains the first job; active sessions use compact live previews instead of a flattened card dashboard. |
 | Orca-clean visual baseline | Locked | Preserve the reference’s restraint, spacing, typography, quiet surfaces, and predictable rows; improve information order instead of inventing a louder visual language. |

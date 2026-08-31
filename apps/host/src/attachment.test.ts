@@ -98,10 +98,11 @@ test("claim delivers live output, supersedes the previous client, and release re
   await new Promise((resolve) => setTimeout(resolve, 60));
   assert.ok(!attachment.isDisposed);
 
+  const resizesBeforeRelease = process.resizes.length;
   attachment.release(second);
-  // Without a desktop size (tmux lane), releasing claims the desktop-scale
-  // grid so tmux's smallest-client clamp lets the Mac win.
-  assert.deepEqual(process.resizes.at(-1), { cols: 250, rows: 80 });
+  // With no way to ask what the desktop shows, releasing leaves the size
+  // alone — an oversized guess would crop the Mac's view (#44).
+  assert.equal(process.resizes.length, resizesBeforeRelease);
   await new Promise((resolve) => setTimeout(resolve, 60));
   assert.ok(attachment.isDisposed);
   assert.ok(process.killed);
@@ -119,8 +120,8 @@ test("release hands a herdr pane back to the desktop's own size (#44)", async ()
 
   attachment.release(phone);
   await new Promise((resolve) => setTimeout(resolve, 5));
-  // Not the 250×80 tmux fallback: herdr keeps whatever size it is told, so
-  // an oversized claim would leave the Mac looking at a cropped terminal.
+  // herdr keeps whatever size it is told, so the desktop's own rect is the
+  // only honest size to hand back.
   assert.deepEqual(process.resizes.at(-1), { cols: 174, rows: 49 });
   attachment.dispose();
 });

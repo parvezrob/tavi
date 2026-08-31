@@ -140,13 +140,12 @@ function launchAgentXml(input: {
     MOCHA_PORT: String(input.config.port),
     MOCHA_STATE_DIR: input.config.stateDir,
     MOCHA_MACHINE_NAME: input.config.machineName,
-    MOCHA_TMUX_BIN: input.config.tmuxBin,
     MOCHA_SHELL: input.config.shell,
     MOCHA_HERDR_SOCKET: input.config.herdrSocket,
     MOCHA_ROOTS: input.config.roots.join(","),
     PATH: process.env.PATH || "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-    // launchd provides no locale; without UTF-8, tmux sanitizes the 
-    // field separator in list-format output to "_" and parsing breaks.
+    // launchd provides no locale; agents and the pty bridge need UTF-8 so
+    // terminal output and herdr's NDJSON are never mangled.
     LANG: utf8Locale(),
   };
   const envXml = Object.entries(environment)

@@ -90,7 +90,6 @@ function createFixture(context: TestContext, fail?: (command: string) => void) {
     port: 8787,
     token: "test-token-that-is-long-enough",
     shell: "/bin/zsh",
-    tmuxBin: "tmux",
     herdrSocket: "/tmp/mocha-test-herdr.sock",
     roots: ["/project"],
     stateDir: path.join(homeDirectory, ".mocha"),
