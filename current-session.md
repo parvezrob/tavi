@@ -6,6 +6,8 @@
 
 ## Next work
 
+**TestFlight track (owner decision 2026-08-31), in priority order:** #44 herdr pane sizing (step 1: release the attachment on phone detach instead of claiming 250×80) → #45 QR pairing → #46 per-device credentials + revoke → #21 installer flake → #37 App Store epic. Then #26, #10, #38, #40/#39, #25; #27–#29 parked. Push notifications (Phase E.1) deliberately deferred until testers ask.
+
 **#42 shipped 2026-08-31 (empty terminal):** "Terminal" leads the agent menu; the host creates the tab and `pane.report_agent`s it as `shell/idle` instead of launching anything, so it lists, lands in Recent, and opens to a live shell in the chosen folder. Live test `testCreateTerminalFromPicker` (also sends a command through the composer — #43 fixed: a shell pane takes the plain-terminal send path, not the prompt endpoint). Not yet known: what herdr does if a real agent is later started by hand inside a reported pane.
 
 **#41 shipped 2026-08-31 (agent kinds):** the picker offers all 21 herdr kinds as a one-row menu; the host detects installed ones via the login shell and refuses uninstalled kinds by name (herdr otherwise hands back a dead tab). Shipped as #42 above.
@@ -30,7 +32,7 @@ Then, in order: #26 (project-grouped home + tmux card removal), #25 (diff glance
 - Prompt delivery hardened: launch-pending retry, typing fallback via `send_keys` (spaces travel as "Space", idle-pane guard), post-prompt Enter nudge. Herdr quirk: owner's sessions run in manual mode — phone prompts can still occasionally sit unsubmitted.
 - Feature decisions 2026-08-26 recorded in `docs/ROADMAP.md` (adopted #23–#29, rejected list). Multi-host = Phase D item 3; push notifications = Phase E item 1.
 - Deploy loop: `docs/DEVELOPMENT.md`. Watch for #21 (first `service:install` attempt often fails; retry succeeds — verify with `/api/health` after deploys, a half-installed service serves 502s via Tailscale).
-- Open issues (audited 2026-08-31; #18–#20 closed as shipped): #8 (old PWA, unrelated), #10 (scroll feel tuning — gesture itself shipped), #21 (installer retry), #25–#29 (adopted work), #37 (App Store epic), #38 (`POST /api/sessions` bypasses the roots guardrail), #39 (no test seam for `AgentDirectory`'s HTTP calls), #40 (`herdr-events` intermittent failure).
+- Open issues (audited 2026-08-31; #8, #18–#20 closed): #44 pane sizing, #45 QR pairing, #46 per-device credentials — all on the App Store milestone; #10 (scroll feel tuning), #21 (installer retry), #25–#29 (adopted work), #37 (App Store epic), #38–#40 (host hygiene / tests).
 - **App Store readiness (2026-08):** milestone “App Store review readiness” + epic #37 gate any Apple submission. `codebase-scan.html` (#30) is a second-agent audit whose claims were re-verified against the code — input only, never the tracker.
 - **Security hygiene #31–#36 shipped and closed** (`0a02cf9` host, `b32b9c4` iOS): token in Keychain with one-time migration off AppStorage + truthful storage copy on both connect screens; Claude hook runs `claude-hook-relay.js` so the token never hits argv (reinstalled on the owner Mac); dev env seeding is DEBUG-only; CORS headers deleted; `~/.mocha` forced 0700/0600; AgentDirectory on an ephemeral URLSession.
 - Host and phone both run the #42 build (deployed + installed 2026-08-31).
