@@ -117,6 +117,37 @@ struct NewAgentSheet: View {
             }
             .listRowBackground(MochaTheme.card)
 
+            Section {
+                TextField("/Users/you/Projects/thing", text: $customPath)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .font(.footnote.monospaced())
+                    .accessibilityIdentifier("newAgent.customPath")
+                Button("Use this folder") {
+                    select(customPath.trimmingCharacters(in: .whitespacesAndNewlines))
+                }
+                .disabled(customPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("newAgent.useCustomPath")
+            } header: {
+                Text("Another folder")
+            } footer: {
+                if let failure {
+                    Text(failure)
+                        .font(.footnote)
+                        .foregroundStyle(MochaTheme.statusBlocked)
+                        .accessibilityIdentifier("newAgent.error")
+                } else if let selectedPath {
+                    Text("Starting \(agentKind) in \(selectedPath)")
+                        .font(.footnote)
+                        .foregroundStyle(MochaTheme.textSecondary)
+                } else {
+                    Text("Pick the folder this agent should work in.")
+                        .font(.footnote)
+                        .foregroundStyle(MochaTheme.textSecondary)
+                }
+            }
+            .listRowBackground(MochaTheme.card)
+
             if !sections.recent.isEmpty {
                 Section("Recent") {
                     ForEach(sections.recent) { folder in
@@ -154,40 +185,16 @@ struct NewAgentSheet: View {
                 }
                 .listRowBackground(MochaTheme.card)
             }
-
-            Section {
-                TextField("/Users/you/Projects/thing", text: $customPath)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .font(.footnote.monospaced())
-                    .accessibilityIdentifier("newAgent.customPath")
-                Button("Use this folder") {
-                    select(customPath.trimmingCharacters(in: .whitespacesAndNewlines))
-                }
-                .disabled(customPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityIdentifier("newAgent.useCustomPath")
-            } header: {
-                Text("Another folder")
-            } footer: {
-                if let failure {
-                    Text(failure)
-                        .font(.footnote)
-                        .foregroundStyle(MochaTheme.statusBlocked)
-                        .accessibilityIdentifier("newAgent.error")
-                } else if let selectedPath {
-                    Text("Starting \(agentKind) in \(selectedPath)")
-                        .font(.footnote)
-                        .foregroundStyle(MochaTheme.textSecondary)
-                } else {
-                    Text("Pick the folder this agent should work in.")
-                        .font(.footnote)
-                        .foregroundStyle(MochaTheme.textSecondary)
-                }
-            }
-            .listRowBackground(MochaTheme.card)
         }
         .scrollContentBackground(.hidden)
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Find a folder")
+        // Keep the search field in the navigation bar drawer; left to the
+        // platform it anchors to the bottom of the sheet and floats over the
+        // list content.
+        .searchable(
+            text: $query,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Find a folder"
+        )
         .accessibilityIdentifier("newAgent.folders")
     }
 
@@ -196,9 +203,9 @@ struct NewAgentSheet: View {
             return "No folder matches “\(query)”."
         }
         if catalog.roots.isEmpty {
-            return "No project folders are configured on your Mac, so every folder here needs confirming. Set MOCHA_ROOTS on the host, or enter a full path below."
+            return "No project folders are configured on your Mac, so every folder needs confirming. Set MOCHA_ROOTS on the host, or type a full path above."
         }
-        return "No project folders yet. Enter a full path below to start somewhere specific."
+        return "No project folders yet. Type a full path above to start somewhere specific."
     }
 
     private func folderRow(

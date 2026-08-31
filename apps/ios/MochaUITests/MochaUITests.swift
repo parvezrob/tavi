@@ -233,6 +233,139 @@ final class MochaUITests: XCTestCase {
         )
     }
 
+    // #24 acceptance: create an agent in a folder chosen on the phone, and
+    // never in the host's home directory. Drives the real picker against a
+    // live host, then closes the tab it made.
+    @MainActor
+    func testCreateAgentInAPickedProjectFolder() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live picker test.")
+        }
+
+        let project = try await knownProjectPath(host: host, token: token)
+        let before = Set(try await agentPaneIds(host: host, token: token))
+
+        let app = XCUIApplication()
+        app.launchEnvironment["MOCHA_DEV_HOST"] = host
+        app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
+        app.launch()
+
+        app.buttons["sessions.newAgentTab"].tap()
+        XCTAssertTrue(
+            app.otherElements["newAgent.folders"].waitForExistence(timeout: 20)
+                || app.collectionViews["newAgent.folders"].waitForExistence(timeout: 1),
+            "The project picker never listed any folders."
+        )
+
+        keepScreenshot(named: "new-agent-picker")
+
+        // Nothing is chosen yet, so there is nowhere to create the agent.
+        let create = app.buttons["newAgent.create"]
+        XCTAssertTrue(create.exists)
+        XCTAssertFalse(create.isEnabled, "Create was enabled before a folder was picked.")
+
+        let folder = app.buttons["newAgent.folder.\(project)"]
+        XCTAssertTrue(folder.waitForExistence(timeout: 10), "The picker never offered \(project).")
+        folder.tap()
+        XCTAssertTrue(create.isEnabled, "Create stayed disabled after picking a folder.")
+        create.tap()
+
+        // The agent arrives on the home through the live snapshot feed.
+        var created: String?
+        let deadline = Date().addingTimeInterval(60)
+        while Date() < deadline, created == nil {
+            let now = try await agentPaneIds(host: host, token: token)
+            created = now.first { !before.contains($0) }
+            if created == nil { try await Task.sleep(for: .seconds(2)) }
+        }
+        guard let paneId = created else {
+            throw XCTSkip("The host never reported a new agent; cannot verify the picker end to end.")
+        }
+        addTeardownBlock {
+            if let tabId = try? await Self.tabId(host: host, token: token, paneId: paneId) {
+                try? await Self.closeAgentTab(host: host, token: token, tabId: tabId)
+            }
+        }
+
+        // Born where it was told to be, not in the host's home directory.
+        let cwd = try await agentCwd(host: host, token: token, paneId: paneId)
+        XCTAssertEqual(cwd, project, "The agent did not start in the folder picked on the phone.")
+        XCTAssertTrue(
+            app.buttons["sessions.agent.\(paneId)"].waitForExistence(timeout: 20),
+            "The agent created from the picker never appeared on the home."
+        )
+
+        // The folder it launched in is remembered for next time.
+        let remembered = try await recentProjectPaths(host: host, token: token)
+        XCTAssertTrue(remembered.contains(project), "The picker did not remember \(project).")
+    }
+
+    // #24: a folder outside the host's project roots is not refused outright
+    // — it asks first. The host owns that rule, so this drives the real
+    // refusal and the real confirmation rather than a simulated one.
+    @MainActor
+    func testCustomFolderOutsideRootsAsksBeforeCreating() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live confirmation test.")
+        }
+
+        let outside = outsideRootsPath()
+        let before = Set(try await agentPaneIds(host: host, token: token))
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: outside) }
+
+        let app = XCUIApplication()
+        app.launchEnvironment["MOCHA_DEV_HOST"] = host
+        app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
+        app.launch()
+
+        app.buttons["sessions.newAgentTab"].tap()
+
+        // "Another folder" sits directly under the agent picker, so it is on
+        // screen without scrolling however many projects this Mac has.
+        let customField = app.textFields["newAgent.customPath"]
+        XCTAssertTrue(customField.waitForExistence(timeout: 20), "The picker never offered a custom path field.")
+        XCTAssertTrue(type(outside, into: customField, in: app), "The custom path field never took focus.")
+        app.buttons["newAgent.useCustomPath"].tap()
+
+        let create = app.buttons["newAgent.create"]
+        XCTAssertTrue(create.isEnabled, "Create stayed disabled after choosing a custom folder.")
+        create.tap()
+
+        // The host refuses, and the phone asks instead of failing.
+        let confirm = app.alerts.buttons["newAgent.outsideRoots.confirm"].firstMatch
+        XCTAssertTrue(
+            confirm.waitForExistence(timeout: 20),
+            "A folder outside the roots was not confirmed with the person."
+        )
+        // Nothing has been created while the question is still open.
+        let during = Set(try await agentPaneIds(host: host, token: token))
+        XCTAssertEqual(during, before, "An agent was created before the confirmation was answered.")
+
+        confirm.tap()
+
+        var created: String?
+        let deadline = Date().addingTimeInterval(60)
+        while Date() < deadline, created == nil {
+            created = try await agentPaneIds(host: host, token: token).first { !before.contains($0) }
+            if created == nil { try await Task.sleep(for: .seconds(2)) }
+        }
+        guard let paneId = created else {
+            throw XCTSkip("The host never reported the confirmed agent; cannot verify the flow.")
+        }
+        addTeardownBlock {
+            if let tabId = try? await Self.tabId(host: host, token: token, paneId: paneId) {
+                try? await Self.closeAgentTab(host: host, token: token, tabId: tabId)
+            }
+        }
+
+        let cwd = try await agentCwd(host: host, token: token, paneId: paneId)
+        XCTAssertEqual(cwd, outside, "The confirmed agent did not start in the custom folder.")
+    }
+
     // Phase C: tapping an agent on the home lands in its pane with an
     // identity header, and the Jump-to sheet lists the hierarchy with the
     // current pane badged. Creates its own disposable agent tab through the
@@ -495,27 +628,85 @@ final class MochaUITests: XCTestCase {
     // the best available hint that Claude trusts it — but nothing here
     // proves trust, so callers that need an idle agent must treat a trust
     // prompt as a skip rather than a failure.
+    private func agentPaneIds(host: String, token: String) async throws -> [String] {
+        try await agentRecords(host: host, token: token).map(\.id)
+    }
+
+    private func agentCwd(host: String, token: String, paneId: String) async throws -> String? {
+        try await agentRecords(host: host, token: token).first { $0.id == paneId }?.cwd
+    }
+
+    private static func tabId(host: String, token: String, paneId: String) async throws -> String? {
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/agents")))
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, _) = try await URLSession.shared.data(for: request)
+        struct Body: Decodable {
+            struct Agent: Decodable { let id: String; let tabId: String }
+            let agents: [Agent]
+        }
+        return try JSONDecoder().decode(Body.self, from: data).agents.first { $0.id == paneId }?.tabId
+    }
+
+    private struct AgentRecord: Decodable {
+        let id: String
+        let cwd: String
+    }
+
+    private func agentRecords(host: String, token: String) async throws -> [AgentRecord] {
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/agents")))
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, _) = try await URLSession.shared.data(for: request)
+        struct Body: Decodable { let agents: [AgentRecord] }
+        return (try? JSONDecoder().decode(Body.self, from: data))?.agents ?? []
+    }
+
+    private func recentProjectPaths(host: String, token: String) async throws -> [String] {
+        try await projectCatalog(host: host, token: token).recent.map(\.path)
+    }
+
+    // A real folder on this Mac to start a disposable agent in, read from the
+    // host's own project catalog rather than hard-coding one machine's layout.
+    // It prefers a folder inside the configured roots, so creating there needs
+    // no confirmation, and among those one an agent is already running in —
+    // the best available hint that Claude trusts it. Nothing here proves
+    // trust, so callers needing an idle agent must treat a trust prompt as a
+    // skip rather than a failure.
     private func knownProjectPath(host: String, token: String) async throws -> String {
+        let catalog = try await projectCatalog(host: host, token: token)
+        let insideRoots = catalog.recent.filter(\.withinRoots)
+        guard let path = insideRoots.first(where: \.active)?.path
+            ?? insideRoots.first?.path
+            ?? catalog.workspaces.first?.path
+        else {
+            throw XCTSkip("This host has no project folder inside its roots to start a disposable agent in.")
+        }
+        return path
+    }
+
+    // A real folder deliberately *outside* the roots, to exercise the
+    // confirmation. /private/tmp is shared with the simulator, so the folder
+    // exists for the agent's cwd.
+    private func outsideRootsPath() -> String {
+        let path = "/private/tmp/mocha-ui-outside-\(UUID().uuidString.prefix(8))"
+        try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        return path
+    }
+
+    private struct ProjectCatalogBody: Decodable {
+        struct Folder: Decodable { let path: String; let active: Bool; let withinRoots: Bool }
+        struct Workspace: Decodable { let path: String }
+        let recent: [Folder]
+        let workspaces: [Workspace]
+    }
+
+    private func projectCatalog(host: String, token: String) async throws -> ProjectCatalogBody {
         var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/projects")))
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw XCTSkip("The host could not list its projects.")
         }
-        struct Catalog: Decodable {
-            struct Folder: Decodable { let path: String; let active: Bool }
-            struct Workspace: Decodable { let path: String }
-            let recent: [Folder]
-            let workspaces: [Workspace]
-        }
-        let catalog = try JSONDecoder().decode(Catalog.self, from: data)
-        guard let path = catalog.recent.first(where: \.active)?.path
-            ?? catalog.recent.first?.path
-            ?? catalog.workspaces.first?.path
-        else {
-            throw XCTSkip("This host has no known project folder to start a disposable agent in.")
-        }
-        return path
+        return try JSONDecoder().decode(ProjectCatalogBody.self, from: data)
     }
 
     private func readDialogPresent(host: String, token: String, paneId: String) async throws -> Bool {
@@ -545,6 +736,20 @@ final class MochaUITests: XCTestCase {
                 return true
             }
             Thread.sleep(forTimeInterval: 0.25)
+        }
+        return false
+    }
+
+    // A freshly scrolled field can be hittable before it will accept keyboard
+    // focus; tap until the keyboard is actually up, then type.
+    @MainActor
+    private func type(_ text: String, into field: XCUIElement, in app: XCUIApplication) -> Bool {
+        for _ in 0 ..< 5 {
+            field.tap()
+            if app.keyboards.element.waitForExistence(timeout: 3) {
+                field.typeText(text)
+                return true
+            }
         }
         return false
     }
