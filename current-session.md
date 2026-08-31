@@ -2,9 +2,11 @@
 
 > Every agent starts here. This file holds the live state of the project *right now* and the next piece of work. Update it before ending a session (or at any significant milestone); move the previous state into [`handoffs.md`](./handoffs.md). Keep it short — details belong in the linked docs.
 
-**Last updated:** 2026-09-01 (session closed; #54 P1–P2.1 and #55 shipped, deployed, installed; next: #21 root cause, then #54 P3 once the name is decided)
+**Last updated:** 2026-09-01 (#54 P1–P2.1 and #55 shipped, deployed, installed; feature issues #56–#59 filed from a brainstorm; next: #21 root cause, then #54 P3 once the name is decided)
 
 ## Next work
+
+**Four feature issues filed 2026-09-01 from an owner brainstorm (#56–#59).** All four were already sanctioned as "Next" in `docs/FEATURE_LANDSCAPE.md`; the issues capture shape, traps, and sequencing, not new decisions. **#56 voice input** (small — on-device iOS 26 `SpeechTranscriber`, lands in *compose* mode only and is never auto-sent; the real gate is one owner pass on the physical phone since XCUITest cannot dictate). **#57 project files** (medium — the browsing layer on top of #25, which ships first; changed-files is the default view and the alphabetical tree only the fallback; the security-critical line is re-checking roots containment *after* `realpath` or a symlink escapes). **#58 local dev-server preview** (medium via `tailscale serve`, large with our own proxy — the blocker is loopback-bound dev servers, not the browser; auth must be a `WKHTTPCookieStore` cookie because a header does not reach subresources; proxy per-port never per-path or absolute asset paths 404; HMR is a WebSocket so a proxy must upgrade; dev servers are usually unauthenticated and some expose the filesystem, so exposure needs an explicit per-preview confirm and Funnel stays off). **#59 git worktrees** (large — extends #24's "where is this agent born"; the win over Orca is joining worktrees to the agent list, not drawing a graph; not a root destination per the nav map; removal never silently `--force`s). Suggested order once #21/#47 clear: #56 → #25+#57 → #58 → #59 (after #50).
 
 **#54 P3 — the brand moments** (app icon, launch screen, App Store shots) stays gated on the name decision.
 
