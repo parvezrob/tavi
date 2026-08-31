@@ -2,6 +2,14 @@
 
 > Append-only log of completed work sessions, newest first. Each entry is what the *next* agent needs to know about that session: what shipped, what was learned, what was left open. The live starting point is always [`current-session.md`](./current-session.md); prune entries older than a few sessions — git history keeps everything.
 
+## 2026-08-31 (evening) — #44 sizing, #45 QR pairing, #46 device credentials
+
+**Shipped:** #44 step 1 (detach → viewer rect); #45 pairing end to end; #46 host side (per-device credentials, list/revoke CLI + API, live-cut on revoke, self-unpair endpoint).
+
+**Learned:** herdr pane size is last-writer-wins (see current-session). Free-account provisioning profiles expire after 7 days → "App no longer available" / "Untrusted developer" (documented in DEVELOPMENT.md). VisionKit's `.qr` symbology needs `import Vision` as well as `VisionKit`. UI-test teardown closures must call static helpers (non-Sendable `self`).
+
+**Left open:** #46 phone-side manage-access; #44 steps 2–3; the shared host token still authorizes phones (kept so the simulator/UI tests and the owner's current phone keep working — decide when to retire it).
+
 ## 2026-08-31 (later) — #41 agent kinds, #42 empty terminal
 
 **Shipped:** #42 — Terminal in the picker via `pane.report_agent` (`shell/idle`, `source: mocha`); opens through the normal agent terminal. #41 (`6bb38af`) — picker offers every herdr kind (21) via a one-row menu; host serves `agents` on `GET /api/projects` with login-shell installed detection and refuses uninstalled kinds by name.

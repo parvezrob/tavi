@@ -69,6 +69,10 @@ Host-token only. Mints a single-use pairing secret that expires in 5 minutes (at
 
 `201` → `{ "credential", "device": { "id", "name", "pairedAt" }, "host": { "name", "fingerprint" } }`. The credential is returned exactly once; the host stores only its hash. A client must refuse to keep the credential if `host.fingerprint` differs from the QR's `f`. `401` for an unknown, spent, or expired secret.
 
+### `GET /api/devices`, `DELETE /api/devices/{id}`, `DELETE /api/devices/me`
+
+Host-token only: list paired devices (`{ "devices": [{ "id", "name", "pairedAt", "lastSeenAt"? }] }`) and revoke one (`204`, or `404`). A paired phone may call `DELETE /api/devices/me` with its own credential to unpair itself (`204`); the host token gets `400` there. Revocation is immediate: open event streams and terminals for that device close with WebSocket code `4401` within two seconds.
+
 ### `GET /api/host`
 
 ```json

@@ -341,6 +341,40 @@ async function routeRequest(
     return;
   }
 
+  // Paired-device management (#46). Listing and revoking others is the host
+  // owner's act; a phone may only unpair itself.
+  if (url.pathname === "/api/devices" && request.method === "GET") {
+    if (!isAuthorized(bearerToken(request), config.token)) {
+      sendJson(response, 403, { error: "Only the host itself can list paired devices." });
+      return;
+    }
+    sendJson(response, 200, { devices: devices.list() });
+    return;
+  }
+  if (url.pathname === "/api/devices/me" && request.method === "DELETE") {
+    const me = devices.authorize(bearerToken(request) ?? "");
+    if (!me) {
+      sendJson(response, 400, { error: "Only a paired phone can unpair itself." });
+      return;
+    }
+    devices.revoke(me.id);
+    response.writeHead(204).end();
+    return;
+  }
+  const deviceMatch = url.pathname.match(/^\/api\/devices\/([^/]+)$/);
+  if (deviceMatch && request.method === "DELETE") {
+    if (!isAuthorized(bearerToken(request), config.token)) {
+      sendJson(response, 403, { error: "Only the host itself can revoke a device." });
+      return;
+    }
+    if (!devices.revoke(safeSessionId(deviceMatch[1] || ""))) {
+      sendJson(response, 404, { error: "No paired device with that id." });
+      return;
+    }
+    response.writeHead(204).end();
+    return;
+  }
+
   // Minting a pairing code is the host owner's act: only the host token may,
   // never an already-paired phone.
   if (url.pathname === "/api/pair/begin" && request.method === "POST") {

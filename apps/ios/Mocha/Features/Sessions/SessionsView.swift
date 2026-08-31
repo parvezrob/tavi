@@ -17,6 +17,7 @@ struct SessionsView: View {
     @State private var draftHost = ""
     @State private var draftToken = ""
     @State private var showingHostForm = false
+    @State private var showingPairing = false
     @State private var showingNewAgent = false
     @State private var decisionAgent: AgentSummary?
     @State private var terminalController = TerminalSessionController()
@@ -48,12 +49,23 @@ struct SessionsView: View {
                     .accessibilityIdentifier("sessions.newAgentTab")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Host", systemImage: "desktopcomputer") {
-                        draftHost = storedHost
-                        draftToken = storedToken
-                        showingHostForm = true
+                    // Pairing is the way in (#45). The typed host/token form
+                    // survives only in DEBUG for simulator and UI-test runs.
+                    Menu {
+                        Button("Pair a Mac", systemImage: "qrcode.viewfinder") { showingPairing = true }
+                            .accessibilityIdentifier("sessions.pair")
+                        #if DEBUG
+                        Button("Enter host and token (dev)", systemImage: "keyboard") {
+                            draftHost = storedHost
+                            draftToken = storedToken
+                            showingHostForm = true
+                        }
+                        .accessibilityIdentifier("sessions.hostSettings")
+                        #endif
+                    } label: {
+                        Label("Host", systemImage: "desktopcomputer")
                     }
-                    .accessibilityIdentifier("sessions.hostSettings")
+                    .accessibilityIdentifier("sessions.hostMenu")
                 }
             }
             .navigationDestination(isPresented: $terminalIsPresented) {
@@ -65,6 +77,13 @@ struct SessionsView: View {
             }
             .sheet(isPresented: $showingNewAgent) {
                 NewAgentSheet(directory: agentDirectory)
+            }
+            .sheet(isPresented: $showingPairing) {
+                PairingFlowView { endpoint, credential in
+                    storedHost = endpoint.baseURL.absoluteString
+                    persistToken(credential)
+                    agentDirectory.configure(hostText: storedHost, credential: storedToken)
+                }
             }
             .sheet(isPresented: $showingHostForm) {
                 hostForm
@@ -207,17 +226,18 @@ struct SessionsView: View {
             Text("No Paired Computers")
                 .font(.headline)
                 .foregroundStyle(MochaTheme.textPrimary)
-            Text("Add your Mac's Tailscale address and token to see live agents.")
+            Text("Your agents and logins stay on your Mac. Pair it once by scanning the code it shows.")
                 .font(.footnote)
                 .foregroundStyle(MochaTheme.textSecondary)
                 .multilineTextAlignment(.center)
-            Button("Connect Host") {
-                draftHost = storedHost
-                draftToken = storedToken
-                showingHostForm = true
+            Button {
+                showingPairing = true
+            } label: {
+                Label("Scan pairing code", systemImage: "qrcode.viewfinder")
             }
             .buttonStyle(.borderedProminent)
             .padding(.top, 4)
+            .accessibilityIdentifier("sessions.scanPairingCode")
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 28)
@@ -257,20 +277,31 @@ struct SessionsView: View {
 
     private var degradedCard: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle")
+            Image(systemName: agentDirectory.isRevoked ? "person.crop.circle.badge.xmark" : "exclamationmark.triangle")
                 .foregroundStyle(MochaTheme.statusBlocked)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(agentDirectory.reason ?? "Waiting for the host.")
                     .font(.callout)
                     .foregroundStyle(MochaTheme.textPrimary)
-                Text("The terminal below still works.")
-                    .font(.caption)
-                    .foregroundStyle(MochaTheme.textSecondary)
+                if agentDirectory.isRevoked {
+                    // The credential is dead on the host side (#46); nothing
+                    // on this phone can revive it, so the only offer is pairing.
+                    Button("Pair again") {
+                        persistToken("")
+                        showingPairing = true
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("sessions.pairAgain")
+                } else {
+                    Text("The terminal below still works.")
+                        .font(.caption)
+                        .foregroundStyle(MochaTheme.textSecondary)
+                }
             }
         }
         .padding(14)
         .mochaCard(stripe: MochaTheme.statusBlocked)
-        .accessibilityIdentifier("sessions.agentsUnavailable")
+        .accessibilityIdentifier(agentDirectory.isRevoked ? "sessions.revoked" : "sessions.agentsUnavailable")
     }
 
     private var idleStateCard: some View {

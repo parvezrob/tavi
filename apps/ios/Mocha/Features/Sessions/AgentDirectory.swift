@@ -181,6 +181,10 @@ final class AgentDirectory {
     // blocked agent therefore stays visible through reconnects until a live
     // snapshot actually reports it resolved.
     private(set) var isStale = false
+    // The host rejected this phone's credential outright (#46): revoked on
+    // the Mac, or the host was reset. Retrying cannot fix it; only pairing
+    // again can, so the stream stops and the home says so.
+    private(set) var isRevoked = false
     // Safe, sanitized terminal excerpts keyed by pane id, refreshed after
     // every snapshot for the agents the home actually previews.
     private(set) var previews: [String: String] = [:]
@@ -210,6 +214,7 @@ final class AgentDirectory {
         reason = nil
         hasLoaded = false
         isStale = false
+        isRevoked = false
         lastRawAgents = []
         smoother.reset()
         guard let url = URL(string: hostText),
@@ -568,6 +573,31 @@ final class AgentDirectory {
             // dropping them here made "Needs you" blink away on every
             // network blip while the agent was still waiting.
             isStale = true
+            // Unless the host is telling us this credential is dead: a
+            // WebSocket drop and an HTTP 401 look alike here, so ask the
+            // host directly before deciding.
+            if await credentialIsRejected() {
+                isRevoked = true
+                available = false
+                reason = "This iPhone is no longer paired with this Mac. Pair it again to reconnect."
+                hasLoaded = true
+                isStale = false
+                agents = []
+                stop()
+            }
         }
+    }
+
+    // True only on a definite 401 from the host; anything else (offline,
+    // host down) is a transient failure and must keep retrying.
+    private func credentialIsRejected() async -> Bool {
+        guard let host, !credential.isEmpty,
+              var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else { return false }
+        components.path = "/api/host"
+        guard let url = components.url else { return false }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        guard let (_, response) = try? await Self.session.data(for: request) else { return false }
+        return (response as? HTTPURLResponse)?.statusCode == 401
     }
 }

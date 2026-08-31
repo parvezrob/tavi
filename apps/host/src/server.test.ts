@@ -350,8 +350,29 @@ test("a phone pairs with a single-use code and gets a credential of its own (#45
     });
     assert.equal(phoneMints.status, 403);
 
+    // The host can list and revoke; a phone can see neither, but can leave.
+    const listed = await fetch(`${base}/api/devices`, { headers: { Authorization: `Bearer ${config.token}` } });
+    assert.equal(listed.status, 200);
+    assert.deepEqual(((await listed.json()) as { devices: Array<{ id: string }> }).devices.map((d) => d.id), [grant.device.id]);
+    const phoneLists = await fetch(`${base}/api/devices`, { headers: { Authorization: `Bearer ${grant.credential}` } });
+    assert.equal(phoneLists.status, 403);
+    const hostLeaves = await fetch(`${base}/api/devices/me`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${config.token}` },
+    });
+    assert.equal(hostLeaves.status, 400);
+
     // Revoking on the host cuts that phone and only that phone.
-    assert.equal(devices.revoke(grant.device.id), true);
+    const revokedByHost = await fetch(`${base}/api/devices/${grant.device.id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${config.token}` },
+    });
+    assert.equal(revokedByHost.status, 204);
+    const again = await fetch(`${base}/api/devices/${grant.device.id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${config.token}` },
+    });
+    assert.equal(again.status, 404);
     const revoked = await fetch(`${base}/api/host`, {
       headers: { Authorization: `Bearer ${grant.credential}` },
     });
@@ -360,6 +381,15 @@ test("a phone pairs with a single-use code and gets a credential of its own (#45
       headers: { Authorization: `Bearer ${config.token}` },
     });
     assert.equal(stillHost.status, 200);
+
+    // A phone can unpair itself, and is gone the moment it does.
+    const second = devices.add("second phone");
+    const left = await fetch(`${base}/api/devices/me`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${second.credential}` },
+    });
+    assert.equal(left.status, 204);
+    assert.equal(devices.authorize(second.credential), undefined);
   } finally {
     await close(server);
   }

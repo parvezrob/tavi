@@ -130,6 +130,10 @@ final class MochaUITests: XCTestCase {
         }
 
         let app = XCUIApplication()
+        // Start from nothing persisted, then seed from the environment: a
+        // credential left by an earlier run (a pairing test, say) must never
+        // decide what this test connects with.
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
         app.launchEnvironment["MOCHA_DEV_HOST"] = host
         app.launchEnvironment["MOCHA_DEV_SESSION"] = session
         app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
@@ -170,6 +174,10 @@ final class MochaUITests: XCTestCase {
         }
 
         let app = XCUIApplication()
+        // Start from nothing persisted, then seed from the environment: a
+        // credential left by an earlier run (a pairing test, say) must never
+        // decide what this test connects with.
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
         app.launchEnvironment["MOCHA_DEV_HOST"] = host
         app.launchEnvironment["MOCHA_DEV_SESSION"] = session
         app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
@@ -207,6 +215,10 @@ final class MochaUITests: XCTestCase {
         }
 
         let app = XCUIApplication()
+        // Start from nothing persisted, then seed from the environment: a
+        // credential left by an earlier run (a pairing test, say) must never
+        // decide what this test connects with.
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
         app.launchEnvironment["MOCHA_DEV_HOST"] = host
         app.launchEnvironment["MOCHA_DEV_SESSION"] = session
         app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
@@ -233,6 +245,86 @@ final class MochaUITests: XCTestCase {
         )
     }
 
+    // #45 acceptance: a fresh phone pairs from a code the host printed, sees
+    // the host's fingerprint before consenting, and lands on live sessions
+    // with a credential of its own. The simulator has no camera, so this
+    // takes the manual-entry path; the exchange is the same.
+    @MainActor
+    func testPairsAFreshPhoneFromAPairingCode() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live pairing test.")
+        }
+
+        let before = Set(try await Self.pairedDeviceIds(host: host, token: token))
+        addTeardownBlock {
+            // Never leave the owner's Mac with a stray paired phone.
+            for id in (try? await Self.pairedDeviceIds(host: host, token: token)) ?? [] where !before.contains(id) {
+                try? await Self.revokeDevice(host: host, token: token, id: id)
+            }
+        }
+        let (code, fingerprint) = try await beginPairing(host: host, token: token)
+
+        let app = XCUIApplication()
+        // A phone that has never been paired: no host, no token.
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
+        app.launch()
+
+        app.buttons["sessions.scanPairingCode"].tap()
+        let manual = app.textViews["pairing.manualCode"].firstMatch.exists
+            ? app.textViews["pairing.manualCode"].firstMatch
+            : app.textFields["pairing.manualCode"].firstMatch
+        XCTAssertTrue(manual.waitForExistence(timeout: 10), "Manual code entry never appeared.")
+        manual.tap()
+        manual.typeText(code)
+        app.buttons["pairing.manualContinue"].tap()
+
+        // Consent screen: the fingerprint the Mac printed, before anything is sent.
+        let shown = app.staticTexts["pairing.fingerprint"]
+        XCTAssertTrue(shown.waitForExistence(timeout: 10), "The verify screen never appeared.")
+        XCTAssertEqual(shown.label, fingerprint)
+        let beforeConsent = try await Self.pairedDeviceIds(host: host, token: token)
+        XCTAssertEqual(beforeConsent.count, before.count, "A device was paired before consent.")
+
+        app.buttons["pairing.confirm"].tap()
+        XCTAssertTrue(app.staticTexts["pairing.done"].waitForExistence(timeout: 30), "Pairing never completed.")
+        let after = try await Self.pairedDeviceIds(host: host, token: token)
+        XCTAssertEqual(after.count, before.count + 1, "The host did not record the new phone.")
+        keepScreenshot(named: "pairing-done")
+
+        app.buttons["pairing.viewSessions"].tap()
+        // Paired for real: the home is talking to the host with the new credential.
+        XCTAssertTrue(
+            app.staticTexts["sessions.loading"].waitForExistence(timeout: 5)
+                || app.otherElements["sessions.agentsUnavailable"].waitForExistence(timeout: 5)
+                || app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sessions.agent.'")).firstMatch.waitForExistence(timeout: 15)
+                || app.staticTexts["No agents are running in Herdr right now."].waitForExistence(timeout: 5),
+            "The home never connected after pairing."
+        )
+        XCTAssertFalse(app.buttons["sessions.scanPairingCode"].exists, "The home still asks to pair.")
+
+        // Revoke on the Mac while the app is open: the phone must notice and
+        // offer to pair again rather than retry a dead credential forever.
+        for id in after where !before.contains(id) {
+            try await Self.revokeDevice(host: host, token: token, id: id)
+        }
+        // Found by label: SwiftUI drops a child button's identifier when the
+        // enclosing card carries one of its own.
+        XCTAssertTrue(
+            app.buttons["Pair again"].waitForExistence(timeout: 15),
+            "The home did not notice the revocation."
+        )
+        keepScreenshot(named: "pairing-revoked")
+
+        // Leave the simulator as it was found: no persisted host or credential
+        // from this test can leak into the env-seeded tests that follow.
+        app.terminate()
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
+        app.launch()
+        XCTAssertTrue(app.buttons["sessions.scanPairingCode"].waitForExistence(timeout: 10))
+    }
+
     // #24 acceptance: create an agent in a folder chosen on the phone, and
     // never in the host's home directory. Drives the real picker against a
     // live host, then closes the tab it made.
@@ -248,6 +340,10 @@ final class MochaUITests: XCTestCase {
         let before = Set(try await agentPaneIds(host: host, token: token))
 
         let app = XCUIApplication()
+        // Start from nothing persisted, then seed from the environment: a
+        // credential left by an earlier run (a pairing test, say) must never
+        // decide what this test connects with.
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
         app.launchEnvironment["MOCHA_DEV_HOST"] = host
         app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
         app.launch()
@@ -325,6 +421,10 @@ final class MochaUITests: XCTestCase {
         let before = Set(try await agentPaneIds(host: host, token: token))
 
         let app = XCUIApplication()
+        // Start from nothing persisted, then seed from the environment: a
+        // credential left by an earlier run (a pairing test, say) must never
+        // decide what this test connects with.
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
         app.launchEnvironment["MOCHA_DEV_HOST"] = host
         app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
         app.launch()
@@ -404,6 +504,10 @@ final class MochaUITests: XCTestCase {
         addTeardownBlock { try? FileManager.default.removeItem(atPath: outside) }
 
         let app = XCUIApplication()
+        // Start from nothing persisted, then seed from the environment: a
+        // credential left by an earlier run (a pairing test, say) must never
+        // decide what this test connects with.
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
         app.launchEnvironment["MOCHA_DEV_HOST"] = host
         app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
         app.launch()
@@ -472,6 +576,10 @@ final class MochaUITests: XCTestCase {
         }
 
         let app = XCUIApplication()
+        // Start from nothing persisted, then seed from the environment: a
+        // credential left by an earlier run (a pairing test, say) must never
+        // decide what this test connects with.
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
         app.launchEnvironment["MOCHA_DEV_HOST"] = host
         app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
         app.launch()
@@ -552,6 +660,10 @@ final class MochaUITests: XCTestCase {
         try await waitForAgentStatus(host: host, token: token, paneId: paneId, status: "blocked", timeout: 150)
 
         let app = XCUIApplication()
+        // Start from nothing persisted, then seed from the environment: a
+        // credential left by an earlier run (a pairing test, say) must never
+        // decide what this test connects with.
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
         app.launchEnvironment["MOCHA_DEV_HOST"] = host
         app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
         app.launch()
@@ -623,6 +735,10 @@ final class MochaUITests: XCTestCase {
         }
 
         let app = XCUIApplication()
+        // Start from nothing persisted, then seed from the environment: a
+        // credential left by an earlier run (a pairing test, say) must never
+        // decide what this test connects with.
+        app.launchEnvironment["MOCHA_DEV_RESET"] = "1"
         app.launchEnvironment["MOCHA_DEV_HOST"] = host
         app.launchEnvironment["MOCHA_DEV_TOKEN"] = token
         app.launch()
@@ -714,6 +830,50 @@ final class MochaUITests: XCTestCase {
     // the best available hint that Claude trusts it — but nothing here
     // proves trust, so callers that need an idle agent must treat a trust
     // prompt as a skip rather than a failure.
+    private func beginPairing(host: String, token: String) async throws -> (code: String, fingerprint: String) {
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/pair/begin")))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 201 else {
+            throw XCTSkip("The host could not start pairing.")
+        }
+        struct Body: Decodable {
+            struct Host: Decodable { let name: String; let fingerprint: String }
+            let secret: String
+            let host: Host
+        }
+        let body = try JSONDecoder().decode(Body.self, from: data)
+        var components = URLComponents()
+        components.scheme = "mocha"
+        components.host = "pair"
+        components.queryItems = [
+            URLQueryItem(name: "u", value: host),
+            URLQueryItem(name: "s", value: body.secret),
+            URLQueryItem(name: "f", value: body.host.fingerprint),
+            URLQueryItem(name: "n", value: body.host.name),
+        ]
+        return (try XCTUnwrap(components.url?.absoluteString), body.host.fingerprint)
+    }
+
+    private static func pairedDeviceIds(host: String, token: String) async throws -> [String] {
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/devices")))
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, _) = try await URLSession.shared.data(for: request)
+        struct Body: Decodable {
+            struct Device: Decodable { let id: String }
+            let devices: [Device]
+        }
+        return (try? JSONDecoder().decode(Body.self, from: data))?.devices.map(\.id) ?? []
+    }
+
+    private static func revokeDevice(host: String, token: String, id: String) async throws {
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/devices/\(id)")))
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        _ = try await URLSession.shared.data(for: request)
+    }
+
     private func agentPaneIds(host: String, token: String) async throws -> [String] {
         try await agentRecords(host: host, token: token).map(\.id)
     }
