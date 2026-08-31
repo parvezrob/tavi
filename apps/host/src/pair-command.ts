@@ -43,7 +43,9 @@ export async function runPairCommand(config: HostConfig, publicUrl: string): Pro
     hostName: body.host.name,
   });
   console.log(`\nPair a phone with ${body.host.name}\n`);
-  await new Promise<void>((resolve) => qrcode.generate(payload, { small: true }, () => resolve()));
+  // With a callback the library hands the drawing to it instead of printing.
+  const drawing = await new Promise<string>((resolve) => qrcode.generate(payload, { small: true }, resolve));
+  console.log(drawing);
   console.log(`Host:        ${publicUrl}`);
   console.log(`Fingerprint: ${body.host.fingerprint}   ← the phone will show this; make sure it matches`);
   console.log(`Code expires: ${body.expiresAt}\n`);
