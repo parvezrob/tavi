@@ -2,7 +2,7 @@
 
 > Every agent starts here. This file holds the live state of the project *right now* and the next piece of work. Update it before ending a session (or at any significant milestone); move the previous state into [`handoffs.md`](./handoffs.md). Keep it short — details belong in the linked docs.
 
-**Last updated:** 2026-08-31
+**Last updated:** 2026-09-01 (session closed; #54 P1–P2.1 and #55 shipped, deployed, installed; next: #21 root cause, then #54 P3 once the name is decided)
 
 ## Next work
 
