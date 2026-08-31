@@ -6,7 +6,9 @@
 
 ## Next work
 
-**Start #21 root cause** — the first `install-service` attempt crashes and a retry succeeds (reproduced again during the #53 deploy); find the real cause instead of the retry ritual. Then the **#44 step-2 spike** (snapshot rendering on detach, no second PTY).
+**Design pass (#54) — owner is reviewing the audit.** The screen-by-screen audit (nine live screens, captured by the reusable `MochaScreenshotAudit` harness, `TEST_RUNNER_MOCHA_AUDIT=1`) is delivered as a Claude artifact ("Mocha Design Audit"). Direction proposed: premium-as-restraint — (1) warm the neutral ramp (current greys are blue-biased; espresso/cream instead), (2) one amber accent, system blue and green demoted to quiet dots, (3) boxes reserved for needs-you only. Phases: P1 = the system in one `MochaTheme` commit, P2 = per-screen fixes (folds in #52), P3 = icon/launch/App Store shots (gated on the name). **Waiting on the owner to approve the three moves before P1.**
+
+**Then: #21 root cause** — the first `install-service` attempt crashes and a retry succeeds (reproduced again during the #53 deploy); find the real cause instead of the retry ritual. Then the **#44 step-2 spike** (snapshot rendering on detach, no second PTY).
 
 **Owner hands-on for #51 (small):** on the physical iPhone, pinch a full-screen TUI (Claude Code) to the smallest and largest sizes and confirm the redraw is clean and the Mac pane follows — everything else about #51 is machine-verified; pinch needs fingers.
 
