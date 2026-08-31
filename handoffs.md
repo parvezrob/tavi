@@ -6,7 +6,7 @@
 
 **Shipped:** #44 step 1 (detach → viewer rect); #45 pairing end to end; #46 host side (per-device credentials, list/revoke CLI + API, live-cut on revoke, self-unpair endpoint).
 
-**Learned:** herdr pane size is last-writer-wins (see current-session). Free-account provisioning profiles expire after 7 days → "App no longer available" / "Untrusted developer" (documented in DEVELOPMENT.md). VisionKit's `.qr` symbology needs `import Vision` as well as `VisionKit`. UI-test teardown closures must call static helpers (non-Sendable `self`).
+**Learned:** two bugs the whole green suite could not see surfaced only on the real phone: `mocha pair` printed no QR (I had piped its output through grep when "verifying"), and the fingerprint's spaces travelled as `+` (both sides' tests had hand-typed `%20`). Rule: for anything a person looks at, verify by looking — screenshot or the actual string the other side produces. herdr pane size is last-writer-wins (see current-session). Free-account provisioning profiles expire after 7 days → "App no longer available" / "Untrusted developer" (documented in DEVELOPMENT.md). VisionKit's `.qr` symbology needs `import Vision` as well as `VisionKit`. UI-test teardown closures must call static helpers (non-Sendable `self`).
 
 **Left open:** #46 phone-side manage-access; #44 steps 2–3; the shared host token still authorizes phones (kept so the simulator/UI tests and the owner's current phone keep working — decide when to retire it).
 
