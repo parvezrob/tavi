@@ -60,6 +60,14 @@ struct TerminalSessionView: View {
         return agentDirectory?.agents.first { $0.id == paneID }
     }
 
+    // The agent the composer should *prompt*. A shell pane is a herdr agent
+    // for listing and attaching, but its input is commands (#43), so it is
+    // deliberately nil here and takes the plain-terminal send path.
+    private var promptTarget: AgentSummary? {
+        guard let agent = activeAgent, !agent.isShell else { return nil }
+        return agent
+    }
+
     private var canJump: Bool {
         agentDirectory != nil
             && onSelectAgent != nil
@@ -271,7 +279,7 @@ struct TerminalSessionView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(
-                    activeAgent == nil ? "Type a command…" : "Message \(activeAgent?.displayName ?? "the agent")…",
+                    promptTarget == nil ? "Type a command…" : "Message \(promptTarget?.displayName ?? "the agent")…",
                     text: $composerText,
                     axis: .vertical
                 )
@@ -419,7 +427,7 @@ struct TerminalSessionView: View {
         let text = composerText
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         composerError = nil
-        if let agent = activeAgent, let agentDirectory {
+        if let agent = promptTarget, let agentDirectory {
             composerSending = true
             Task {
                 let failure = await agentDirectory.promptAgent(paneId: agent.id, text: text)

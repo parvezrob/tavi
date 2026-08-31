@@ -370,6 +370,21 @@ final class MochaUITests: XCTestCase {
             app.descendants(matching: .any)["terminal.identity"].waitForExistence(timeout: 10),
             "The terminal never opened."
         )
+
+        // A shell takes commands, not prompts (#43): the composer must run
+        // the text as a command line, and say so in its placeholder.
+        let composer = app.textFields["terminal.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 10))
+        XCTAssertEqual(composer.placeholderValue, "Type a command…")
+        let marker = "MOCHA43-\(UUID().uuidString.prefix(6))"
+        composer.tap()
+        composer.typeText("echo \(marker)")
+        app.buttons["terminal.composerSend"].tap()
+        let surface = app.descendants(matching: .any)["terminal.surface"]
+        XCTAssertTrue(
+            waitForTranscript(of: surface, timeout: 15) { $0.contains(marker) },
+            "The command sent from the composer never ran in the shell."
+        )
         keepScreenshot(named: "terminal-from-picker")
     }
 

@@ -6,7 +6,7 @@
 
 ## Next work
 
-**#42 shipped 2026-08-31 (empty terminal):** "Terminal" leads the agent menu; the host creates the tab and `pane.report_agent`s it as `shell/idle` instead of launching anything, so it lists, lands in Recent, and opens to a live shell in the chosen folder. Live test `testCreateTerminalFromPicker`. Not yet known: what herdr does if a real agent is later started by hand inside a reported pane.
+**#42 shipped 2026-08-31 (empty terminal):** "Terminal" leads the agent menu; the host creates the tab and `pane.report_agent`s it as `shell/idle` instead of launching anything, so it lists, lands in Recent, and opens to a live shell in the chosen folder. Live test `testCreateTerminalFromPicker` (also sends a command through the composer — #43 fixed: a shell pane takes the plain-terminal send path, not the prompt endpoint). Not yet known: what herdr does if a real agent is later started by hand inside a reported pane.
 
 **#41 shipped 2026-08-31 (agent kinds):** the picker offers all 21 herdr kinds as a one-row menu; the host detects installed ones via the login shell and refuses uninstalled kinds by name (herdr otherwise hands back a dead tab). Shipped as #42 above.
 

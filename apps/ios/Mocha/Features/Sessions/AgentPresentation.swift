@@ -18,6 +18,10 @@ extension AgentSummary {
         }
     }
 
+    // A reported plain shell (#42): listed and attached like an agent, but
+    // it takes commands, not prompts — the composer treats it as a terminal.
+    var isShell: Bool { agent == "shell" }
+
     // Product names for the kinds herdr can launch; the host serves the same
     // labels in the picker, this covers agents that were started elsewhere.
     var displayName: String {
