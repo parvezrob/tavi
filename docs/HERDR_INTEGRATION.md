@@ -50,3 +50,14 @@ CLI attach used by the terminal bridge: `herdr agent attach <pane_id>` (option `
 - herdr will not attach a pane that has no agent (`agent.attach` → `agent_not_found`) and has no shell kind. `pane.report_agent {pane_id, source, agent, state}` lets Mocha declare one: a pane reported as `agent: "shell", state: "idle", source: "mocha"` lists in `agent.list` with that kind and status, and `agent attach` / the host pty bridge accept it. Verified live 2026-08-31.
 - herdr keeps a reported state: running commands in the pane did not flip `idle` to `working`/`done`, and the events feed carries the reported kind. A terminal therefore reads honestly as idle. Not yet verified: what happens if a real agent is later started by hand inside a reported pane.
 
+
+## Rendering a pane from snapshots instead of attaching (#44 step-2 spike, 2026-09-01)
+
+Measured live against herdr protocol 17 so the spike is not repeated:
+
+- `agent.read` / `pane.read` with `source: "visible", format: "ansi", strip_ansi: false` returns the Mac's exact viewport with full SGR attributes (256-color, bold, dim, box drawing), one `\r\n` per row, ~100 ms per socket round trip. Good enough to paint a read-only mirror. The `revision` field in the read result stays `0`; it is not an output counter.
+- **There is no push signal for output.** `pane_output_changed` is in the `EventKind` enum but is not a subscribable type and never arrived on any of the 25 subscribable types. `pane.updated` fires on state/metadata changes only, not on output. `pane.output_matched` (regex/substring) fires **once** at subscribe with the matching read (`format: "text"` even with `strip_ansi: false`) and never again. `pane.scroll_changed` fires only when scrollback grows past the viewport; it carries `viewport_rows`. A mirror therefore has to poll.
+- **No cursor position** is exposed anywhere — not in reads, `session.snapshot`, or events. `session.snapshot` gives each pane's `rect` in cells (e.g. 171×46).
+- One request per socket connection: herdr closes the socket after the response; only `events.subscribe` keeps it open. An unscoped `pane.updated` subscription replays the whole pane history at ~100 ms per event (138 events / 15 s on the owner Mac) — always scope subscriptions by `pane_id` where the schema allows.
+
+Conclusion recorded on #44: a snapshot mirror would be a ~200 ms-laggy, cursorless, `send_keys`-only view. Not built; the pty attach stays. The Mac-stays-full-size wish is step 3 (a viewer-only attach in herdr) or a compose-mode-only mirror.

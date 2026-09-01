@@ -2,7 +2,7 @@
 
 > Every agent starts here. This file holds the live state of the project *right now* and the next piece of work. Update it before ending a session (or at any significant milestone); move the previous state into [`handoffs.md`](./handoffs.md). Keep it short — details belong in the linked docs.
 
-**Last updated:** 2026-09-01 (#21 root-caused and fixed, host deployed; #54 P1–P2.1 and #55 shipped; #56–#59 filed; next: #44 step-2 spike, then #54 P3 once the name is decided)
+**Last updated:** 2026-09-01 (#21 root-caused and fixed, host deployed; #54 P1–P2.1 and #55 shipped; #56–#59 filed; #44 step-2 spike answered (not built); next: #56 voice or #54 P3 once the name is decided)
 
 ## Next work
 
@@ -14,7 +14,7 @@
 
 **#21 shipped 2026-09-01 (host deployed):** the installer failed first-try whenever the app was open — the owner's hunch, confirmed by measurement. `launchctl bootout` returns in ~80 ms but the old process lingered **5 s** while a phone held the events WebSocket (`http.Server.close` waits for connections and never sees upgraded sockets; idle it exits in 170 ms), and the installer bootstrapped the same label inside that window → `Bootstrap failed: 5: Input/output error`; its catch block then deleted the plist and left the host dead until the retry. Fix on both sides: `server.close` now closes every events/terminal WebSocket with `1001 host restarting` and `closeAllConnections()`, plus a 2 s hard exit deadline on SIGTERM; the installer polls `launchctl print` until the label has really left the domain (bounded 30 s, clear error naming the stuck label), retries `bootstrap` only on the race errors, wraps launchctl failures with their stderr, and the CLI prints the message instead of a stack. `kickstart -k` → `kickstart`: the `-k` was killing the just-bootstrapped instance and starting a second one (`runs = 2` on every install; now 1). Live-verified three installs in a row with a WebSocket client attached: first-try success each time (5.4 s against the old instance, 0.6 s after). Phone needs no change — any stream close is already stale → credential check → reconnect.
 
-**Then: the #44 step-2 spike** (snapshot rendering on detach, no second PTY).
+**#44 step-2 spike done 2026-09-01 — not built.** herdr can hand a phone the exact ANSI viewport (~100 ms) and the pane rect, but exposes no output push event (`pane_output_changed` is unsubscribable and never fires; `pane.output_matched` is one-shot) and no cursor position, so a mirror would be a polled, cursorless, `send_keys`-only view — a downgrade from the pty attach the owner likes. Facts in `docs/HERDR_INTEGRATION.md`. Rollback tag `pre-44-step2` = `7b2e5fd` marks the liked implementation. Open owner choice on #44: leave as is (Mac phone-sized only while attached), ask herdr for a viewer-only attach (step 3), or a compose-mode-only mirror.
 
 **Owner hands-on for #51 (small):** on the physical iPhone, pinch a full-screen TUI (Claude Code) to the smallest and largest sizes and confirm the redraw is clean and the Mac pane follows — everything else about #51 is machine-verified; pinch needs fingers.
 
