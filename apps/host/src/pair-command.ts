@@ -42,14 +42,13 @@ export async function runPairCommand(config: HostConfig, publicUrl: string): Pro
     fingerprint: body.host.fingerprint,
     hostName: body.host.name,
   });
-  console.log(`\nPair a phone with ${body.host.name}\n`);
+  console.log(`Scan this in Tavi on your phone (tap “Scan pairing code”):\n`);
   // With a callback the library hands the drawing to it instead of printing.
   const drawing = await new Promise<string>((resolve) => qrcode.generate(payload, { small: true }, resolve));
   console.log(drawing);
-  console.log(`Host:        ${publicUrl}`);
-  console.log(`Fingerprint: ${body.host.fingerprint}   ← the phone will show this; make sure it matches`);
-  console.log(`Code expires: ${body.expiresAt}\n`);
-  console.log("In Tavi on the phone: Scan pairing code. No camera? Enter this instead:");
+  console.log(`The phone will show ${body.host.name} with fingerprint ${body.host.fingerprint} — check they match, then confirm.`);
+  console.log(`This code works once, for a few minutes.\n`);
+  console.log("No camera? Type this into the app instead:");
   console.log(`  ${payload}\n`);
 }
 

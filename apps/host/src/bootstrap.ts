@@ -128,45 +128,112 @@ export async function diagnose(config: HostConfig, deps: BootstrapDeps): Promise
   ];
 }
 
+interface Step {
+  /** What the plan says will happen ("Install Tailscale and sign in"). */
+  label: string;
+  /** The ✓ line once it has ("Tailscale connected"). */
+  done: string;
+  optional?: boolean;
+  /** Does the work; may return a short detail for the ✓ line. */
+  run: () => Promise<string | undefined>;
+}
+
 /**
- * Make the machine ready to pair, asking before each change. Every gap has
- * a yes/no question and a real fix behind it; "no" (or a non-interactive
- * run) ends with the same instructions `doctor` prints. Throws with those
- * instructions when something still needs a person.
+ * Make the machine ready to pair: one checklist of what is already fine and
+ * what will be done, one yes/no question, then each step reports a ✓ line.
+ * Nothing technical reaches the screen unless a step fails, and then it is
+ * one plain sentence plus the log path. Throws with `doctor`'s instructions
+ * when the person says no or something still needs them.
  */
 export async function bootstrap(config: HostConfig, deps: BootstrapDeps): Promise<void> {
   const pty = await checkPty(deps);
   if (!pty.ok) throw new BootstrapError([pty]);
 
-  const cli = await ensureTailscale(deps);
-  await ensureServe(config, deps, cli);
-  await ensureService(config, deps);
+  const tailscale = await checkTailscale(deps);
+  const serve = await checkServe(config, deps, tailscale.cli);
+  const service = await checkService(config, deps);
+  const herdr = await deps.which("herdr");
 
-  await offerTool(deps, "herdr", "herdr isn't installed. It keeps your agents running and gives you the agent cards; without it Tavi is a plain remote terminal. Install it now?", installHerdrCommand(deps));
+  const lines: string[] = ["  ✓ Terminal ready"];
+  const steps: Step[] = [];
+  const pending: Check[] = [];
+
+  if (tailscale.check.ok) {
+    lines.push(`  ✓ Tailscale connected  (${tailscale.check.detail.replace(/^connected as /, "")})`);
+  } else {
+    const label = tailscale.cli ? "Start Tailscale and sign in" : "Install Tailscale and sign in";
+    lines.push(`  • ${label}  — will do`);
+    pending.push(tailscale.check);
+    steps.push({ label, done: "Tailscale connected", run: () => stepTailscale(deps) });
+  }
+  if (serve.ok) {
+    lines.push(`  ✓ Private address for your phone  (${serve.detail.split(" → ")[0]})`);
+  } else {
+    lines.push("  • Private address for your phone  — will set up");
+    pending.push(serve);
+    steps.push({ label: "Private address", done: "Private address", run: () => stepServe(config, deps) });
+  }
+  if (service.ok) {
+    lines.push("  ✓ Tavi runs in the background");
+  } else {
+    lines.push("  • Run Tavi in the background  — will set up");
+    pending.push(service);
+    steps.push({ label: "Run Tavi in the background", done: "Tavi runs in the background", run: () => stepService(config, deps) });
+  }
+  if (herdr) {
+    lines.push("  ✓ herdr installed  (agent cards)");
+  } else {
+    const install = installHerdrCommand(deps);
+    if (install) {
+      lines.push("  • herdr, for the agent cards  — will install");
+      steps.push({
+        label: "herdr",
+        done: "herdr installed",
+        optional: true,
+        run: async () => {
+          await deps.run(install[0] as string, install.slice(1));
+          return undefined;
+        },
+      });
+    }
+  }
+
+  deps.report(`\nTavi — setting up this computer\n\n${lines.join("\n")}\n`);
+  if (steps.length === 0) return;
+
+  const count = steps.length === 1 ? "this" : `these ${steps.length} things`;
+  if (!(await deps.ask(`Do ${count} now? Your password may be asked once.`))) {
+    throw new BootstrapError(pending);
+  }
+  deps.report("");
+  for (const step of steps) {
+    try {
+      const detail = await step.run();
+      deps.report(`  ✓ ${step.done}${detail ? `   ${detail}` : ""}`);
+    } catch (error) {
+      if (step.optional) {
+        deps.report(`  – ${step.label} skipped: ${firstLine(describe(error))}. Tavi still works as a terminal.`);
+        continue;
+      }
+      throw error instanceof BootstrapError ? error : new BootstrapError([{ name: step.label, ok: false, detail: firstLine(describe(error)) }]);
+    }
+  }
+  deps.report("");
 }
 
-async function ensureTailscale(deps: BootstrapDeps): Promise<string> {
+// Installs and/or starts Tailscale. `tailscale up` prints the sign-in link
+// itself and returns once the browser side is done.
+async function stepTailscale(deps: BootstrapDeps): Promise<string | undefined> {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const { check, cli } = await checkTailscale(deps);
-    if (check.ok && cli) return cli;
-
+    if (check.ok) return check.detail.replace(/^connected as /, "");
     if (!cli) {
       const install = tailscaleInstallCommand(deps);
-      if (!install || !(await deps.ask("Tailscale isn't installed. It is the private link between your phone and this computer. Install it now?"))) {
-        throw new BootstrapError([check]);
-      }
-      deps.report(`Installing Tailscale: ${install.join(" ")}`);
+      if (!install) throw new BootstrapError([check]);
       await deps.run(install[0] as string, install.slice(1));
       continue;
     }
-
-    // Installed but stopped or signed out. `tailscale up` prints the sign-in
-    // link and returns once the browser side is done.
-    if (!(await deps.ask("Tailscale is installed but not running. Start it and sign in now?"))) {
-      throw new BootstrapError([check]);
-    }
     if (deps.operatingSystem === "linux") await ensureOperator(deps, cli);
-    deps.report("Starting Tailscale — a sign-in link will appear if this computer is not signed in yet.");
     await deps.run(cli, ["up"]).catch(async () => {
       await deps.run("sudo", [cli, "up"]);
     });
@@ -174,27 +241,29 @@ async function ensureTailscale(deps: BootstrapDeps): Promise<string> {
   throw new BootstrapError([(await checkTailscale(deps)).check]);
 }
 
-async function ensureServe(config: HostConfig, deps: BootstrapDeps, cli: string): Promise<void> {
+async function stepServe(config: HostConfig, deps: BootstrapDeps): Promise<string | undefined> {
+  const cli = (await checkTailscale(deps)).cli;
+  if (!cli) throw new Error("Tailscale is not available.");
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const serve = await checkServe(config, deps, cli);
-    if (serve.ok) return;
-    deps.report(`Giving the host a private HTTPS address on your tailnet: tailscale serve --bg ${config.port}`);
+    if (serve.ok) return serve.detail.split(" → ")[0];
     try {
       await deps.execute(cli, ["serve", "--bg", String(config.port)]);
-      continue;
     } catch (error) {
       const explained = explainServeFailure(describe(error), config.port);
       if (explained.kind === "operator") {
-        if (!(await deps.ask("Tailscale only lets root change this. Allow your user to manage Tailscale (asks for your password once)?"))) {
-          throw new BootstrapError([{ ...serve, ...explained }]);
-        }
         await ensureOperator(deps, cli, true);
         continue;
       }
       if (explained.kind === "https") {
-        deps.report(`Tailscale needs HTTPS certificates enabled for your tailnet (one-time): https://login.tailscale.com/admin/dns → HTTPS Certificates.`);
-        if (!(await deps.ask("Enabled it? Try again"))) throw new BootstrapError([{ ...serve, ...explained }]);
-        continue;
+        throw new BootstrapError([
+          {
+            name: "Private address",
+            ok: false,
+            detail: "Tailscale needs HTTPS certificates turned on for your network (one time).",
+            fix: "Open https://login.tailscale.com/admin/dns, turn on “HTTPS Certificates”, then run `npx tavi-host pair` again.",
+          },
+        ]);
       }
       throw new BootstrapError([{ ...serve, ...explained }]);
     }
@@ -206,37 +275,27 @@ async function ensureOperator(deps: BootstrapDeps, cli: string, force = false): 
   const user = deps.env.USER || deps.env.LOGNAME;
   if (!user) return;
   if (!force) {
-    // Already allowed if serve status answers without complaint.
     const ok = await deps.execute(cli, ["serve", "status", "--json"]).then(() => true).catch(() => false);
     if (ok) return;
   }
   await deps.run("sudo", [cli, "set", `--operator=${user}`]);
 }
 
-async function ensureService(config: HostConfig, deps: BootstrapDeps): Promise<void> {
-  const service = await checkService(config, deps);
-  if (service.ok) return;
-  if (!(await deps.ask("Tavi isn't running in the background yet. Run it whenever you log in, so it is always there for your phone?"))) {
-    throw new BootstrapError([service]);
-  }
-  deps.report("Setting Tavi up to run in the background…");
+async function stepService(config: HostConfig, deps: BootstrapDeps): Promise<string | undefined> {
   const log = path.join(config.stateDir, "host.log");
   try {
     await deps.installService();
-    await waitHealthy(config, deps, "The background service was set up but is not answering");
-    return;
+    await waitHealthy(config, deps, "Tavi was set up but is not answering");
+    return undefined;
   } catch (error) {
-    // The person still gets to pair today. The service is Tavi's problem
-    // to fix, and the details are in the log, not on their screen.
-    deps.report(
-      `The background service didn't start on this computer, so I'll run Tavi for this session instead. ` +
-        `Details are in ${log}; please share that file with us.`,
-    );
-    deps.report(`(${firstLine(describe(error))})`);
+    // The person still gets to pair today; the service is Tavi's problem
+    // to fix and the details go to the log, not their screen.
+    deps.report(`  – Couldn't set Tavi to run in the background here (details in ${log} — please share that file with us).`);
+    deps.report(`    Running Tavi for this session instead. (${firstLine(describe(error))})`);
   }
   await deps.startForSession();
   await waitHealthy(config, deps, "Tavi could not start on this computer");
-  deps.report("Tavi is running until you log out. Run `npx tavi-host pair` again after the next update to make it permanent.");
+  return "until you log out";
 }
 
 async function waitHealthy(config: HostConfig, deps: BootstrapDeps, problem: string): Promise<void> {
@@ -246,24 +305,6 @@ async function waitHealthy(config: HostConfig, deps: BootstrapDeps, problem: str
       throw new Error(`${problem} on port ${config.port} after ${HEALTH_WAIT_MS / 1000}s. See ${path.join(config.stateDir, "host.log")}.`);
     }
     await deps.sleep(250);
-  }
-}
-
-async function offerTool(deps: BootstrapDeps, tool: string, question: string, install: string[] | undefined): Promise<void> {
-  if (await deps.which(tool)) return;
-  if (!install) {
-    deps.report(`Note: ${tool} isn't installed and I don't know how to install it here.`);
-    return;
-  }
-  if (!(await deps.ask(question))) {
-    deps.report(`Skipping ${tool}. You can install it later; \`tavi doctor\` will remind you.`);
-    return;
-  }
-  deps.report(`Installing ${tool}: ${install.join(" ")}`);
-  try {
-    await deps.run(install[0] as string, install.slice(1));
-  } catch (error) {
-    deps.report(`${tool} did not install (${firstLine(describe(error))}). Tavi still works as a terminal; run \`tavi doctor\` later.`);
   }
 }
 

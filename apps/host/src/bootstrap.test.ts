@@ -150,37 +150,52 @@ test("doctor says exactly what to install when Tailscale is missing, and marks h
   assert.match(formatChecks(checks), /– herdr/);
 });
 
-test("pair asks before each fix and does them: Serve, then the login service, then waits for health", async () => {
+test("pair shows one checklist, asks once, then does the work and reports each ✓", async () => {
   const world: World = { ...READY, serveProxies: [], serviceLoaded: false, healthy: false, answers: [true] };
   const { deps, commands, questions, reports } = createDeps(world);
 
   await bootstrap(config, deps);
 
+  const plan = reports.find((line) => /setting up this computer/.test(line)) ?? "";
+  assert.match(plan, /✓ Terminal ready/);
+  assert.match(plan, /✓ Tailscale connected  \(studio.tail1234.ts.net\)/);
+  assert.match(plan, /• Private address for your phone  — will set up/);
+  assert.match(plan, /• Run Tavi in the background  — will set up/);
+  assert.match(plan, /✓ herdr installed/);
+  assert.deepEqual(questions, ["Do these 2 things now? Your password may be asked once."]);
   assert.ok(commands.includes("tailscale serve --bg 8787"), commands.join("\n"));
-  assert.equal(questions.length, 1);
-  assert.match(questions[0] ?? "", /Run it whenever you log in/);
   assert.ok(commands.includes("install-service"));
-  assert.ok(reports.some((line) => /run in the background/.test(line)));
-  assert.deepEqual(world.serveProxies, ["http://127.0.0.1:8787"]);
+  assert.ok(reports.some((line) => /^  ✓ Private address   https:\/\/studio.tail1234.ts.net$/.test(line)), reports.join("\n"));
+  assert.ok(reports.some((line) => /^  ✓ Tavi runs in the background$/.test(line)));
+  assert.ok(!reports.some((line) => /systemctl|launchctl|serve --bg/.test(line)), reports.join("\n"));
 });
 
-test("declining the service install ends with the doctor instructions instead of a half-set-up machine", async () => {
-  const { deps, commands } = createDeps({ ...READY, serviceLoaded: false, healthy: false, answers: [false] });
-  await assert.rejects(() => bootstrap(config, deps), /tavi install-service/);
+test("nothing to do: the checklist is all ✓ and no question is asked", async () => {
+  const { deps, questions, commands } = createDeps({ ...READY, serveProxies: [...READY.serveProxies] });
+  await bootstrap(config, deps);
+  assert.deepEqual(questions, []);
   assert.ok(!commands.includes("install-service"));
 });
 
-test("Tailscale missing on Linux: offers the install, then the sign-in, then continues to pairing", async () => {
-  const world: World = { ...READY, os: "linux", tools: { herdr: "/usr/local/bin/herdr" }, answers: [true, true] };
-  const { deps, ran, questions } = createDeps(world);
+test("saying no ends with the doctor instructions and changes nothing", async () => {
+  const { deps, commands, ran } = createDeps({ ...READY, serviceLoaded: false, healthy: false, answers: [false] });
+  await assert.rejects(() => bootstrap(config, deps), /tavi install-service/);
+  assert.ok(!commands.includes("install-service"));
+  assert.deepEqual(ran, []);
+});
+
+test("Tailscale missing on Linux: the plan says install and sign in; one yes installs it, signs in, and continues", async () => {
+  const world: World = { ...READY, os: "linux", tools: { herdr: "/usr/local/bin/herdr" }, answers: [true] };
+  const { deps, ran, questions, reports } = createDeps(world);
 
   await bootstrap(config, deps);
 
-  assert.match(questions[0] ?? "", /Tailscale isn't installed.*Install it now\?/);
-  assert.match(questions[1] ?? "", /not running\. Start it and sign in now\?/);
+  assert.match(reports[0] ?? "", /• Install Tailscale and sign in  — will do/);
+  assert.equal(questions.length, 1);
   assert.equal(ran[0], "sh -c curl -fsSL https://tailscale.com/install.sh | sh");
   assert.ok(ran.includes("/usr/bin/tailscale up"), ran.join("\n"));
   assert.equal(world.backendState, "Running");
+  assert.ok(reports.some((line) => /✓ Tailscale connected   studio.tail1234.ts.net/.test(line)), reports.join("\n"));
 });
 
 test("Tailscale missing and the person says no: stops with the download link", async () => {
@@ -189,35 +204,35 @@ test("Tailscale missing and the person says no: stops with the download link", a
   assert.deepEqual(ran, []);
 });
 
-test("Tailscale stopped on the Mac: one question, then `tailscale up`", async () => {
+test("Tailscale stopped on the Mac: plan says start, yes runs `tailscale up`", async () => {
   const world: World = { ...READY, backendState: "Stopped", answers: [true] };
-  const { deps, ran } = createDeps(world);
+  const { deps, ran, reports } = createDeps(world);
   await bootstrap(config, deps);
+  assert.match(reports[0] ?? "", /• Start Tailscale and sign in/);
   assert.ok(ran.includes("/opt/homebrew/bin/tailscale up"));
 });
 
-test("Serve denied on Linux: asks to make the user an operator, runs the sudo command, then Serve succeeds", async () => {
+test("Serve denied on Linux: the operator step happens inside the private-address step, no extra question", async () => {
   const world: World = { ...READY, os: "linux", serveProxies: [], serveFails: "sending serve config: Access denied: serve config denied", answers: [true] };
   const { deps, ran, questions } = createDeps(world);
 
   await bootstrap(config, deps);
 
-  assert.match(questions[0] ?? "", /Allow your user to manage Tailscale/);
+  assert.equal(questions.length, 1);
   assert.ok(ran.includes("sudo /opt/homebrew/bin/tailscale set --operator=robin"), ran.join("\n"));
   assert.deepEqual(world.serveProxies, ["http://127.0.0.1:8787"]);
 });
 
-test("Serve refused for HTTPS certificates: explains the one-time admin setting and retries on yes", async () => {
+test("Serve refused for HTTPS certificates: one plain sentence with the admin link, no jargon", async () => {
   const world: World = { ...READY, serveProxies: [], serveFails: "error: HTTPS is not enabled for this tailnet", answers: [true] };
-  const { deps, reports } = createDeps(world);
-  // The person enables it in the browser before answering.
-  deps.ask = async () => {
-    world.serveFails = undefined;
+  const { deps } = createDeps(world);
+  await assert.rejects(() => bootstrap(config, deps), (error: unknown) => {
+    assert.ok(error instanceof BootstrapError);
+    assert.match(error.message, /HTTPS certificates turned on/);
+    assert.match(error.message, /login.tailscale.com\/admin\/dns/);
+    assert.doesNotMatch(error.message, /serve --bg|tailnet/);
     return true;
-  };
-  await bootstrap(config, deps);
-  assert.ok(reports.some((line) => /admin\/dns/.test(line)));
-  assert.deepEqual(world.serveProxies, ["http://127.0.0.1:8787"]);
+  });
 });
 
 test("when the service cannot start, Tavi runs for the session, says so in plain words, and pairing continues", async () => {
@@ -227,10 +242,10 @@ test("when the service cannot start, Tavi runs for the session, says so in plain
   await bootstrap(config, deps);
 
   assert.ok(commands.includes("start-for-session"), commands.join("\n"));
-  const explanation = reports.find((line) => /didn't start on this computer/.test(line)) ?? "";
-  assert.match(explanation, /run Tavi for this session/);
+  const explanation = reports.find((line) => /Couldn't set Tavi to run in the background/.test(line)) ?? "";
   assert.match(explanation, /host\.log/);
   assert.doesNotMatch(explanation, /systemctl/);
+  assert.ok(reports.some((line) => /✓ Tavi runs in the background   until you log out/.test(line)), reports.join("\n"));
 });
 
 test("pair bootstrap fails honestly when nothing can start the host", async () => {
@@ -243,15 +258,19 @@ test("pair bootstrap fails honestly when nothing can start the host", async () =
   await assert.rejects(() => bootstrap(config, deps), /could not start on this computer on port 8787 after 15s/);
 });
 
-test("herdr is offered: installed on yes, skipped with a note on no", async () => {
+test("herdr is in the plan when missing; a failed install is skipped with a note, never fatal", async () => {
   const yes = createDeps({ ...READY, tools: { tailscale: "/usr/bin/tailscale" }, answers: [true] });
   await bootstrap(config, yes.deps);
+  assert.match(yes.reports[0] ?? "", /• herdr, for the agent cards  — will install/);
   assert.ok(yes.ran.includes("brew install herdr"), yes.ran.join("\n"));
+  assert.ok(yes.reports.some((line) => /✓ herdr installed/.test(line)));
 
-  const no = createDeps({ ...READY, tools: { tailscale: "/usr/bin/tailscale" }, answers: [false] });
-  await bootstrap(config, no.deps);
-  assert.ok(!no.ran.some((line) => /herdr/.test(line)));
-  assert.ok(no.reports.some((line) => /Skipping herdr/.test(line)));
+  const failing = createDeps({ ...READY, tools: { tailscale: "/usr/bin/tailscale" }, answers: [true] });
+  failing.deps.run = async () => {
+    throw new Error("brew: command not found");
+  };
+  await bootstrap(config, failing.deps);
+  assert.ok(failing.reports.some((line) => /– herdr skipped: brew: command not found/.test(line)), failing.reports.join("\n"));
 });
 
 test("non-interactive runs never change anything they were not told to", async () => {
