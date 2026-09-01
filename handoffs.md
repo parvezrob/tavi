@@ -12,6 +12,8 @@
 
 **Decided (owner, same night, from https://claude.ai/code/artifact/c7b31825-b308-4c49-9301-fa4f8bffd3cc):** stack indistinguishable waiting rows (key = host · kind · identity line · asking line; expands in place to members labelled by raw tab label / pane id); keep the path line; Idle is silent with a dimmed tile. Shipped in the follow-up commit; PRD §7.3 updated; 116 unit tests green; stack verified on the simulator by marking three staged panes blocked through `POST /api/hooks/claude` (`PermissionRequest`) — **the owner's Claude now auto-allows Bash, so a real permission dialog cannot be staged any more**; the two live permission tests (`testNeedsYouSurvivesVisitingTheBlockedAgent`, `testAnswerWaitingPermissionFromNeedsYouCard`) will keep skipping until they stage through the hook endpoint instead (#39 seam).
 
+**Also fixed (owner-felt with robin-PC unplugged):** a computer that never answers sat on "Connecting…" indefinitely and reset to it on every foreground. `AgentDirectory` now bounds the connect: 5 s without a frame → probe → no answer ⇒ Offline (the attempt continues in case the peer is merely slow); the WebSocket handshake itself times out at 15 s instead of the system default; Offline sticks across foregrounds until a snapshot proves otherwise; retries back off 2 → 30 s through `ReconnectPolicy`. Verified on the simulator against the real offline robin-PC: chip "Connecting…" at 3 s, "Offline" + the asleep card at 12 s.
+
 **Open:** owner's look on the phone; then the #50 remaining acceptance list in current-session.
 
 ## 2026-09-02 (night) — #50 multi-host: built, cold-reviewed, home reshaped twice on the owner's real screens

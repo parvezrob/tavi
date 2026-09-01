@@ -186,7 +186,19 @@ private struct AgentsSnapshotMessage: Decodable {
 final class AgentDirectory {
     private static let logger = Logger(subsystem: "com.farfield.tavi", category: "agents.directory")
     private static let eventsProtocol = "tavi.events.v1"
-    private static let retryDelay: Duration = .seconds(2)
+    // Retry cadence for the events stream. A computer that is asleep or off
+    // the tailnet is dialled again at 2, 4, 8, 16, then every 30 s — not
+    // every 2 s for hours (owner-felt, 2026-09-02: robin-PC unplugged). The
+    // connect deadline bounds "Connecting…": a peer that has said nothing
+    // after 5 s is probed, and no answer means Offline — the phone never
+    // waits out a silent handshake to admit it.
+    private static let reconnectPolicy = ReconnectPolicy(
+        initialDelay: .seconds(2),
+        maximumDelay: .seconds(30),
+        multiplier: 2,
+        connectDeadline: .seconds(5)
+    )
+    private var reconnectAttempt = 0
 
     // Every request here carries the bearer token, so it uses the same
     // no-disk-trace policy as the terminal transport (#36): ephemeral
@@ -295,15 +307,18 @@ final class AgentDirectory {
         guard streamTask == nil, !isRevoked, let host, !credential.isEmpty else { return }
         guard let eventsURL = try? host.eventsURL() else { return }
         isRunning = true
-        // Whether the computer answers is decided by this attempt, not the
-        // last one before the app went to the background.
-        isOffline = false
+        // Offline stays Offline until a snapshot proves otherwise. Resetting
+        // it here showed "Connecting…" on every foreground for as long as
+        // the handshake took to time out — for an unplugged computer, every
+        // time the owner looked (2026-09-02).
         let credential = credential
         streamTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.streamOnce(eventsURL: eventsURL, credential: credential)
+                guard let self else { return }
+                await self.streamOnce(eventsURL: eventsURL, credential: credential)
                 guard !Task.isCancelled else { return }
-                try? await Task.sleep(for: Self.retryDelay)
+                self.reconnectAttempt += 1
+                try? await Task.sleep(for: Self.reconnectPolicy.delay(forAttempt: self.reconnectAttempt))
             }
         }
         latencyTask = Task { [weak self] in
@@ -712,18 +727,38 @@ final class AgentDirectory {
         var request = URLRequest(url: eventsURL)
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
         request.setValue(Self.eventsProtocol, forHTTPHeaderField: "Sec-WebSocket-Protocol")
+        // A handshake that gets no answer must fail on its own clock, not
+        // the system's minute-long default: the deadline below decides what
+        // the home says, this decides when the attempt is abandoned.
+        request.timeoutInterval = 15
         let socket = Self.session.webSocketTask(with: request)
         socket.resume()
         defer { socket.cancel(with: .normalClosure, reason: nil) }
+
+        // Bounded "Connecting…": if nothing has arrived by the deadline,
+        // ask the host directly; no answer at all is Offline, said now,
+        // while the attempt keeps going in case it is merely slow. The
+        // first frame cancels this, and a probe that lands after a frame
+        // is discarded — the frame is the truth.
+        let deadline = Task { [weak self] in
+            try? await Task.sleep(for: Self.reconnectPolicy.connectDeadline)
+            guard !Task.isCancelled, let self else { return }
+            let probe = await self.probeHost()
+            guard !Task.isCancelled else { return }
+            if probe == .unreachable { self.isOffline = true }
+        }
+        defer { deadline.cancel() }
 
         do {
             var measured = false
             while !Task.isCancelled {
                 let frame = try await socket.receive()
+                deadline.cancel()
                 guard case let .string(text) = frame else { continue }
                 let snapshot = try JSONDecoder().decode(AgentsSnapshotMessage.self, from: Data(text.utf8))
                 guard snapshot.type == "agents" else { continue }
                 apply(snapshot)
+                reconnectAttempt = 0
                 if !measured {
                     // The first snapshot proves the stream; the round trip
                     // the header shows is measured right behind it.
