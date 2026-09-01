@@ -14,7 +14,7 @@
 
 **Review findings deliberately not done (owner call):** accessibility identifiers stay pane-only (test hooks; UI suite is single-host); computers keep pairing order even when the first is asleep; `Live · n ms` stays on the chip-era surfaces; no `.id(terminalHostId)` on the terminal destination (jumping keeps composer state).
 
-**After #50:** #25 + #61 + #57 (diff glance → files-mentioned → project files, one read-only file endpoint), #58 dev-server preview, #59 worktrees. #54 P3 brand moments unblocked. #37 App Store epic gates any submission. Phase E push payloads must carry `hostId` + `paneId` (`AgentTarget`, noted in code).
+**After #50:** #63 (host: grace window before the detach resize — the flap-garble the owner saw 2026-09-02), #25 + #61 + #57 (diff glance → files-mentioned → project files, one read-only file endpoint), #58 dev-server preview, #59 worktrees. #54 P3 brand moments unblocked. #37 App Store epic gates any submission. Phase E push payloads must carry `hostId` + `paneId` (`AgentTarget`, noted in code).
 
 **Publishing rule (owner + agent, 2026-09-01):** the agent bumps `apps/host/package.json` + `VERSION` only when it says a release is worth publishing; the owner runs `cd apps/host && npm publish` in Terminal.app (2FA; the auth URL is masked under Claude Code). Versions are immutable, propagate in 1–2 min, and every publish restarts every paired host. Nothing in #50 touched the host; no publish needed.
 
