@@ -21,8 +21,9 @@ struct JumpToSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     // One fetch per computer, each landing on its own; a slow host never
-    // holds up the others.
+    // holds up the others. Cancelled with the sheet.
     @State private var fetches: [String: HerdrTreeFetch] = [:]
+    @State private var fetchTasks: [Task<Void, Never>] = []
 
     var body: some View {
         NavigationStack {
@@ -45,12 +46,17 @@ struct JumpToSheet: View {
         .task {
             // One task per computer rather than a group: each answer lands
             // as it arrives, and a slow host never holds up the others.
-            for source in sources {
+            fetchTasks = sources.map { source in
                 Task {
                     let fetch = await source.directory.fetchTree()
+                    guard !Task.isCancelled else { return }
                     fetches[source.hostId] = fetch
                 }
             }
+        }
+        .onDisappear {
+            for task in fetchTasks { task.cancel() }
+            fetchTasks = []
         }
         .accessibilityIdentifier("terminal.jumpSheet")
     }
@@ -70,9 +76,11 @@ struct JumpToSheet: View {
                 }
             }
         case let .failure(reason):
+            // The same words the home uses for that computer; a raw HTTP
+            // status is not an explanation a person can act on.
             Section(prefix.isEmpty ? "" : source.name) {
                 Label {
-                    Text(reason)
+                    Text(Self.failureText(reason, health: source.directory.health, name: source.name))
                         .font(.footnote)
                         .foregroundStyle(TaviTheme.textSecondary)
                 } icon: {
@@ -103,6 +111,15 @@ struct JumpToSheet: View {
                     )
                 }
             }
+        }
+    }
+
+    static func failureText(_ reason: String, health: HostHealth, name: String) -> String {
+        switch health {
+        case .revoked: "This iPhone is no longer paired with \(name)."
+        case .offline: "\(name) isn't answering right now."
+        case .stale, .connecting: "Reconnecting to \(name)…"
+        case .live: reason.replacingOccurrences(of: " \\(HTTP \\d+\\)", with: "", options: .regularExpression)
         }
     }
 

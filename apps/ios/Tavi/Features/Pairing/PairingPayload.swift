@@ -55,7 +55,7 @@ struct PairingPayload: Equatable {
             endpoint: endpoint,
             secret: secret,
             fingerprint: fingerprint,
-            hostName: items["n"].flatMap { $0.isEmpty ? nil : $0 } ?? (hostURL.host ?? "your Mac")
+            hostName: items["n"].flatMap { $0.isEmpty ? nil : $0 } ?? (hostURL.host ?? "your computer")
         )
     }
 }

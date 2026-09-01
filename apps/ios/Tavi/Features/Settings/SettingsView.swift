@@ -59,6 +59,11 @@ struct SettingsView: View {
         .onChange(of: fontSize) { _, size in
             TerminalFontPreference.save(size)
         }
+        // The sheet must not outlive its computer: a removal from any other
+        // path would leave a dead directory behind "Unpair".
+        .onChange(of: fleet.hosts.map(\.id)) { _, ids in
+            if let managing, !ids.contains(managing.id) { self.managing = nil }
+        }
     }
 
     // MARK: - Terminal
@@ -129,7 +134,7 @@ struct SettingsView: View {
         } header: {
             Text("Terminal")
         } footer: {
-            Text("A smaller font gives the Mac a bigger window while you are connected. Pinch the terminal to change this too.")
+            Text("A smaller font gives the agent a bigger window while you are connected. Pinch the terminal to change this too.")
         }
     }
 
@@ -204,7 +209,7 @@ struct SettingsView: View {
             Button {
                 onPairAnother()
             } label: {
-                Label(fleet.isConfigured ? "Pair another computer" : "Pair a computer", systemImage: "qrcode.viewfinder")
+                Label("Pair a computer", systemImage: "qrcode.viewfinder")
                     .foregroundStyle(TaviTheme.textPrimary)
             }
             .accessibilityIdentifier("settings.pairAnother")
@@ -231,7 +236,7 @@ struct SettingsView: View {
 
     private var privacySection: some View {
         Section {
-            Text("Tavi has no analytics and no servers of its own. Your terminals, prompts, and credentials travel only between this iPhone and your paired computers over your tailnet. Previews shown on the home are stripped of terminal control sequences before display.")
+            Text("Tavi has no analytics and no servers of its own. Your terminals, prompts, and credentials travel only between this iPhone and your paired computers over your Tailscale network. Previews shown on the home are stripped of terminal control sequences before display.")
                 .font(.footnote)
                 .foregroundStyle(TaviTheme.textSecondary)
                 .listRowBackground(TaviTheme.card)

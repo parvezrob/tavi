@@ -46,31 +46,43 @@ enum HostCredentialStore {
     }
 
     // One-time move of the single pre-#50 credential (and, before it, the
-    // pre-#31 UserDefaults token) under the migrated host's id. The old
-    // copies are removed unconditionally: leaving them would fix nothing.
-    static func migrateLegacyCredential(toHostId hostId: String, defaults: UserDefaults = .standard) {
-        var legacy = load(account: legacyAccount)
-        if legacy.isEmpty, let fromDefaults = defaults.string(forKey: legacyDefaultsKey) {
-            legacy = fromDefaults
-        }
+    // pre-#31 UserDefaults token) under the migrated host's id. Returns
+    // false — and touches nothing — when the Keychain cannot be read or
+    // written right now, so the caller leaves the legacy state for the
+    // next launch. The old copies are removed only after the new item
+    // reads back.
+    static func migrateLegacyCredential(toHostId hostId: String, defaults: UserDefaults = .standard) -> Bool {
+        let (legacyItem, status) = read(account: legacyAccount)
+        guard status == errSecSuccess || status == errSecItemNotFound else { return false }
+        let legacy = legacyItem ?? defaults.string(forKey: legacyDefaultsKey) ?? ""
         if !legacy.isEmpty, load(hostId: hostId).isEmpty {
             save(legacy, hostId: hostId)
+            guard load(hostId: hostId) == legacy else { return false }
         }
         SecItemDelete(baseQuery(account: legacyAccount) as CFDictionary)
         defaults.removeObject(forKey: legacyDefaultsKey)
+        return true
     }
 
     private static func load(account: String) -> String {
+        read(account: account).value ?? ""
+    }
+
+    // The status matters: "not there" and "not readable right now" (the
+    // device has not been unlocked yet) must not look the same to a
+    // migration that deletes what it thinks it moved.
+    private static func read(account: String) -> (value: String?, status: OSStatus) {
         var query = baseQuery(account: account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
               let data = result as? Data,
               let token = String(data: data, encoding: .utf8) else {
-            return ""
+            return (nil, status)
         }
-        return token
+        return (token, status)
     }
 
     private static func baseQuery(account: String) -> [String: Any] {

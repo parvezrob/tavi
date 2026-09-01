@@ -23,7 +23,7 @@ Native iPhone app
 
 [herdr](https://herdr.dev) owns process lifetime, so an agent keeps running when the phone locks, changes networks, or disconnects. The host only translates terminal input/output to a small WebSocket protocol. There is no cloud relay and no agent-specific orchestration layer.
 
-## Quick start on macOS
+## Quick start (macOS or Linux)
 
 You need Node.js 20+ on the computer (macOS or Linux), Tailscale signed in on the phone, and the Tavi app on the phone. Then, on the computer:
 
@@ -31,7 +31,7 @@ You need Node.js 20+ on the computer (macOS or Linux), Tailscale signed in on th
 npx tavi-host pair
 ```
 
-That one command shows a short checklist of what the computer already has and what it will set up — Tailscale (installed and signed in), a private address for your phone, Tavi running in the background, [herdr](https://herdr.dev) for the agent cards — asks once, does it, and prints a QR code. In Tavi on the phone, tap **Scan pairing code**, confirm the fingerprint matches what the terminal shows, and you are in. `npx tavi-host doctor` shows every check without changing anything; `npx tavi-host pair --yes` answers yes to everything for scripts.
+That one command shows a short checklist of what the computer already has and what it will set up — Tailscale (installed and signed in), a private address for your phone, Tavi running in the background, [herdr](https://herdr.dev) for the agent cards — asks once, does it, and prints a QR code. In Tavi on the phone, tap **Scan pairing code**, confirm the fingerprint matches what the terminal shows, and you are in. Run the same command on another computer — a Linux box, a second Mac — and pair it too: the phone holds every computer you pair, grouped on the home with each one's connection health, and anything waiting on any of them sits on top. `npx tavi-host doctor` shows every check without changing anything; `npx tavi-host pair --yes` answers yes to everything for scripts.
 
 herdr is optional but is what makes the agent cards work: without it Tavi is a plain remote terminal. Enable HTTPS certificates for your tailnet once (Tailscale admin → DNS → HTTPS Certificates) if `tailscale serve` refuses.
 

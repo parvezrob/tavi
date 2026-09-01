@@ -36,6 +36,10 @@ struct TerminalSessionView: View {
     // behind the identity header, rename, and prompt delivery; nil only in
     // previews, which keep the generic chrome.
     private let agentDirectory: AgentDirectory?
+    // The attached computer's name when several are paired (#50): the
+    // header is the only thing that says which machine this screen is,
+    // and Jump-to can move it across machines.
+    private let computerName: String?
     // Every paired computer, for the Jump-to sheet (#50).
     private let jumpSources: [JumpSource]
     private let onSelectAgent: ((AgentSummary) -> Void)?
@@ -44,6 +48,7 @@ struct TerminalSessionView: View {
     init(
         controller: TerminalSessionController,
         agentDirectory: AgentDirectory? = nil,
+        computerName: String? = nil,
         jumpSources: [JumpSource]? = nil,
         onSelectAgent: ((AgentSummary) -> Void)? = nil,
         developmentBootstrap: TerminalDevelopmentBootstrap = .launchEnvironment()
@@ -51,6 +56,7 @@ struct TerminalSessionView: View {
         self.developmentBootstrap = developmentBootstrap
         self.controller = controller
         self.agentDirectory = agentDirectory
+        self.computerName = computerName
         self.jumpSources = jumpSources
             ?? agentDirectory.map { [JumpSource(hostId: $0.hostId, name: "", directory: $0)] }
             ?? []
@@ -235,8 +241,9 @@ struct TerminalSessionView: View {
         // itself shows what the agent is doing.
         // Your name for the tab beats the folder (#55); the folder beats a
         // shell's prompt string.
-        let location = agent.userTabName
+        let place = agent.userTabName
             ?? (agent.isShell ? HomeGrouping.projectName(of: agent.cwd) : agent.projectName)
+        let location = [computerName, place].compactMap { $0 }.joined(separator: " · ")
         // One line, not a stack: a two-line title made the whole nav bar
         // tall. Name leads, the folder rides along in the quiet type.
         return HStack(spacing: 6) {
@@ -271,7 +278,7 @@ struct TerminalSessionView: View {
                 .frame(width: 7, height: 7)
             Text(
                 ended
-                    ? "This session ended on your Mac — its last screen stays readable."
+                    ? "This session ended on \(computerName ?? "the computer") — its last screen stays readable."
                     : [controller.connectionState.accessibilityDescription, controller.errorMessage]
                         .compactMap { $0 }
                         .joined(separator: " — ")

@@ -119,7 +119,7 @@ struct PairingPayloadTests {
         defaults.set("https://studio-mac.tail.ts.net", forKey: PairedHostRegistry.legacyAddressKey)
 
         var moved: [String] = []
-        PairedHostRegistry.migrateLegacy(in: defaults) { moved.append($0) }
+        PairedHostRegistry.migrateLegacy(in: defaults) { moved.append($0); return true }
 
         let hosts = PairedHostRegistry.load(from: defaults)
         #expect(hosts.count == 1)
@@ -133,7 +133,7 @@ struct PairingPayloadTests {
 
         // Running again is a no-op: the list is authoritative now.
         defaults.set("https://other.tail.ts.net", forKey: PairedHostRegistry.legacyAddressKey)
-        PairedHostRegistry.migrateLegacy(in: defaults) { moved.append($0) }
+        PairedHostRegistry.migrateLegacy(in: defaults) { moved.append($0); return true }
         #expect(PairedHostRegistry.load(from: defaults) == hosts)
         #expect(moved == ["8F2A 19C4"])
     }
@@ -143,17 +143,32 @@ struct PairingPayloadTests {
         let defaults = UserDefaults(suiteName: "tavi.tests.\(UUID().uuidString)")!
         defaults.set("https://dev-box.tail.ts.net", forKey: PairedHostRegistry.legacyAddressKey)
         var moved: [String] = []
-        PairedHostRegistry.migrateLegacy(in: defaults) { moved.append($0) }
+        PairedHostRegistry.migrateLegacy(in: defaults) { moved.append($0); return true }
         let hosts = PairedHostRegistry.load(from: defaults)
         #expect(hosts.map(\.id) == ["address:https://dev-box.tail.ts.net"])
         #expect(moved == hosts.map(\.id))
+    }
+
+    // A Keychain that cannot be read yet (first launch before unlock)
+    // leaves everything in place for the next launch — nothing is deleted
+    // on the strength of a move that did not happen.
+    @Test
+    func migrationLeavesLegacyStateWhenTheCredentialCannotMove() {
+        let defaults = UserDefaults(suiteName: "tavi.tests.\(UUID().uuidString)")!
+        defaults.set("https://dev-box.tail.ts.net", forKey: PairedHostRegistry.legacyAddressKey)
+        PairedHostRegistry.migrateLegacy(in: defaults) { _ in false }
+        #expect(defaults.object(forKey: PairedHostRegistry.storageKey) == nil)
+        #expect(defaults.string(forKey: PairedHostRegistry.legacyAddressKey) == "https://dev-box.tail.ts.net")
+        PairedHostRegistry.migrateLegacy(in: defaults) { _ in true }
+        #expect(PairedHostRegistry.load(from: defaults).count == 1)
+        #expect(defaults.object(forKey: PairedHostRegistry.legacyAddressKey) == nil)
     }
 
     @Test
     func nothingToMigrateLeavesNoList() {
         let defaults = UserDefaults(suiteName: "tavi.tests.\(UUID().uuidString)")!
         var moved: [String] = []
-        PairedHostRegistry.migrateLegacy(in: defaults) { moved.append($0) }
+        PairedHostRegistry.migrateLegacy(in: defaults) { moved.append($0); return true }
         #expect(defaults.object(forKey: PairedHostRegistry.storageKey) == nil)
         #expect(moved.isEmpty)
     }

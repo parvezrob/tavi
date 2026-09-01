@@ -273,6 +273,15 @@ final class AgentDirectory {
               !credential.isEmpty else {
             host = nil
             self.credential = ""
+            // Nothing can connect without a credential or a valid address,
+            // and "Connecting…" forever would be a fabricated state. Say
+            // so with the same offers as a revocation: pair again or remove.
+            isRevoked = true
+            hasLoaded = true
+            available = false
+            reason = credential.isEmpty
+                ? "Tavi no longer has a credential for this computer. Pair it again to reconnect."
+                : "This computer's address is not valid any more. Pair it again to reconnect."
             return
         }
         host = endpoint
@@ -281,9 +290,14 @@ final class AgentDirectory {
     }
 
     func start() {
-        guard streamTask == nil, let host, !credential.isEmpty else { return }
+        // A dead credential stays dead: re-dialing it on every foreground
+        // would only produce 401s (#46).
+        guard streamTask == nil, !isRevoked, let host, !credential.isEmpty else { return }
         guard let eventsURL = try? host.eventsURL() else { return }
         isRunning = true
+        // Whether the computer answers is decided by this attempt, not the
+        // last one before the app went to the background.
+        isOffline = false
         let credential = credential
         streamTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -295,7 +309,8 @@ final class AgentDirectory {
         latencyTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.latencyInterval)
-                guard !Task.isCancelled, let self, self.hasLoaded, !self.isStale else { continue }
+                guard !Task.isCancelled, let self else { return }
+                guard self.hasLoaded, !self.isStale else { continue }
                 if case let .reachable(latency) = await self.probeHost() {
                     self.latencyMilliseconds = latency
                 }
@@ -413,16 +428,16 @@ final class AgentDirectory {
         do {
             let (data, response) = try await Self.session.data(for: request)
             guard let status = (response as? HTTPURLResponse)?.statusCode else {
-                return "The Mac did not answer."
+                return "The computer did not answer."
             }
             // 401 means the credential is already dead: unpaired either way.
             guard status == 204 || status == 401 else {
                 let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
-                return message ?? "The Mac could not unpair this iPhone (HTTP \(status))."
+                return message ?? "The computer could not unpair this iPhone (HTTP \(status))."
             }
             return nil
         } catch {
-            return "Could not reach the Mac: \(error.localizedDescription)"
+            return "Could not reach the computer: \(error.localizedDescription)"
         }
     }
 
@@ -616,6 +631,7 @@ final class AgentDirectory {
         hasLoaded = true
         isStale = false
         isOffline = false
+        isRevoked = false
         lastRawAgents = snapshot.agents
         present(lastRawAgents)
     }

@@ -37,6 +37,7 @@ struct NewAgentSheet: View {
     init(computers: [HostFleet.Entry]) {
         self.computers = computers
         _chosenHostId = State(initialValue: computers.count == 1 ? computers[0].id : nil)
+        _phase = State(initialValue: computers.count == 1 ? .loading : .chooseComputer)
     }
 
     private var chosen: HostFleet.Entry? {
@@ -73,6 +74,16 @@ struct NewAgentSheet: View {
                 }
         }
         .task { await load() }
+        // A computer removed while this sheet is open (Settings, or a
+        // revocation) must not leave its folders on screen: back to the
+        // question, or straight on if one computer remains.
+        .onChange(of: computers.map(\.id)) { _, ids in
+            guard let chosenHostId, !ids.contains(chosenHostId) else { return }
+            self.chosenHostId = ids.count == 1 ? ids[0] : nil
+            selectedPath = nil
+            failure = nil
+            Task { await load() }
+        }
         .alert(
             "Start outside your project folders?",
             isPresented: Binding(
@@ -103,9 +114,10 @@ struct NewAgentSheet: View {
         case .loading:
             VStack(spacing: 12) {
                 ProgressView()
-                Text("Reading your projects…")
+                Text("Reading the projects on \(computerName)…")
                     .font(.callout)
                     .foregroundStyle(TaviTheme.textSecondary)
+                chooseAnotherComputerButton
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityIdentifier("newAgent.loading")
@@ -121,6 +133,8 @@ struct NewAgentSheet: View {
                 Button("Try again") { Task { await load() } }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("newAgent.retry")
+                // A sleeping computer must not be a dead end (#50).
+                chooseAnotherComputerButton
             }
             .padding(24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -128,6 +142,19 @@ struct NewAgentSheet: View {
 
         case let .catalog(catalog):
             folderList(catalog)
+        }
+    }
+
+    @ViewBuilder
+    private var chooseAnotherComputerButton: some View {
+        if computers.count > 1 {
+            Button("Choose another computer") {
+                phase = .chooseComputer
+                selectedPath = nil
+                failure = nil
+            }
+            .font(.footnote)
+            .accessibilityIdentifier("newAgent.chooseAnotherComputer")
         }
     }
 

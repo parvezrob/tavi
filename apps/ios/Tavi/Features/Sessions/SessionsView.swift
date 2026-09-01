@@ -21,7 +21,9 @@ struct SessionsView: View {
     // present; flipping both flags in one turn silently drops the second.
     @State private var pairingAfterSettings = false
     @State private var showingNewAgent = false
-    @State private var decisionAgent: AgentSummary?
+    @State private var decisionAgent: DecisionTarget?
+    // A revoked computer's Remove asks first: it wipes a credential.
+    @State private var removingHostId: String?
     @State private var terminalController = TerminalSessionController()
     @State private var terminalIsPresented = false
     // The computer the open terminal is attached to (#50): its directory
@@ -67,6 +69,18 @@ struct SessionsView: View {
                         // Adds a computer; the ones already paired stay (#50).
                         Button("Pair a computer", systemImage: "qrcode.viewfinder") { showingPairing = true }
                             .accessibilityIdentifier("sessions.pair")
+                        if !fleet.hosts.isEmpty {
+                            // Which computers are paired, one tap from the
+                            // home, with their health (#50).
+                            Section("Paired computers") {
+                                ForEach(fleet.entries) { entry in
+                                    Label(
+                                        "\(entry.host.displayName) — \(entry.directory.health.label(latencyMilliseconds: entry.directory.latencyMilliseconds))",
+                                        systemImage: "desktopcomputer"
+                                    )
+                                }
+                            }
+                        }
                         #if DEBUG
                         Button("Enter host and token (dev)", systemImage: "keyboard") {
                             draftHost = ""
@@ -76,7 +90,7 @@ struct SessionsView: View {
                         .accessibilityIdentifier("sessions.hostSettings")
                         #endif
                     } label: {
-                        Label("Host", systemImage: "desktopcomputer")
+                        Label("Computers", systemImage: "desktopcomputer")
                     }
                     .accessibilityIdentifier("sessions.hostMenu")
                 }
@@ -85,6 +99,7 @@ struct SessionsView: View {
                 TerminalSessionView(
                     controller: terminalController,
                     agentDirectory: terminalHostId.flatMap { fleet.directory(for: $0) },
+                    computerName: terminalHostId.flatMap { computerLabel(for: $0) },
                     jumpSources: jumpSources,
                     onSelectAgent: { agent in openAgent(agent) }
                 )
@@ -119,16 +134,42 @@ struct SessionsView: View {
                 hostForm
                     .presentationDetents([.medium])
             }
-            .sheet(item: $decisionAgent) { agent in
-                // The decision goes to the computer the agent lives on.
-                if let directory = fleet.directory(for: agent.hostId) {
+            .sheet(item: $decisionAgent) { target in
+                // The decision goes to the computer the agent lives on; the
+                // tap site checked that computer is still paired, and this
+                // else only stands in for a removal that raced the sheet.
+                if let directory = fleet.directory(for: target.agent.hostId) {
                     PermissionDecisionSheet(
-                        agent: agent,
+                        agent: target.agent,
                         directory: directory,
-                        onOpenTerminal: { openAgent(agent) }
+                        computerName: computerLabel(for: target.agent.hostId),
+                        onOpenTerminal: { openAgent(target.agent) }
                     )
                     .presentationDetents([.medium, .large])
+                } else {
+                    Text("This computer is no longer paired.")
+                        .font(.callout)
+                        .foregroundStyle(TaviTheme.textSecondary)
+                        .padding(24)
+                        .presentationDetents([.medium])
                 }
+            }
+            .confirmationDialog(
+                "Remove this computer from Tavi?",
+                isPresented: Binding(
+                    get: { removingHostId != nil },
+                    set: { if !$0 { removingHostId = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: removingHostId
+            ) { hostId in
+                Button("Remove", role: .destructive) {
+                    fleet.remove(hostId: hostId)
+                    removingHostId = nil
+                }
+                Button("Cancel", role: .cancel) { removingHostId = nil }
+            } message: { hostId in
+                Text("\(computerLabel(for: hostId) ?? "It") stays paired on its own side until you revoke this iPhone there. You can pair it again any time.")
             }
             .task {
                 fleet.load()
@@ -223,7 +264,10 @@ struct SessionsView: View {
                 // needs-you card opens the decision sheet (approve/deny
                 // without the terminal); everything else opens the terminal.
                 ForEach(layout.needsYou, id: \.cardIdentity) { agent in
-                    agentCard(agent, showsLocation: true, action: { decisionAgent = agent })
+                    agentCard(agent, showsLocation: true, action: {
+                        guard fleet.directory(for: agent.hostId) != nil else { return }
+                        decisionAgent = DecisionTarget(agent: agent)
+                    })
                 }
             }
 
@@ -236,9 +280,13 @@ struct SessionsView: View {
             // in the flat list above — its project header counts it, never
             // repeats it.
             ForEach(layout.computers) { computer in
-                ComputerHeader(computer: computer)
-                    // Several computers: the folder name says which one.
-                    .accessibilityValue(layout.computers.count > 1 ? "\(computer.agentCount) agents" : "")
+                ComputerHeader(computer: computer, prominent: layout.computers.count > 1)
+                if computer.hasLoaded, computer.health == .stale || computer.health == .offline {
+                    // The cards below are the last known state and say so
+                    // in a full line, not only in the header's word (PRD
+                    // §7.8): a waiting agent stays visible through a drop.
+                    lastKnownBanner(computer)
+                }
                 computerBody(computer)
             }
         }
@@ -297,8 +345,23 @@ struct SessionsView: View {
             preview: directory?.previews[agent.id],
             observedAt: directory?.statusObservedAt[agent.id],
             showsLocation: showsLocation,
+            computerName: showsLocation ? computerLabel(for: agent.hostId) : nil,
             action: action
         )
+    }
+
+    // The computer's name, only when there is more than one to tell apart
+    // (#50); with a single computer the name is noise on every card.
+    private func computerLabel(for hostId: String) -> String? {
+        guard fleet.hosts.count > 1 else { return nil }
+        return fleet.host(for: hostId)?.displayName
+    }
+
+    // One agent to decide on, keyed by host + pane so two computers'
+    // same-numbered panes never share a sheet identity.
+    private struct DecisionTarget: Identifiable {
+        let agent: AgentSummary
+        var id: String { agent.cardIdentity }
     }
 
     private func recentCard(_ agents: [AgentSummary]) -> some View {
@@ -352,6 +415,30 @@ struct SessionsView: View {
         .taviCard()
     }
 
+    private func lastKnownBanner(_ computer: HomeComputer) -> some View {
+        HStack(spacing: 8) {
+            if computer.health == .stale {
+                ProgressView()
+                    .controlSize(.mini)
+            } else {
+                Image(systemName: "moon.zzz")
+                    .font(.caption)
+            }
+            Text(
+                computer.health == .stale
+                    ? "Reconnecting — showing the last known state"
+                    : "\(computer.name) isn't answering — showing the last known state"
+            )
+            .font(.caption)
+            .foregroundStyle(TaviTheme.textSecondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .taviCard()
+        .accessibilityIdentifier("sessions.stale")
+    }
+
     private func loadingCard(_ computer: HomeComputer) -> some View {
         HStack(spacing: 10) {
             ProgressView()
@@ -373,7 +460,7 @@ struct SessionsView: View {
             Image(systemName: "moon.zzz")
                 .foregroundStyle(TaviTheme.textSecondary)
             VStack(alignment: .leading, spacing: 6) {
-                Text("\(computer.name) isn't answering. It may be asleep or off your tailnet.")
+                Text("\(computer.name) isn't answering. It may be asleep or not on your Tailscale network.")
                     .font(.callout)
                     .foregroundStyle(TaviTheme.textPrimary)
                 Text("Tavi keeps trying on its own.")
@@ -408,7 +495,9 @@ struct SessionsView: View {
 
     // The credential is dead on the host side (#46); nothing on this phone
     // can revive it, so the offers are pairing again or letting it go. The
-    // other computers are untouched either way (#50).
+    // other computers are untouched either way (#50). Pair again keeps the
+    // record until the new pairing lands — cancelling the scan must not
+    // silently lose the computer — and the same fingerprint replaces it.
     private func revokedCard(_ computer: HomeComputer) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "person.crop.circle.badge.xmark")
@@ -419,13 +508,12 @@ struct SessionsView: View {
                     .foregroundStyle(TaviTheme.textPrimary)
                 HStack(spacing: 10) {
                     Button("Pair again") {
-                        fleet.remove(hostId: computer.id)
                         showingPairing = true
                     }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("sessions.pairAgain")
                     Button("Remove") {
-                        fleet.remove(hostId: computer.id)
+                        removingHostId = computer.id
                     }
                     .buttonStyle(.plain)
                     .font(.subheadline)

@@ -207,7 +207,10 @@ extension AgentSummary {
 }
 
 // Host + pane: the only thing that names one agent once a phone holds
-// several computers (#50).
+// several computers (#50). Phase E (push notifications, deep links) must
+// carry both halves in its payload and resolve them through HostFleet —
+// a pane id on its own is ambiguous and the navigation map forbids
+// duplicate targets. Noted here; not built yet.
 struct AgentTarget: Equatable, Hashable, Sendable {
     let hostId: String
     let paneId: String

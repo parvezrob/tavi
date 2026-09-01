@@ -86,7 +86,7 @@ Runs an unsupported CLI or ordinary shell. Tavi cannot supply structured status,
 
 - First section: sessions requiring attention — always flat and on top, across every computer and project, so a waiting agent never hides under a group.
 - Below it (#26): computer → project → agents. A project is the agent's working directory (basename; "Home" for the home folder), nothing to name or maintain. Running agents are full cards under their folder; done/idle agents share a compact card with their status word. A folder whose only agent is waiting keeps its header (it counts the agent) and never repeats it.
-- Host availability remains visible but secondary; the computer header is the host dimension multi-host (#50) nests under.
+- Several computers (#50): every paired computer is its own group, in pairing order, and its header carries the connection health — `Live · <round trip> ms`, `Reconnecting` (stream dropped, host answers, last known state shown), `Offline` (host does not answer; last known state shown), `Unpaired` (credential revoked; offer pair again or remove), `Connecting…`. One computer being asleep never hides another. A computer with nothing running keeps its header and says so in one line. The waiting section above pools every computer.
 - The group headers carry host and project; each row carries provider, state, state source, recent timestamp, and (for running/waiting agents) a short safe preview.
 - One tap resumes the exact session target.
 - Unknown/unclassified sessions are clearly labeled and remain accessible.

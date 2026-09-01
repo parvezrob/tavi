@@ -91,12 +91,6 @@ final class HostFleet {
         stopAll()
     }
 
-    // Agents on every host, in host order — waiting work across the whole
-    // fleet is what the top of the home is made of.
-    var allAgents: [AgentSummary] {
-        entries.flatMap(\.directory.agents)
-    }
-
     private func stopAll() {
         for directory in directories.values { directory.stop() }
     }

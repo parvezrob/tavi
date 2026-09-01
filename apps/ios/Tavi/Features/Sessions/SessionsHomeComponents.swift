@@ -60,7 +60,15 @@ struct AgentCard: View {
     // shows only the agent's own title, if it set one. Cards in the flat
     // needs-you list keep the full location.
     var showsLocation = true
+    // Which computer, when several are paired (#50): the flat needs-you
+    // list is the one place with no computer header above it, and two
+    // machines can hold the same folder name.
+    var computerName: String? = nil
     let action: () -> Void
+
+    private var location: String {
+        [computerName, agent.userTabName ?? agent.projectName].compactMap { $0 }.joined(separator: " · ")
+    }
 
     private var status: AgentStatusStyle { .of(agent.status) }
 
@@ -92,7 +100,7 @@ struct AgentCard: View {
                 if showsLocation || agent.secondaryIdentity != nil || showsFreshness {
                     HStack(spacing: 8) {
                         if showsLocation {
-                            Text(agent.userTabName ?? agent.projectName)
+                            Text(location)
                                 .font(.footnote)
                                 .foregroundStyle(TaviTheme.textSecondary)
                                 .lineLimit(1)
@@ -139,7 +147,7 @@ struct AgentCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(agent.displayName), \(agent.projectName), \(status.label)")
+        .accessibilityLabel("\(agent.displayName), \(location), \(status.label)")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("sessions.agent.\(agent.id)")
     }
@@ -203,23 +211,31 @@ struct RecentAgentRow: View {
 // so a second computer's trouble never reads as the first one's.
 struct ComputerHeader: View {
     let computer: HomeComputer
+    // With one computer the header is a landmark, not a headline (#54):
+    // the smallest, dimmest label on the screen — project names carry the
+    // hierarchy below it. With several, the computer is the boundary that
+    // matters most, so it steps up above the project headers.
+    var prominent = false
 
     var body: some View {
-        // A landmark, not a headline (#54): the smallest, dimmest label on
-        // the screen — project names carry the hierarchy below it.
         HStack(spacing: 6) {
             Image(systemName: "desktopcomputer")
-                .font(.caption2)
+                .font(prominent ? .footnote : .caption2)
             Text(computer.name)
-                .font(.caption2.weight(.medium))
-                .kerning(0.8)
-                .textCase(.uppercase)
+                .font(prominent ? .subheadline.weight(.semibold) : .caption2.weight(.medium))
+                .kerning(prominent ? 0 : 0.8)
+                .textCase(prominent ? nil : .uppercase)
                 .lineLimit(1)
             Spacer(minLength: 8)
             HostHealthLabel(health: computer.health, latencyMilliseconds: computer.latencyMilliseconds)
         }
-        .foregroundStyle(TaviTheme.textSecondary.opacity(0.75))
-        .padding(.top, 14)
+        .foregroundStyle(prominent ? TaviTheme.textPrimary : TaviTheme.textSecondary.opacity(0.75))
+        .padding(.top, prominent ? 18 : 14)
+        .overlay(alignment: .bottom) {
+            if prominent {
+                Rectangle().fill(TaviTheme.hairline).frame(height: 1).offset(y: 6)
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
         .accessibilityIdentifier("sessions.computer.\(computer.id)")

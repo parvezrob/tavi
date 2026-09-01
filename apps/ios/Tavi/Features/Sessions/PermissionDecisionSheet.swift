@@ -8,6 +8,9 @@ import SwiftUI
 struct PermissionDecisionSheet: View {
     let agent: AgentSummary
     let directory: AgentDirectory
+    // Named when several computers are paired (#50): a command approved
+    // here runs on that machine, and the folder name alone can be shared.
+    var computerName: String? = nil
     let onOpenTerminal: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -46,9 +49,10 @@ struct PermissionDecisionSheet: View {
     // Identity appears once: the eyebrow below carries the agent's name as
     // attribution for the quoted dialog; the header keeps only the place.
     private var header: some View {
-        Text(agent.projectName)
+        Text([computerName, agent.projectName].compactMap { $0 }.joined(separator: " · "))
             .font(.footnote)
             .foregroundStyle(TaviTheme.textSecondary)
+            .accessibilityIdentifier("decision.location")
     }
 
     @ViewBuilder

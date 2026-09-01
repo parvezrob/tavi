@@ -39,15 +39,13 @@ struct ManageAccessView: View {
                 }
                 .listRowBackground(TaviTheme.card)
 
-                if host.deviceName != nil {
-                    Section("This iPhone") {
-                        if let deviceName = host.deviceName {
-                            row("Known to \(host.displayName) as", deviceName)
-                        }
-                        row("Paired", host.pairedAt.formatted(date: .abbreviated, time: .shortened))
+                Section("This iPhone") {
+                    if let deviceName = host.deviceName {
+                        row("Known as", deviceName)
                     }
-                    .listRowBackground(TaviTheme.card)
+                    row("Paired", host.pairedAt.formatted(date: .abbreviated, time: .shortened))
                 }
+                .listRowBackground(TaviTheme.card)
 
                 Section {
                     Button(role: .destructive) {
@@ -70,7 +68,7 @@ struct ManageAccessView: View {
                                 .accessibilityIdentifier("manageAccess.forgetOnly")
                         }
                     } else {
-                        Text("Revokes this phone's access on \(host.displayName) and forgets it here. Your agents keep running and your other paired computers are not affected. You can also revoke from that computer with `tavi devices revoke`.")
+                        Text("Revokes this phone's access on \(host.displayName) and forgets it here. Your agents keep running; other paired computers are not affected. On the computer itself: `npx tavi-host devices revoke`.")
                     }
                 }
                 .listRowBackground(TaviTheme.card)

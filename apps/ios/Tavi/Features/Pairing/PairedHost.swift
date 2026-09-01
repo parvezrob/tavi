@@ -101,19 +101,26 @@ enum PairedHostRegistry {
     // A phone updated from the one-host app (#46) had one address, one
     // pairing record and one Keychain credential. They become the first
     // entry of the list, and the credential moves under the host's id.
-    // Runs once: the legacy keys are removed whether or not they held
-    // anything worth keeping.
+    // The legacy keys are removed only once the list is written and the
+    // credential has moved; if the Keychain is not available yet (first
+    // launch before unlock) nothing is touched and the next launch retries.
     static func migrateLegacy(
         in defaults: UserDefaults = .standard,
-        moveCredential: (_ hostId: String) -> Void = { HostCredentialStore.migrateLegacyCredential(toHostId: $0) }
+        moveCredential: (_ hostId: String) -> Bool = { HostCredentialStore.migrateLegacyCredential(toHostId: $0) }
     ) {
-        defer {
+        func forgetLegacyKeys() {
             defaults.removeObject(forKey: legacyRecordKey)
             defaults.removeObject(forKey: legacyAddressKey)
         }
-        guard defaults.data(forKey: storageKey) == nil else { return }
+        guard defaults.data(forKey: storageKey) == nil else {
+            forgetLegacyKeys()
+            return
+        }
         let address = defaults.string(forKey: legacyAddressKey)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !address.isEmpty else { return }
+        guard !address.isEmpty else {
+            forgetLegacyKeys()
+            return
+        }
 
         let record = defaults.data(forKey: legacyRecordKey).flatMap { try? JSONDecoder().decode(LegacyRecord.self, from: $0) }
         let host: PairedHost
@@ -130,8 +137,9 @@ enum PairedHostRegistry {
         } else {
             host = .typed(address: address)
         }
+        guard moveCredential(host.id) else { return }
         save([host], to: defaults)
-        moveCredential(host.id)
+        forgetLegacyKeys()
     }
 
     private struct LegacyRecord: Decodable {
