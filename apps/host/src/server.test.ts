@@ -440,6 +440,27 @@ test("revoking a phone closes its open event stream within the recheck interval 
   }
 });
 
+test("closing the server drops open event streams instead of waiting for them (#21)", async () => {
+  const server = await createMochaServer({ config });
+  await listen(server);
+  const port = (server.address() as AddressInfo).port;
+  const websocket = new WebSocket(`ws://127.0.0.1:${port}/api/events`, EVENTS_PROTOCOL, {
+    headers: { Authorization: `Bearer ${config.token}` },
+  });
+  await once(websocket, "open");
+  const closed = once(websocket, "close");
+
+  // A phone with the app open holds this stream for hours; a close that waits
+  // for it never finishes, and the installer bootstraps into a live label.
+  const started = Date.now();
+  await close(server);
+  const [code, reason] = (await closed) as [number, Buffer];
+
+  assert.equal(code, 1001);
+  assert.equal(reason.toString(), "host restarting");
+  assert.ok(Date.now() - started < 1_000, "close must not wait on the client");
+});
+
 test("the project picker serves live agent folders, remembered choices, and roots", async () => {
   const stateDir = mkdtempSync(path.join(tmpdir(), "mocha-picker-state-"));
   const root = mkdtempSync(path.join(tmpdir(), "mocha-picker-root-"));

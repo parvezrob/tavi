@@ -19,15 +19,27 @@ export interface ServiceOptions {
   operatingSystem?: NodeJS.Platform;
   projectRoot?: string;
   userId?: number;
+  /** How long to wait for a booted-out service to actually leave launchd. */
+  bootoutTimeoutMs?: number;
+  /** Poll and retry cadence; tests shorten it. */
+  retryIntervalMs?: number;
 }
 
 interface ServiceRuntime {
+  bootoutTimeoutMs: number;
   currentPlist: string;
   domain: string;
   execute: Execute;
   legacyPlist: string;
   projectRoot: string;
+  retryIntervalMs: number;
 }
+
+const BOOTSTRAP_ATTEMPTS = 5;
+// launchctl's own words for "the old instance is still on its way out":
+// bootout has returned but the label is not free yet. Anything else is a real
+// error and is reported as such.
+const TRANSIENT_BOOTSTRAP_ERROR = /Input\/output error|Operation now in progress|already in progress/i;
 
 export async function installService(config: HostConfig, options: ServiceOptions = {}): Promise<string> {
   const runtime = createRuntime(options);
@@ -51,8 +63,7 @@ export async function installService(config: HostConfig, options: ServiceOptions
   await bootout(runtime, LABEL);
 
   try {
-    await runtime.execute("launchctl", ["bootstrap", runtime.domain, runtime.currentPlist]);
-    await runtime.execute("launchctl", ["kickstart", "-k", `${runtime.domain}/${LABEL}`]);
+    await bootstrap(runtime, LABEL, runtime.currentPlist);
     await rm(runtime.legacyPlist, { force: true });
     return runtime.currentPlist;
   } catch (installationError) {
@@ -60,8 +71,7 @@ export async function installService(config: HostConfig, options: ServiceOptions
     await rm(runtime.currentPlist, { force: true });
     if (legacyExists) {
       try {
-        await runtime.execute("launchctl", ["bootstrap", runtime.domain, runtime.legacyPlist]);
-        await runtime.execute("launchctl", ["kickstart", "-k", `${runtime.domain}/${LEGACY_LABEL}`]);
+        await bootstrap(runtime, LEGACY_LABEL, runtime.legacyPlist);
       } catch (rollbackError) {
         throw new AggregateError(
           [installationError, rollbackError],
@@ -91,21 +101,74 @@ function createRuntime(options: ServiceOptions): ServiceRuntime {
   const homeDirectory = options.homeDirectory ?? homedir();
   const launchAgents = path.join(homeDirectory, "Library", "LaunchAgents");
   return {
+    bootoutTimeoutMs: options.bootoutTimeoutMs ?? 30_000,
     currentPlist: path.join(launchAgents, `${LABEL}.plist`),
     domain: `gui/${options.userId ?? userInfo().uid}`,
     execute: options.execute ?? execute,
     legacyPlist: path.join(launchAgents, `${LEGACY_LABEL}.plist`),
     projectRoot:
       options.projectRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.."),
+    retryIntervalMs: options.retryIntervalMs ?? 250,
   };
 }
 
+// `launchctl bootout` returns as soon as launchd has *accepted* the removal;
+// the old process is still being torn down (seconds, when a phone holds the
+// events stream open). Bootstrapping the same label inside that window fails
+// with "5: Input/output error" — the whole of #21. Wait for the label to
+// really leave the domain before handing it out again.
 async function bootout(runtime: ServiceRuntime, label: string): Promise<void> {
-  await runtime.execute("launchctl", ["bootout", `${runtime.domain}/${label}`]).catch(() => undefined);
+  const target = `${runtime.domain}/${label}`;
+  await runtime.execute("launchctl", ["bootout", target]).catch(() => undefined);
+  const deadline = Date.now() + runtime.bootoutTimeoutMs;
+  while (await serviceLoaded(runtime, target)) {
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `${label} is still running ${runtime.bootoutTimeoutMs / 1000}s after \`launchctl bootout ${target}\`. ` +
+          `Check \`launchctl print ${target}\` and stop it before installing.`,
+      );
+    }
+    await delay(runtime.retryIntervalMs);
+  }
+}
+
+async function bootstrap(runtime: ServiceRuntime, label: string, plist: string): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await runtime.execute("launchctl", ["bootstrap", runtime.domain, plist]);
+      break;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt >= BOOTSTRAP_ATTEMPTS || !TRANSIENT_BOOTSTRAP_ERROR.test(message)) throw error;
+      await delay(runtime.retryIntervalMs * attempt);
+    }
+  }
+  // RunAtLoad already started it; a plain kickstart only fills in if it did
+  // not. `-k` here used to kill the fresh instance and start a second one.
+  await runtime.execute("launchctl", ["kickstart", `${runtime.domain}/${label}`]);
+}
+
+async function serviceLoaded(runtime: ServiceRuntime, target: string): Promise<boolean> {
+  return runtime
+    .execute("launchctl", ["print", target])
+    .then(() => true)
+    .catch(() => false);
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function execute(command: string, args: string[]): Promise<void> {
-  await execFileAsync(command, args);
+  try {
+    await execFileAsync(command, args);
+  } catch (error) {
+    const stderr = (error as { stderr?: string }).stderr?.trim();
+    throw new Error(
+      `\`${[command, ...args].join(" ")}\` failed${stderr ? `: ${stderr}` : ""}`,
+      { cause: error },
+    );
+  }
 }
 
 async function writeFileAtomically(file: string, contents: string): Promise<void> {

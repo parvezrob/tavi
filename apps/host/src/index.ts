@@ -9,6 +9,15 @@ import { HerdrEventFeed } from "./herdr-events.js";
 import { createMochaServer } from "./server.js";
 import { installService, uninstallService } from "./service.js";
 
+const SHUTDOWN_DEADLINE_MS = 2_000;
+
+function describeFailure(error: unknown): string {
+  if (error instanceof AggregateError) {
+    return [error.message, ...error.errors.map(describeFailure)].join("\n");
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 const config = loadConfig();
 
 if (process.argv[2] === "token") {
@@ -17,9 +26,14 @@ if (process.argv[2] === "token") {
 }
 
 if (process.argv[2] === "install-service") {
-  const plist = await installService(config);
-  console.log(`Mocha now starts automatically. LaunchAgent: ${plist}`);
-  process.exit(0);
+  try {
+    const plist = await installService(config);
+    console.log(`Mocha now starts automatically. LaunchAgent: ${plist}`);
+    process.exit(0);
+  } catch (error) {
+    console.error(`Mocha service installation failed.\n${describeFailure(error)}`);
+    process.exit(1);
+  }
 }
 
 if (process.argv[2] === "uninstall-service") {
@@ -84,5 +98,9 @@ server.listen(config.port, config.bindHost, () => {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     server.close(() => process.exit(0));
+    // Whatever still holds the event loop (a pty mid-teardown, a client that
+    // never answers the close frame) must not keep the old instance alive while
+    // the installer bootstraps the new one (#21).
+    setTimeout(() => process.exit(0), SHUTDOWN_DEADLINE_MS).unref();
   });
 }

@@ -29,19 +29,68 @@ test("installs the Mocha service and removes the stopped legacy plist", async (c
   if (process.platform === "darwin") {
     assert.match(execFileSync("plutil", ["-lint", installed], { encoding: "utf8" }), /OK/);
   }
-  assert.deepEqual(fixture.commands.slice(0, 4), [
-    `launchctl bootout gui/501/${LEGACY_LABEL}`,
-    `launchctl bootout gui/501/${CURRENT_LABEL}`,
-    `launchctl bootstrap gui/501 ${fixture.plist(CURRENT_LABEL)}`,
-    `launchctl kickstart -k gui/501/${CURRENT_LABEL}`,
+  assert.deepEqual(fixture.launchctl(), [
+    `bootout gui/501/${LEGACY_LABEL}`,
+    `print gui/501/${LEGACY_LABEL}`,
+    `bootout gui/501/${CURRENT_LABEL}`,
+    `print gui/501/${CURRENT_LABEL}`,
+    `bootstrap gui/501 ${fixture.plist(CURRENT_LABEL)}`,
+    `kickstart gui/501/${CURRENT_LABEL}`,
   ]);
 });
 
+test("waits for the old instance to leave launchd before bootstrapping the new one (#21)", async (context) => {
+  // launchctl bootout returns before the process is gone; the label stays
+  // loaded for a while (seconds, when a phone holds the events stream open).
+  const fixture = createFixture(context, { loaded: [CURRENT_LABEL], lingerMs: 120 });
+
+  await installService(fixture.config, fixture.options);
+
+  const commands = fixture.launchctl();
+  const prints = commands.filter((command) => command === `print gui/501/${CURRENT_LABEL}`);
+  assert.ok(prints.length >= 2, `expected repeated polling, saw ${prints.length} print(s)`);
+  assert.ok(
+    commands.indexOf(`bootstrap gui/501 ${fixture.plist(CURRENT_LABEL)}`) > commands.lastIndexOf(`print gui/501/${CURRENT_LABEL}`),
+    "bootstrap must come after the last poll",
+  );
+  assert.deepEqual(fixture.loaded(), [CURRENT_LABEL]);
+});
+
+test("retries bootstrap while launchd still reports the label busy, then succeeds", async (context) => {
+  let failures = 2;
+  const fixture = createFixture(context, {
+    fail: (command) => {
+      if (command.startsWith("bootstrap") && failures-- > 0) {
+        throw new Error("`launchctl bootstrap` failed: Bootstrap failed: 5: Input/output error");
+      }
+    },
+  });
+
+  await installService(fixture.config, fixture.options);
+
+  const bootstraps = fixture.launchctl().filter((command) => command.startsWith("bootstrap"));
+  assert.equal(bootstraps.length, 3);
+  assert.deepEqual(fixture.loaded(), [CURRENT_LABEL]);
+});
+
+test("gives up with a clear message when the old instance never exits", async (context) => {
+  const fixture = createFixture(context, { loaded: [CURRENT_LABEL], lingerMs: Number.POSITIVE_INFINITY });
+  fixture.options.bootoutTimeoutMs = 100;
+
+  await assert.rejects(
+    () => installService(fixture.config, fixture.options),
+    /still running .*launchctl bootout gui\/501\/com\.parvezrob\.mocha\.host/,
+  );
+  assert.equal(fixture.launchctl().some((command) => command.startsWith("bootstrap")), false);
+});
+
 test("restores the legacy service if the Mocha service cannot bootstrap", async (context) => {
-  const fixture = createFixture(context, (command) => {
-    if (command === `launchctl bootstrap gui/501 ${fixture.plist(CURRENT_LABEL)}`) {
-      throw new Error("bootstrap failed");
-    }
+  const fixture = createFixture(context, {
+    fail: (command) => {
+      if (command === `bootstrap gui/501 ${fixture.plist(CURRENT_LABEL)}`) {
+        throw new Error("bootstrap failed");
+      }
+    },
   });
   const legacyPlist = fixture.plist(LEGACY_LABEL);
   mkdirSync(path.dirname(legacyPlist), { recursive: true });
@@ -51,8 +100,9 @@ test("restores the legacy service if the Mocha service cannot bootstrap", async 
 
   assert.equal(existsSync(fixture.plist(CURRENT_LABEL)), false);
   assert.equal(existsSync(legacyPlist), true);
-  assert.ok(fixture.commands.includes(`launchctl bootstrap gui/501 ${legacyPlist}`));
-  assert.ok(fixture.commands.includes(`launchctl kickstart -k gui/501/${LEGACY_LABEL}`));
+  assert.ok(fixture.launchctl().includes(`bootstrap gui/501 ${legacyPlist}`));
+  assert.ok(fixture.launchctl().includes(`kickstart gui/501/${LEGACY_LABEL}`));
+  assert.deepEqual(fixture.loaded(), [LEGACY_LABEL]);
 });
 
 test("uninstall removes both current and legacy services idempotently", async (context) => {
@@ -70,19 +120,43 @@ test("uninstall removes both current and legacy services idempotently", async (c
   assert.equal(removed.some(existsSync), false);
 });
 
-function createFixture(context: TestContext, fail?: (command: string) => void) {
+interface FixtureOptions {
+  fail?: (command: string) => void;
+  /** Labels launchd already has loaded when the install starts. */
+  loaded?: string[];
+  /** How long a booted-out label keeps answering `launchctl print` (the #21 window). */
+  lingerMs?: number;
+}
+
+// A small launchd: `bootstrap` loads a label, `bootout` unloads it after
+// `lingerMs`, and `print` fails once it is gone — exactly the signals the
+// installer relies on.
+function createFixture(context: TestContext, fixtureOptions: FixtureOptions = {}) {
   const homeDirectory = mkdtempSync(path.join(tmpdir(), "mocha-service-test-"));
   context.after(() => rmSync(homeDirectory, { recursive: true, force: true }));
   const commands: string[] = [];
+  const loaded = new Set(fixtureOptions.loaded ?? []);
+  const labelOf = (target: string) => target.slice("gui/501/".length);
   const options: ServiceOptions = {
     execute: async (executable, args) => {
-      const command = [executable, ...args].join(" ");
+      const command = args.join(" ");
+      assert.equal(executable, "launchctl");
       commands.push(command);
-      fail?.(command);
+      fixtureOptions.fail?.(command);
+      const [verb = "", target = ""] = args;
+      if (verb === "print" && !loaded.has(labelOf(target))) throw new Error(`Could not find service "${target}"`);
+      if (verb === "bootstrap") loaded.add(path.basename(args[2] ?? "", ".plist"));
+      if (verb === "bootout") {
+        const linger = fixtureOptions.lingerMs ?? 0;
+        if (linger === Number.POSITIVE_INFINITY) return;
+        if (linger > 0) setTimeout(() => loaded.delete(labelOf(target)), linger);
+        else loaded.delete(labelOf(target));
+      }
     },
     homeDirectory,
     operatingSystem: "darwin",
     projectRoot: "/project/mocha",
+    retryIntervalMs: 10,
     userId: 501,
   };
   const config: HostConfig = {
@@ -97,8 +171,9 @@ function createFixture(context: TestContext, fail?: (command: string) => void) {
   };
 
   return {
-    commands,
     config,
+    launchctl: () => [...commands],
+    loaded: () => [...loaded],
     options,
     plist: (label: string) => path.join(homeDirectory, "Library", "LaunchAgents", `${label}.plist`),
   };

@@ -5,7 +5,7 @@ Practical knowledge for building, deploying, and verifying Mocha end-to-end. Pol
 ## Host
 
 - The host runs as a launchd LaunchAgent `com.parvezrob.mocha.host` (KeepAlive auto-restart). Logs: `~/.mocha/host.log`.
-- **Deploying host changes:** the service runs `dist/`, not watch mode. From `apps/host`: `npm run build && npm run service:install` (install boots the old instance out and kickstarts the new one). `npm run dev` remains available for iteration but is not how the phone connects.
+- **Deploying host changes:** the service runs `dist/`, not watch mode. From `apps/host`: `npm run build && npm run service:install` (install boots the old instance out, waits for it to actually leave launchd, then bootstraps the new one; a genuine failure prints launchctl's own error — no retry ritual). On SIGTERM the host closes every phone stream with WebSocket code `1001 host restarting` and exits within 2 s, so a deploy with the app open is fine (#21). `npm run dev` remains available for iteration but is not how the phone connects.
 - Pair a phone: `npm run pair` in `apps/host` prints a QR (needs the service running and Tailscale Serve up; `-- --url https://…` overrides the detected address). `npm run devices` lists paired phones; `npm run devices revoke <id|name>` cuts one immediately. State: `~/.mocha/devices.json` (credential hashes only) and `~/.mocha/identity.json` (the host fingerprint key).
 - Reveal the host's own token: `npm run token` in `apps/host` — the CLI/dev credential, never handed to a phone once pairing is in use.
 - The launchd plist sets a UTF-8 `LANG` deliberately: launchd provides no locale, and agents, the pty bridge, and herdr's NDJSON all assume UTF-8.

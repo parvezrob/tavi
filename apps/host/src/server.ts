@@ -236,6 +236,21 @@ export async function createMochaServer(options: MochaServerOptions) {
     attachments.disposeAll();
     agentEvents?.stop();
   });
+
+  // `http.Server.close` only stops accepting; it waits for every open
+  // connection to end on its own, and upgraded WebSocket sockets are not even
+  // tracked. A phone with the app open holds the events stream (and often a
+  // terminal) for hours, so a plain close never finishes and launchd has to
+  // wait out its kill timer while `launchctl bootout` reports success (#21).
+  // Tell every client the host is restarting and drop the connections so the
+  // process exits promptly.
+  const closeServer = server.close.bind(server);
+  server.close = (callback?: (error?: Error) => void) => {
+    for (const websocket of eventsWss.clients) websocket.close(1001, "host restarting");
+    for (const websocket of wss.clients) websocket.close(1001, "host restarting");
+    server.closeAllConnections();
+    return closeServer(callback);
+  };
   return server;
 }
 
