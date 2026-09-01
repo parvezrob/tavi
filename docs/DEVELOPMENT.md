@@ -9,7 +9,7 @@ Practical knowledge for building, deploying, and verifying Mocha end-to-end. Pol
 - Pair a phone: `npm run pair` in `apps/host` prints a QR (needs the service running and Tailscale Serve up; `-- --url https://…` overrides the detected address). `npm run devices` lists paired phones; `npm run devices revoke <id|name>` cuts one immediately. State: `~/.mocha/devices.json` (credential hashes only) and `~/.mocha/identity.json` (the host fingerprint key).
 - Reveal the host's own token: `npm run token` in `apps/host` — the CLI/dev credential, never handed to a phone once pairing is in use.
 - The launchd plist sets a UTF-8 `LANG` deliberately: launchd provides no locale, and agents, the pty bridge, and herdr's NDJSON all assume UTF-8.
-- Host tests: `npm test` in `apps/host`. `herdr-events.test.ts` has a rare timing flake — rerun before trusting a failure.
+- Host tests: `npm test` in `apps/host`.
 
 ## iOS
 
