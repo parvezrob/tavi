@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { bootstrap, BootstrapError, type BootstrapDeps, diagnose, durablePackageRoot, formatChecks } from "./bootstrap.js";
-import type { HostConfig } from "./config.js";
+import { type HostConfig, VERSION } from "./config.js";
 
 const config: HostConfig = {
   bindHost: "127.0.0.1",
@@ -29,6 +29,8 @@ interface World {
   serveProxies: string[];
   serviceLoaded: boolean;
   healthy: boolean;
+  /** Version the running host reports; defaults to this package's. */
+  runningVersion?: string;
   serveFails?: string | undefined;
 }
 
@@ -90,16 +92,18 @@ function createDeps(world: World) {
       if (world.ptyError) throw new Error(world.ptyError);
     },
     which: async (tool) => world.tools[tool],
-    healthy: async () => world.healthy,
+    healthy: async () => (world.healthy ? (world.runningVersion ?? VERSION) : undefined),
     installService: async () => {
       commands.push("install-service");
       if (world.serviceFails) throw new Error(world.serviceFails);
       world.serviceLoaded = true;
       world.healthy = true;
+      world.runningVersion = VERSION;
     },
     startForSession: async () => {
       commands.push("start-for-session");
       world.healthy = true;
+      world.runningVersion = VERSION;
     },
     herdrRunning: async () => world.herdrRunning === true,
     startHerdr: async (herdrPath) => {
@@ -175,6 +179,28 @@ test("pair shows one checklist, asks once, then does the work and reports each �
   assert.ok(reports.some((line) => /^  ✓ Private address   https:\/\/studio.tail1234.ts.net$/.test(line)), reports.join("\n"));
   assert.ok(reports.some((line) => /^  ✓ Tavi runs in the background$/.test(line)));
   assert.ok(!reports.some((line) => /systemctl|launchctl|serve --bg/.test(line)), reports.join("\n"));
+});
+
+test("a background host older than this package is updated, not admired (ubuntu 0.1.3 vs 0.1.5)", async () => {
+  const world: World = { ...READY, serveProxies: [...READY.serveProxies], runningVersion: "0.1.3", answers: [true] };
+  const { deps, commands, reports, questions } = createDeps(world);
+
+  await bootstrap(config, deps);
+
+  assert.match(reports[0] ?? "", new RegExp(`• Update Tavi in the background to ${VERSION.replaceAll(".", "\\.")}  — will do`));
+  assert.deepEqual(questions, ["Do this now? Your password may be asked once."]);
+  assert.ok(commands.includes("install-service"));
+  assert.ok(reports.some((line) => line.includes(`✓ Tavi runs in the background  (${VERSION})`)), reports.join("\n"));
+  assert.equal(world.runningVersion, VERSION);
+});
+
+test("doctor reports an outdated background host with the update command", async () => {
+  const { deps } = createDeps({ ...READY, serveProxies: [...READY.serveProxies], runningVersion: "0.1.3" });
+  const checks = await diagnose(config, deps);
+  const host = checks.find((check) => check.name === "Tavi host");
+  assert.equal(host?.ok, false);
+  assert.match(host?.detail ?? "", /older version \(0\.1\.3\)/);
+  assert.match(host?.fix ?? "", /install-service/);
 });
 
 test("nothing to do: the checklist is all ✓ and no question is asked", async () => {

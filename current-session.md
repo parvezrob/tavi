@@ -2,7 +2,7 @@
 
 > Every agent starts here. This file holds the live state of the project *right now* and the next piece of work. Update it before ending a session (or at any significant milestone); move the previous state into [`handoffs.md`](./handoffs.md). Keep it short — details belong in the linked docs.
 
-**Last updated:** 2026-09-01 (ubuntu paired via `npx tavi-host pair` — first Linux pairing; herdr 0.8.2/protocol 20 supported; 0.1.5 ready to publish; next: ubuntu re-run with agent cards → #50 multi-host)
+**Last updated:** 2026-09-01 (ubuntu paired via `npx tavi-host pair` — first Linux pairing; herdr 0.8.2/protocol 20 supported; 0.1.6 ready to publish (pair now updates an outdated background host); next: ubuntu re-run with agent cards → #50 multi-host)
 
 ## Next work
 

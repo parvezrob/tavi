@@ -5,7 +5,7 @@ import { createInterface } from "node:readline/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import type { HostConfig } from "./config.js";
+import { type HostConfig, VERSION } from "./config.js";
 import { installService, SERVICE_LABEL } from "./service.js";
 import { LINUX_UNIT } from "./service-linux.js";
 import { installHerdrService } from "./herdr-service.js";
@@ -25,6 +25,8 @@ const HEALTH_WAIT_MS = 15_000;
 export interface Check {
   name: string;
   ok: boolean;
+  /** The host is running but older than this package. */
+  outdated?: boolean;
   /** Missing optional tools degrade features; they never block pairing. */
   optional?: boolean;
   detail: string;
@@ -43,7 +45,8 @@ export interface BootstrapDeps {
   /** Loads the pty native module; rejects with the loader's message when it is missing. */
   loadPty: () => Promise<void>;
   which: (command: string) => Promise<string | undefined>;
-  healthy: (port: number) => Promise<boolean>;
+  /** The running host's version when it answers on the port, else undefined. */
+  healthy: (port: number) => Promise<string | undefined>;
   installService: () => Promise<void>;
   /** True when herdr's server answers on its socket. */
   herdrRunning: () => Promise<boolean>;
@@ -100,7 +103,9 @@ export function defaultDeps(config: HostConfig, options: { assumeYes?: boolean }
       const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
         signal: AbortSignal.timeout(2_000),
       }).catch(() => undefined);
-      return response?.ok === true;
+      if (!response?.ok) return undefined;
+      const body = (await response.json().catch(() => ({}))) as { version?: unknown };
+      return typeof body.version === "string" ? body.version : "unknown";
     },
     installService: async () => {
       await installService(config, { packageRoot: await durablePackageRoot(config) });
@@ -185,6 +190,10 @@ export async function bootstrap(config: HostConfig, deps: BootstrapDeps): Promis
   }
   if (service.ok) {
     lines.push("  ✓ Tavi runs in the background");
+  } else if (service.outdated) {
+    lines.push(`  • Update Tavi in the background to ${VERSION}  — will do`);
+    pending.push(service);
+    steps.push({ label: "Update Tavi in the background", done: `Tavi runs in the background  (${VERSION})`, run: () => stepService(config, deps) });
   } else {
     lines.push("  • Run Tavi in the background  — will set up");
     pending.push(service);
@@ -335,7 +344,7 @@ async function waitFor(deps: BootstrapDeps, ready: () => Promise<boolean>, probl
 
 async function waitHealthy(config: HostConfig, deps: BootstrapDeps, problem: string): Promise<void> {
   const deadline = deps.now() + HEALTH_WAIT_MS;
-  while (!(await deps.healthy(config.port))) {
+  while ((await deps.healthy(config.port)) !== VERSION) {
     if (deps.now() >= deadline) {
       throw new Error(`${problem} on port ${config.port} after ${HEALTH_WAIT_MS / 1000}s. See ${path.join(config.stateDir, "host.log")}.`);
     }
@@ -476,7 +485,20 @@ async function checkServe(config: HostConfig, deps: BootstrapDeps, cli: string |
 
 async function checkService(config: HostConfig, deps: BootstrapDeps): Promise<Check> {
   const name = "Tavi host";
-  const healthy = await deps.healthy(config.port);
+  const running = await deps.healthy(config.port);
+  const healthy = running !== undefined;
+  // A background service keeps the copy it was installed with; a newer
+  // `npx tavi-host pair` must update it, not admire it (ubuntu, 2026-09-01:
+  // the service stayed on 0.1.3 while 0.1.5 printed all ✓).
+  if (healthy && running !== VERSION) {
+    return {
+      name,
+      ok: false,
+      detail: `running an older version (${running}); this is ${VERSION}.`,
+      fix: "npx tavi-host install-service (tavi pair offers this)",
+      outdated: true,
+    };
+  }
   if (deps.operatingSystem === "linux") {
     const active = await deps
       .execute("systemctl", ["--user", "is-active", LINUX_UNIT])
