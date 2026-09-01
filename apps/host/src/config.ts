@@ -33,7 +33,9 @@ type EnvironmentKey =
   | "MACHINE_NAME"
   | "SHELL"
   | "ROOTS"
-  | "HERDR_SOCKET";
+  | "HERDR_SOCKET"
+  | "PREVIEW_PORT"
+  | "PREVIEW_DOOR_PORT";
 
 interface StoredConfig {
   token: string;
@@ -53,6 +55,11 @@ export interface HostConfig {
   roots: string[];
   stateDir: string;
   machineName: string;
+  // Dev-server preview (#58): the host's loopback listener that fronts a
+  // person's dev servers, and the HTTPS port Tailscale Serve publishes it
+  // on (`https://<name>.ts.net:<previewDoorPort>` → `127.0.0.1:<previewPort>`).
+  previewPort: number;
+  previewDoorPort: number;
 }
 
 export interface LoadConfigOptions {
@@ -83,6 +90,8 @@ export function loadConfig(options: LoadConfigOptions = {}): HostConfig {
     : path.join(homeDirectory, LEGACY_STATE_DIRECTORY);
   if (legacyStateDir) migrateLegacyStateDirectory(legacyStateDir, stateDir, report);
   const rawPort = Number.parseInt(read("PORT") || "8787", 10);
+  const previewPort = portOr(read("PREVIEW_PORT"), 8788);
+  const previewDoorPort = portOr(read("PREVIEW_DOOR_PORT"), 8443);
   // Trim and drop blanks *before* resolving: path.resolve("") is the host
   // process's own working directory, so a stray trailing comma would
   // silently widen the roots — and roots now decide where an agent may be
@@ -103,9 +112,16 @@ export function loadConfig(options: LoadConfigOptions = {}): HostConfig {
     roots: configuredRoots?.length ? configuredRoots : defaultRoots(homeDirectory),
     stateDir,
     machineName: read("MACHINE_NAME") || machineHostname.split(".")[0] || machineHostname,
+    previewPort,
+    previewDoorPort,
   };
   reportDeprecated(report);
   return config;
+}
+
+function portOr(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 && parsed < 65_536 ? parsed : fallback;
 }
 
 // TAVI_* wins; a MOCHA_* value still applies (a service plist written before

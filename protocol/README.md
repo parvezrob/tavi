@@ -178,6 +178,22 @@ All four routes take `cwd` (absolute) and `path` (absolute, or relative to `cwd`
 
 Nothing under `/api/files` or `/api/changes` writes, renames, deletes, or runs anything but the fixed git reads above.
 
+### `/api/preview…` — private dev-server preview (#58)
+
+An agent starts something on `localhost:<port>`; the phone shows it in a WebKit view without the server being started any differently, and nobody but the paired phone can open it. Two listeners are involved:
+
+- **The API** (these routes, bearer-authenticated as everything else) mints and manages *tickets*.
+- **The door**: a second loopback listener in the host process (`TAVI_PREVIEW_PORT`, default `8788`) that Tailscale Serve publishes once, tailnet-only, as `https://<name>.ts.net:<TAVI_PREVIEW_DOOR_PORT>` (default `8443`; `tavi pair` adds it, `tavi doctor` checks it). The door forwards a request to `127.0.0.1:<port>` **only** when it carries a valid ticket in the `tavi_preview` cookie, and the ticket names the one port it may reach. Without one it answers `401` with a plain page ("Open this from Tavi"). No path prefix: `/assets/index.js` reaches the dev server as `/assets/index.js`. WebSocket upgrades are piped raw, so HMR works. The dev server sees `Host`/`Origin`/`Referer` as `localhost:<port>` (Vite's and Next's allowed-host checks pass), never sees the ticket cookie, and gets `X-Forwarded-Host`/`X-Forwarded-Proto: https`. A `Location` back to its own `http://localhost:<port>/x` is rewritten to `/x`. When the dev server is gone the door answers `502` with a plain page, never a hang.
+
+- `GET /api/preview/door` → `{ "doorPort": 8443, "ready": true, "cookieName": "tavi_preview" }`. `ready` is whether Tailscale Serve publishes the door right now (asked of Tailscale, cached a minute).
+- `GET /api/preview/candidates?cwd=…` → `{ "available": true, "servers": [{ "port": 5173, "command": "node", "cwd": "/Users/me/app" }] }` — processes listening on a loopback or wildcard TCP port whose working directory is inside `cwd` or a parent of it (a monorepo's root server counts for the app inside it), inside the roots either way; one row per port; via `lsof`, run only when asked. `{ "available": false, "reason" }` when `lsof` is missing — the phone offers a typed port instead.
+- `POST /api/preview` `{ "cwd", "port" }` → `201` `{ "id", "port", "doorPort", "cookieName", "ticket" }`. The host first checks something accepts connections on that loopback port (`409` "Nothing is listening on localhost:<port>" otherwise) and that the door is published (`409` + `{ "doorMissing": true }` with the `pair` instruction otherwise). The ticket (256-bit, returned once, stored hashed) is bound to the calling device and to that port. The phone sets it as a `Secure; HttpOnly` cookie for the host name in a non-persistent `WKWebsiteDataStore` and loads `https://<host>:<doorPort>/`. `429` at 32 open previews.
+- `POST /api/preview/{id}/keepalive` → `{ "id", "port", "listening" }`. A preview lives while it is kept alive — this heartbeat or any traffic through the door — and dies **2 minutes** after the last sign of life (a killed app, a lost network). There is no other clock: open means reachable, closed means gone. `listening` tells the phone when the dev server itself has stopped.
+- `DELETE /api/preview/{id}` → `204`. The ticket is dead at once; the door answers `401` again.
+- `POST /api/preview/stop` `{ "cwd", "port" }` → `{ "stopped": true, "pid", "command" }`. "Stop server" from the phone: re-discovers at that moment, and sends `SIGTERM` only to a process that owns that port *and* belongs to this project by the candidates rule above (`404` otherwise). The only write on this path.
+
+Only the device that opened a preview can keep it alive or close it (`404` for anyone else). Every ticket lives in memory: a host restart ends every preview. Tailscale Funnel is never involved; the door is as reachable as the host's own address — from the tailnet, by ticket holders only.
+
 ## Terminal WebSocket
 
 Connect to:

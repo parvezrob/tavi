@@ -8,7 +8,7 @@ import type { HostConfig } from "./config.js";
 import { uninstall, type UninstallDeps } from "./uninstall.js";
 
 function config(stateDir: string): HostConfig {
-  return { bindHost: "127.0.0.1", port: 8787, token: "token-long-enough-for-the-test-suite", shell: "/bin/sh", herdrSocket: "/tmp/h.sock", roots: [], stateDir, machineName: "m" };
+  return { bindHost: "127.0.0.1", port: 8787, token: "token-long-enough-for-the-test-suite", shell: "/bin/sh", herdrSocket: "/tmp/h.sock", roots: [], stateDir, machineName: "m", previewPort: 8788, previewDoorPort: 8443 };
 }
 
 function deps(overrides: Partial<UninstallDeps> & { answer: boolean; handlers?: Array<[string, string]> }) {

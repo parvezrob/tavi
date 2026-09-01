@@ -2,7 +2,8 @@
 import { AttentionOverlay, AttentionReconciler, AttentiveAgentEvents } from "./attention.js";
 import { homedir } from "node:os";
 import { removeCommandLink } from "./command-link.js";
-import { bootstrap, BootstrapError, defaultDeps, diagnose, durablePackageRoot, formatChecks, serviceEntrypoint } from "./bootstrap.js";
+import { bootstrap, BootstrapError, defaultDeps, diagnose, doorReady, durablePackageRoot, formatChecks, serviceEntrypoint } from "./bootstrap.js";
+import { PreviewRegistry, createPreviewDoor } from "./preview.js";
 import { installClaudeHooks, removeClaudeHooks } from "./claude-hooks.js";
 import { uninstallHerdrService } from "./herdr-service.js";
 import { uninstall } from "./uninstall.js";
@@ -243,11 +244,25 @@ const updater = autoUpdate
       }),
     )
   : undefined;
+// Dev-server preview (#58): the door is a second loopback listener that
+// Tailscale Serve publishes; it forwards only for tickets the API minted.
+// Whether Serve publishes it is asked of Tailscale, cached for a minute.
+const previews = new PreviewRegistry();
+const door = createPreviewDoor({ registry: previews });
+const bootstrapDeps = defaultDeps(config);
+let doorState: { at: number; ready: boolean } | undefined;
 const server = await createTaviServer({
   config,
   herdr,
   agentEvents,
   attention,
+  previews,
+  doorReady: async () => {
+    if (doorState && Date.now() - doorState.at < 60_000 && doorState.ready) return true;
+    const ready = await doorReady(config, bootstrapDeps).catch(() => false);
+    doorState = { at: Date.now(), ready };
+    return ready;
+  },
   update: async () =>
     updater
       ? updater.checkNow()
@@ -267,6 +282,12 @@ server.on("error", (error: NodeJS.ErrnoException) => {
   console.error(`Tavi could not start: ${error.message}`);
   process.exit(1);
 });
+door.on("error", (error: NodeJS.ErrnoException) => {
+  // The main server's EADDRINUSE handler above explains a second copy; a
+  // busy preview port alone only costs previews, so say so and carry on.
+  console.error(`Dev-server previews are off: the preview port ${config.previewPort} is busy (${error.code ?? error.message}). Set TAVI_PREVIEW_PORT to a free port.`);
+});
+door.listen(config.previewPort, "127.0.0.1");
 server.listen(config.port, config.bindHost, () => {
   if (managed && markStarted(runtimeLayout(config.stateDir), VERSION)) console.log(`Updated to Tavi ${VERSION}.`);
   console.log(`Tavi ${VERSION} is running on http://${config.bindHost}:${config.port}`);
@@ -276,6 +297,8 @@ server.listen(config.port, config.bindHost, () => {
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
+    door.close();
+    door.closeAllConnections?.();
     server.close(() => process.exit(0));
     // Whatever still holds the event loop (a pty mid-teardown, a client that
     // never answers the close frame) must not keep the old instance alive while

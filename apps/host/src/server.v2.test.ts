@@ -26,6 +26,8 @@ const config: HostConfig = {
   roots: [tmpdir()],
   stateDir: tmpdir(),
   machineName: "Test",
+  previewPort: 8788,
+  previewDoorPort: 8443,
 };
 
 type V2Event =

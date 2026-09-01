@@ -164,6 +164,7 @@ export async function diagnose(config: HostConfig, deps: BootstrapDeps): Promise
     await checkPty(deps),
     tailscale.check,
     await checkServe(config, deps, tailscale.cli),
+    await checkDoor(config, deps, tailscale.cli),
     await checkService(config, deps),
     await checkHerdr(deps),
     ...(await checkCommand(deps)),
@@ -201,6 +202,7 @@ export async function bootstrap(config: HostConfig, deps: BootstrapDeps): Promis
 
   const tailscale = await checkTailscale(deps);
   const serve = await checkServe(config, deps, tailscale.cli);
+  const door = await checkDoor(config, deps, tailscale.cli);
   const service = await checkService(config, deps);
   const herdr = await deps.which("herdr");
 
@@ -222,6 +224,12 @@ export async function bootstrap(config: HostConfig, deps: BootstrapDeps): Promis
     lines.push("  • Private address for your phone  — will set up");
     pending.push(serve);
     steps.push({ label: "Private address", done: "Private address", run: () => stepServe(config, deps) });
+  }
+  if (door.ok) {
+    lines.push("  ✓ Private address for previews  (dev servers on the phone)");
+  } else {
+    lines.push("  • Private address for previews, so dev servers show on the phone  — will set up");
+    steps.push({ label: "Private address for previews", done: "Private address for previews", run: () => stepDoor(config, deps) });
   }
   if (service.ok) {
     lines.push("  ✓ Tavi runs in the background");
@@ -347,6 +355,70 @@ async function stepServe(config: HostConfig, deps: BootstrapDeps): Promise<strin
     }
   }
   throw new BootstrapError([await checkServe(config, deps, cli)]);
+}
+
+// The preview door (#58): a second Serve entry, set once, that fronts the
+// host's preview listener. Nothing gets through it without a ticket, so it
+// is as safe to leave up as the host's own address.
+async function stepDoor(config: HostConfig, deps: BootstrapDeps): Promise<string | undefined> {
+  const cli = (await checkTailscale(deps)).cli;
+  if (!cli) throw new Error("Tailscale is not available.");
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const door = await checkDoor(config, deps, cli);
+    if (door.ok) return door.detail.split(" → ")[0];
+    try {
+      await deps.execute(cli, ["serve", "--bg", `--https=${config.previewDoorPort}`, String(config.previewPort)]);
+    } catch (error) {
+      const explained = explainServeFailure(describe(error), config.previewPort);
+      if (explained.kind === "operator") {
+        await ensureOperator(deps, cli, true);
+        continue;
+      }
+      throw new BootstrapError([{ ...door, detail: explained.detail, fix: doorCommand(config) }]);
+    }
+  }
+  throw new BootstrapError([await checkDoor(config, deps, cli)]);
+}
+
+function doorCommand(config: HostConfig): string {
+  return `tailscale serve --bg --https=${config.previewDoorPort} ${config.previewPort}`;
+}
+
+/** Whether Tailscale Serve publishes the preview door right now (the host asks before minting a ticket). */
+export async function doorReady(config: HostConfig, deps: Pick<BootstrapDeps, "which" | "execute">): Promise<boolean> {
+  const cli = await deps.which("tailscale");
+  if (!cli) return false;
+  return (await findDoor(config, deps, cli)) !== undefined;
+}
+
+async function findDoor(config: HostConfig, deps: Pick<BootstrapDeps, "execute">, cli: string): Promise<{ host: string; proxy: string } | undefined> {
+  const handlers = await serveHandlers(deps, cli);
+  return handlers.find((handler) => new RegExp(`:${config.previewDoorPort}$`).test(handler.host) && new RegExp(`:${config.previewPort}$`).test(handler.proxy));
+}
+
+async function checkDoor(config: HostConfig, deps: BootstrapDeps, cli: string | undefined): Promise<Check> {
+  const name = "Preview door";
+  const fix = doorCommand(config);
+  if (!cli) return { name, ok: false, detail: "Needs Tailscale first.", fix };
+  const ours = await findDoor(config, deps, cli);
+  if (!ours) {
+    return { name, ok: false, detail: `Port ${config.previewPort} is not published as https://…:${config.previewDoorPort}, so dev servers cannot show on the phone.`, fix };
+  }
+  return { name, ok: true, detail: `https://${ours.host} → ${ours.proxy}` };
+}
+
+async function serveHandlers(deps: Pick<BootstrapDeps, "execute">, cli: string): Promise<Array<{ host: string; proxy: string }>> {
+  try {
+    const status = JSON.parse(await deps.execute(cli, ["serve", "status", "--json"])) as {
+      Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }>;
+    };
+    return Object.entries(status.Web ?? {}).flatMap(([host, site]) =>
+      Object.values(site.Handlers ?? {}).map((handler) => ({ host, proxy: handler.Proxy ?? "" })),
+    );
+  } catch {
+    // No serve config at all prints nothing parseable on some versions.
+    return [];
+  }
 }
 
 async function ensureOperator(deps: BootstrapDeps, cli: string, force = false): Promise<void> {
@@ -507,18 +579,8 @@ async function checkServe(config: HostConfig, deps: BootstrapDeps, cli: string |
   const name = "Tailscale Serve";
   const fix = `tailscale serve --bg ${config.port}`;
   if (!cli) return { name, ok: false, detail: "Needs Tailscale first.", fix };
-  let handlers: Array<{ host: string; proxy: string }> = [];
-  try {
-    const status = JSON.parse(await deps.execute(cli, ["serve", "status", "--json"])) as {
-      Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }>;
-    };
-    handlers = Object.entries(status.Web ?? {}).flatMap(([host, site]) =>
-      Object.values(site.Handlers ?? {}).map((handler) => ({ host, proxy: handler.Proxy ?? "" })),
-    );
-  } catch {
-    // No serve config at all prints nothing parseable on some versions.
-  }
-  const ours = handlers.find((handler) => new RegExp(`:${config.port}$`).test(handler.proxy));
+  const handlers = await serveHandlers(deps, cli);
+  const ours = handlers.find((handler) => /:443$/.test(handler.host) && new RegExp(`:${config.port}$`).test(handler.proxy));
   if (!ours) {
     return { name, ok: false, detail: `Port ${config.port} is not exposed as a private HTTPS address on your tailnet.`, fix };
   }

@@ -168,6 +168,8 @@ function createFixture(context: TestContext, fixtureOptions: FixtureOptions = {}
     roots: ["/project"],
     stateDir: path.join(homeDirectory, ".tavi"),
     machineName: "Studio",
+    previewPort: 8788,
+    previewDoorPort: 8443,
   };
 
   return {

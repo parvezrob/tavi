@@ -13,7 +13,7 @@ test("Linux installs a systemd user unit with the host environment and enables l
   const config: HostConfig = {
     bindHost: "127.0.0.1", port: 8787, token: "token-long-enough-for-the-test-suite", shell: "/bin/bash",
     herdrSocket: path.join(home, ".config/herdr/herdr.sock"), roots: [path.join(home, "code")],
-    stateDir: path.join(home, ".tavi"), machineName: "fedora",
+    stateDir: path.join(home, ".tavi"), machineName: "fedora", previewPort: 8788, previewDoorPort: 8443,
   };
 
   const unit = await installService(config, {

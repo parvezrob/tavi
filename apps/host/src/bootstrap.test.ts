@@ -15,6 +15,8 @@ const config: HostConfig = {
   roots: [],
   stateDir: "/home/tester/.tavi",
   machineName: "studio",
+  previewPort: 8788,
+  previewDoorPort: 8443,
 };
 
 interface World {
@@ -27,6 +29,8 @@ interface World {
   herdrRunning?: boolean;
   backendState: string;
   serveProxies: string[];
+  /** Proxies behind the preview door (:8443). Defaults to one when the host's own address exists (#58). */
+  doorProxies?: string[];
   serviceLoaded: boolean;
   healthy: boolean;
   /** Version the running host reports; defaults to this package's. */
@@ -73,12 +77,15 @@ function createDeps(world: World) {
         return JSON.stringify({ BackendState: world.backendState, Self: { DNSName: "studio.tail1234.ts.net." } });
       }
       if (args[0] === "serve" && args[1] === "status") {
-        const handlers = Object.fromEntries(world.serveProxies.map((proxy, index) => [`/${index || ""}`, { Proxy: proxy }]));
-        return JSON.stringify({ Web: { "studio.tail1234.ts.net:443": { Handlers: handlers } } });
+        const site = (proxies: string[]) => ({ Handlers: Object.fromEntries(proxies.map((proxy, index) => [`/${index || ""}`, { Proxy: proxy }])) });
+        return JSON.stringify({
+          Web: { "studio.tail1234.ts.net:443": site(world.serveProxies), "studio.tail1234.ts.net:8443": site(world.doorProxies ?? []) },
+        });
       }
       if (args[0] === "serve" && args[1] === "--bg") {
         if (world.serveFails) throw new Error(world.serveFails);
-        world.serveProxies.push(`http://127.0.0.1:${args[2]}`);
+        if (args[2]?.startsWith("--https=")) (world.doorProxies ??= []).push(`http://127.0.0.1:${args[3]}`);
+        else world.serveProxies.push(`http://127.0.0.1:${args[2]}`);
         return "";
       }
       if (command === "launchctl") {
@@ -139,6 +146,7 @@ const READY: World = {
   herdrRunning: true,
   backendState: "Running",
   serveProxies: ["http://127.0.0.1:8787"],
+  doorProxies: ["http://127.0.0.1:8788"],
   serviceLoaded: true,
   healthy: true,
 };
@@ -150,6 +158,7 @@ test("doctor reports every check green on a configured machine", async () => {
     ["Terminal (pty)", true],
     ["Tailscale", true],
     ["Tailscale Serve", true],
+    ["Preview door", true],
     ["Tavi host", true],
     ["herdr", true],
   ]);
@@ -159,23 +168,25 @@ test("doctor reports every check green on a configured machine", async () => {
 test("doctor on Linux reads the systemd unit state", async () => {
   const { deps } = createDeps({ ...READY, os: "linux", serveProxies: [...READY.serveProxies] });
   const checks = await diagnose(config, deps);
-  assert.match(checks[3]?.detail ?? "", /running as tavi-host.service/);
+  assert.match(checks[4]?.detail ?? "", /running as tavi-host.service/);
 });
 
 test("doctor says exactly what to install when Tailscale is missing, and marks herdr optional", async () => {
-  const { deps } = createDeps({ ...READY, tools: {}, serveProxies: [] });
+  const { deps } = createDeps({ ...READY, tools: {}, serveProxies: [], doorProxies: [] });
   const checks = await diagnose(config, deps);
-  const [, tailscale, serve, , herdr] = checks;
+  const [, tailscale, serve, door, , herdr] = checks;
   assert.equal(tailscale?.ok, false);
   assert.match(tailscale?.fix ?? "", /tailscale.com\/download/);
   assert.equal(serve?.ok, false);
+  assert.equal(door?.ok, false);
+  assert.match(door?.fix ?? "", /tailscale serve --bg --https=8443 8788/);
   assert.equal(herdr?.ok, false);
   assert.equal(herdr?.optional, true);
   assert.match(formatChecks(checks), /– herdr/);
 });
 
 test("pair shows one checklist, asks once, then does the work and reports each ✓", async () => {
-  const world: World = { ...READY, serveProxies: [], serviceLoaded: false, healthy: false, answers: [true] };
+  const world: World = { ...READY, serveProxies: [], doorProxies: [], serviceLoaded: false, healthy: false, answers: [true] };
   const { deps, commands, questions, reports } = createDeps(world);
 
   await bootstrap(config, deps);
@@ -184,10 +195,13 @@ test("pair shows one checklist, asks once, then does the work and reports each �
   assert.match(plan, /✓ Terminal ready/);
   assert.match(plan, /✓ Tailscale connected  \(studio.tail1234.ts.net\)/);
   assert.match(plan, /• Private address for your phone  — will set up/);
+  assert.match(plan, /• Private address for previews, so dev servers show on the phone  — will set up/);
   assert.match(plan, /• Run Tavi in the background  — will set up/);
   assert.match(plan, /✓ herdr running/);
-  assert.deepEqual(questions, ["Do these 2 things now? Your password may be asked once."]);
+  assert.deepEqual(questions, ["Do these 3 things now? Your password may be asked once."]);
   assert.ok(commands.includes("tailscale serve --bg 8787"), commands.join("\n"));
+  assert.ok(commands.includes("tailscale serve --bg --https=8443 8788"), commands.join("\n"));
+  assert.ok(reports.some((line) => /^  ✓ Private address for previews   https:\/\/studio.tail1234.ts.net:8443$/.test(line)), reports.join("\n"));
   assert.ok(commands.includes("install-service"));
   assert.ok(reports.some((line) => /^  ✓ Private address   https:\/\/studio.tail1234.ts.net$/.test(line)), reports.join("\n"));
   assert.ok(reports.some((line) => /^  ✓ Tavi runs in the background$/.test(line)));
@@ -259,7 +273,7 @@ test("Tailscale stopped on the Mac: plan says start, yes runs `tailscale up`", a
 });
 
 test("Serve denied on Linux: the operator step happens inside the private-address step, no extra question", async () => {
-  const world: World = { ...READY, os: "linux", serveProxies: [], serveFails: "sending serve config: Access denied: serve config denied", answers: [true] };
+  const world: World = { ...READY, os: "linux", serveProxies: [], doorProxies: [], serveFails: "sending serve config: Access denied: serve config denied", answers: [true] };
   const { deps, ran, questions } = createDeps(world);
 
   await bootstrap(config, deps);
@@ -270,7 +284,7 @@ test("Serve denied on Linux: the operator step happens inside the private-addres
 });
 
 test("Serve refused for HTTPS certificates: one plain sentence with the admin link, no jargon", async () => {
-  const world: World = { ...READY, serveProxies: [], serveFails: "error: HTTPS is not enabled for this tailnet", answers: [true] };
+  const world: World = { ...READY, serveProxies: [], doorProxies: [], serveFails: "error: HTTPS is not enabled for this tailnet", answers: [true] };
   const { deps } = createDeps(world);
   await assert.rejects(() => bootstrap(config, deps), (error: unknown) => {
     assert.ok(error instanceof BootstrapError);

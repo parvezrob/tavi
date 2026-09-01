@@ -33,6 +33,7 @@ import { InputError, safeSessionId } from "./validation.js";
 import { scanWorkspaces } from "./workspaces.js";
 import { diffFile, listChanges } from "./changes.js";
 import { MAX_RAW_BYTES, listDirectory, readTextContent, resolveWithinRoots, statFile } from "./files.js";
+import { PreviewRegistry, TICKET_COOKIE, defaultDiscoveryDeps, listProjectServers, stopProjectServer, validPort, type DiscoveryDeps } from "./preview.js";
 import { createReadStream } from "node:fs";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -63,6 +64,11 @@ export interface TaviServerOptions {
   update?: () => Promise<unknown>;
   attachmentRetentionMs?: number;
   attachmentBufferBytes?: number;
+  // Dev-server preview (#58): the tickets the door honours, whether Tailscale
+  // Serve publishes the door, and how dev servers are found. All injectable.
+  previews?: PreviewRegistry;
+  doorReady?: () => Promise<boolean>;
+  discovery?: DiscoveryDeps & { kill?: (pid: number) => void };
   // How often an open WebSocket re-checks that its credential still exists,
   // so `tavi devices revoke` cuts a live phone off, not just its next call.
   authorizationRecheckMs?: number;
@@ -93,7 +99,11 @@ export async function createTaviServer(options: TaviServerOptions) {
     pairing = new PairingSessions(),
     spawnTerminal = pty.spawn,
     update,
+    previews = new PreviewRegistry(),
+    doorReady = async () => false,
+    discovery,
   } = options;
+  previews.start();
   const eventsWss = new WebSocketServer({
     noServer: true,
     handleProtocols(protocols) {
@@ -146,6 +156,9 @@ export async function createTaviServer(options: TaviServerOptions) {
         devices,
         pairing,
         authorized,
+        previews,
+        doorReady,
+        discovery,
       });
     } catch (error) {
       const status = error instanceof InputError ? 400 : 500;
@@ -243,6 +256,7 @@ export async function createTaviServer(options: TaviServerOptions) {
   server.on("close", () => {
     attachments.disposeAll();
     agentEvents?.stop();
+    previews.stop();
   });
 
   // `http.Server.close` only stops accepting; it waits for every open
@@ -312,6 +326,9 @@ interface RouteContext {
   herdr?: HerdrAgentSource | undefined;
   attention?: AttentionOverlay | undefined;
   update?: (() => Promise<unknown>) | undefined;
+  previews: PreviewRegistry;
+  doorReady: () => Promise<boolean>;
+  discovery?: (DiscoveryDeps & { kill?: (pid: number) => void }) | undefined;
 }
 
 async function routeRequest(
@@ -319,7 +336,7 @@ async function routeRequest(
   response: ServerResponse,
   context: RouteContext,
 ): Promise<void> {
-  const { config, herdr, listWorkspaces, attention, projects, agentKinds, devices, pairing, authorized, update } = context;
+  const { config, herdr, listWorkspaces, attention, projects, agentKinds, devices, pairing, authorized, update, previews, doorReady, discovery } = context;
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
   if (url.pathname === "/api/health" && request.method === "GET") {
@@ -811,12 +828,116 @@ async function routeRequest(
     return;
   }
 
+  // Private dev-server preview (#58). Tickets are minted here, behind the
+  // bearer token; the door (a separate loopback listener Tailscale Serve
+  // publishes on `previewDoorPort`) honours them. Only the device that
+  // opened a preview can keep it alive or close it. See preview.ts.
+  if (url.pathname === "/api/preview/door" && request.method === "GET") {
+    sendJson(response, 200, { doorPort: config.previewDoorPort, ready: await doorReady(), cookieName: TICKET_COOKIE });
+    return;
+  }
+  if (url.pathname === "/api/preview/candidates" && request.method === "GET") {
+    const cwd = await resolveWithinRoots(url.searchParams.get("cwd") ?? "", "/", config.roots);
+    if (!cwd.ok) {
+      sendJson(response, cwd.status, { error: cwd.error, ...(cwd.outsideRoots ? { outsideRoots: true } : {}) });
+      return;
+    }
+    const found = await listProjectServers(cwd.path, config.roots, withOwnPortsExcluded(discovery, config));
+    if (!found.available) {
+      sendJson(response, 200, { available: false, reason: found.reason, servers: [] });
+      return;
+    }
+    sendJson(response, 200, { available: true, servers: found.servers.map(({ port, command, cwd: serverCwd }) => ({ port, command, cwd: serverCwd })) });
+    return;
+  }
+  if (url.pathname === "/api/preview" && request.method === "POST") {
+    const body = await readJsonBody(request);
+    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const cwd = await resolveWithinRoots(typeof record.cwd === "string" ? record.cwd : "", "/", config.roots);
+    if (!cwd.ok) {
+      sendJson(response, cwd.status, { error: cwd.error, ...(cwd.outsideRoots ? { outsideRoots: true } : {}) });
+      return;
+    }
+    if (!(await doorReady())) {
+      sendJson(response, 409, { error: "This computer's preview door is not set up. Run `npx tavi-host pair` on it once; it adds the door.", doorMissing: true });
+      return;
+    }
+    const opened = await previews.open({ deviceId: deviceIdOf(request, config, devices), port: record.port, cwd: cwd.path });
+    if (!opened.ok) {
+      sendJson(response, opened.status, { error: opened.error });
+      return;
+    }
+    const { preview, ticket } = opened.opened;
+    sendJson(response, 201, { id: preview.id, port: preview.port, doorPort: config.previewDoorPort, cookieName: TICKET_COOKIE, ticket });
+    return;
+  }
+  if (url.pathname === "/api/preview/stop" && request.method === "POST") {
+    const body = await readJsonBody(request);
+    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const cwd = await resolveWithinRoots(typeof record.cwd === "string" ? record.cwd : "", "/", config.roots);
+    if (!cwd.ok) {
+      sendJson(response, cwd.status, { error: cwd.error, ...(cwd.outsideRoots ? { outsideRoots: true } : {}) });
+      return;
+    }
+    const port = validPort(record.port);
+    if (port === undefined) {
+      sendJson(response, 400, { error: "port must be a number between 1 and 65535." });
+      return;
+    }
+    const stopped = await stopProjectServer(cwd.path, port, config.roots, withOwnPortsExcluded(discovery, config));
+    if (!stopped.ok) {
+      sendJson(response, stopped.status, { error: stopped.error });
+      return;
+    }
+    sendJson(response, 200, { stopped: true, pid: stopped.pid, command: stopped.command });
+    return;
+  }
+  const previewSessionMatch = url.pathname.match(/^\/api\/preview\/([a-f0-9]{16})(\/keepalive)?$/);
+  if (previewSessionMatch) {
+    const id = previewSessionMatch[1] ?? "";
+    const deviceId = deviceIdOf(request, config, devices);
+    if (previewSessionMatch[2] && request.method === "POST") {
+      const preview = previews.touch(id, deviceId);
+      if (!preview) {
+        sendJson(response, 404, { error: "That preview is no longer open." });
+        return;
+      }
+      const listening = await previews.listening(preview);
+      sendJson(response, 200, { id, port: preview.port, listening });
+      return;
+    }
+    if (!previewSessionMatch[2] && request.method === "DELETE") {
+      if (!previews.close(id, deviceId)) {
+        sendJson(response, 404, { error: "That preview is no longer open." });
+        return;
+      }
+      response.writeHead(204).end();
+      return;
+    }
+  }
+
   if (url.pathname.startsWith("/api/")) {
     sendJson(response, 404, { error: "Not found." });
     return;
   }
 
   sendJson(response, 404, { error: "Not found." });
+}
+
+// The host never offers (or stops) itself: its API and door ports are out.
+function withOwnPortsExcluded(
+  discovery: (DiscoveryDeps & { kill?: (pid: number) => void }) | undefined,
+  config: HostConfig,
+): DiscoveryDeps & { kill?: (pid: number) => void } {
+  const base = discovery ?? defaultDiscoveryDeps();
+  return { ...base, exclude: { pids: base.exclude?.pids ?? [], ports: [...(base.exclude?.ports ?? []), config.port, config.previewPort] } };
+}
+
+// The host's own token acts as one pseudo-device; a paired phone is itself.
+function deviceIdOf(request: IncomingMessage, config: HostConfig, devices: DeviceRegistry): string {
+  const token = bearerToken(request);
+  if (isAuthorized(token, config.token)) return "host";
+  return devices.authorize(token ?? "")?.id ?? "unknown";
 }
 
 function spawnAttachmentTerminal(

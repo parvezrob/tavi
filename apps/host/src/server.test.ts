@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Server } from "node:http";
@@ -27,6 +27,8 @@ const config: HostConfig = {
   roots: [],
   stateDir: "/tmp",
   machineName: "test-host",
+  previewPort: 8788,
+  previewDoorPort: 8443,
 };
 
 test("the host is API-only and does not serve a browser client", async () => {
@@ -1098,5 +1100,85 @@ test("read-only file routes: auth required, roots enforced after realpath, conte
     assert.equal(changesOutside.status, 403);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// --- dev-server preview (#58) -----------------------------------------------
+
+test("preview: door status, candidates, open/keepalive/close scoped to the device, stop server", async () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "tavi-preview-root-")));
+  const project = path.join(root, "web");
+  mkdirSync(project);
+  const stateDir = mkdtempSync(path.join(tmpdir(), "tavi-preview-state-"));
+  const devices = new DeviceRegistry(stateDir);
+  const phoneA = devices.add("Phone A").credential;
+  const phoneB = devices.add("Phone B").credential;
+  let doorUp = false;
+  const killed: number[] = [];
+  const { PreviewRegistry } = await import("./preview.js");
+  const previews = new PreviewRegistry({ probe: async (port) => (port === 5173 ? "127.0.0.1" : undefined) });
+  const server = await createTaviServer({
+    config: { ...config, roots: [root], port: 8787 },
+    devices,
+    previews,
+    doorReady: async () => doorUp,
+    discovery: {
+      // 8787 is the host's own API port: never offered, even from inside the project.
+      listListeners: async () => "p42\ncnode\nf3\nn127.0.0.1:5173\np43\ncnode\nf3\nn127.0.0.1:4000\np44\ncnode\nf3\nn127.0.0.1:8787\n",
+      listCwds: async () => `p42\nfcwd\nn${project}\np43\nfcwd\nn/tmp\np44\nfcwd\nn${project}\n`,
+      realpath: async (target: string) => target,
+      kill: (pid: number) => killed.push(pid),
+    },
+  });
+  await listen(server);
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const as = (credential: string, init: RequestInit = {}) => ({ ...init, headers: { ...(init.headers ?? {}), Authorization: `Bearer ${credential}`, "Content-Type": "application/json" } });
+
+  try {
+    assert.equal((await fetch(`${origin}/api/preview/door`)).status, 401, "bearer token required");
+    const door = await fetch(`${origin}/api/preview/door`, as(phoneA));
+    assert.deepEqual(await door.json(), { doorPort: 8443, ready: false, cookieName: "tavi_preview" });
+
+    const candidates = await fetch(`${origin}/api/preview/candidates?cwd=${encodeURIComponent(project)}`, as(phoneA));
+    assert.deepEqual(await candidates.json(), { available: true, servers: [{ port: 5173, command: "node", cwd: project }] });
+    const outside = await fetch(`${origin}/api/preview/candidates?cwd=${encodeURIComponent("/tmp")}`, as(phoneA));
+    assert.equal(outside.status, 403);
+
+    // The door is not published yet: say what to run, mint nothing.
+    const noDoor = await fetch(`${origin}/api/preview`, as(phoneA, { method: "POST", body: JSON.stringify({ cwd: project, port: 5173 }) }));
+    assert.equal(noDoor.status, 409);
+    assert.equal(((await noDoor.json()) as { doorMissing?: boolean }).doorMissing, true);
+    assert.equal(previews.size, 0);
+
+    doorUp = true;
+    const dead = await fetch(`${origin}/api/preview`, as(phoneA, { method: "POST", body: JSON.stringify({ cwd: project, port: 4000 }) }));
+    assert.equal(dead.status, 409);
+    assert.match(((await dead.json()) as { error: string }).error, /Nothing is listening on localhost:4000/);
+
+    const opened = await fetch(`${origin}/api/preview`, as(phoneA, { method: "POST", body: JSON.stringify({ cwd: project, port: 5173 }) }));
+    assert.equal(opened.status, 201);
+    const body = (await opened.json()) as { id: string; port: number; doorPort: number; cookieName: string; ticket: string };
+    assert.equal(body.port, 5173);
+    assert.equal(body.doorPort, 8443);
+    assert.equal(body.cookieName, "tavi_preview");
+    assert.match(body.ticket, /^[A-Za-z0-9_-]{43}$/);
+    assert.equal(previews.admit(body.ticket)?.id, body.id);
+
+    const alive = await fetch(`${origin}/api/preview/${body.id}/keepalive`, as(phoneA, { method: "POST" }));
+    assert.deepEqual(await alive.json(), { id: body.id, port: 5173, listening: true });
+    // Phone B never sees phone A's preview.
+    assert.equal((await fetch(`${origin}/api/preview/${body.id}/keepalive`, as(phoneB, { method: "POST" }))).status, 404);
+    assert.equal((await fetch(`${origin}/api/preview/${body.id}`, as(phoneB, { method: "DELETE" }))).status, 404);
+    assert.equal((await fetch(`${origin}/api/preview/${body.id}`, as(phoneA, { method: "DELETE" }))).status, 204);
+    assert.equal(previews.admit(body.ticket), undefined);
+    assert.equal((await fetch(`${origin}/api/preview/${body.id}/keepalive`, as(phoneA, { method: "POST" }))).status, 404);
+
+    const stopStranger = await fetch(`${origin}/api/preview/stop`, as(phoneA, { method: "POST", body: JSON.stringify({ cwd: project, port: 4000 }) }));
+    assert.equal(stopStranger.status, 404);
+    const stopped = await fetch(`${origin}/api/preview/stop`, as(phoneA, { method: "POST", body: JSON.stringify({ cwd: project, port: 5173 }) }));
+    assert.deepEqual(await stopped.json(), { stopped: true, pid: 42, command: "node" });
+    assert.deepEqual(killed, [42]);
+  } finally {
+    await close(server);
   }
 });
