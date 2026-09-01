@@ -106,7 +106,7 @@ function createDeps(world: World) {
 }
 
 const READY: World = {
-  tools: { tailscale: "/opt/homebrew/bin/tailscale", herdr: "/opt/homebrew/bin/herdr", tmux: "/opt/homebrew/bin/tmux" },
+  tools: { tailscale: "/opt/homebrew/bin/tailscale", herdr: "/opt/homebrew/bin/herdr" },
   backendState: "Running",
   serveProxies: ["http://127.0.0.1:8787"],
   serviceLoaded: true,
@@ -122,7 +122,6 @@ test("doctor reports every check green on a configured machine", async () => {
     ["Tailscale Serve", true],
     ["Tavi host", true],
     ["herdr", true],
-    ["tmux", true],
   ]);
   assert.match(formatChecks(checks), /✓ Tailscale {8}connected as studio.tail1234.ts.net/);
 });
@@ -166,7 +165,7 @@ test("declining the service install ends with the doctor instructions instead of
 });
 
 test("Tailscale missing on Linux: offers the install, then the sign-in, then continues to pairing", async () => {
-  const world: World = { ...READY, os: "linux", tools: { herdr: "/usr/local/bin/herdr", tmux: "/usr/bin/tmux" }, answers: [true, true] };
+  const world: World = { ...READY, os: "linux", tools: { herdr: "/usr/local/bin/herdr" }, answers: [true, true] };
   const { deps, ran, questions } = createDeps(world);
 
   await bootstrap(config, deps);
@@ -224,13 +223,15 @@ test("pair bootstrap fails honestly when the installed service never answers", a
   await assert.rejects(() => bootstrap(config, deps), /not answering on port 8787 after 15s/);
 });
 
-test("herdr and tmux are offered, installed on yes, skipped with a note on no", async () => {
-  const world: World = { ...READY, tools: { tailscale: "/usr/bin/tailscale" }, answers: [true, false] };
-  const { deps, ran, reports } = createDeps(world);
-  await bootstrap(config, deps);
-  assert.ok(ran.includes("brew install herdr"), ran.join("\n"));
-  assert.ok(!ran.some((line) => /tmux/.test(line)));
-  assert.ok(reports.some((line) => /Skipping tmux/.test(line)));
+test("herdr is offered: installed on yes, skipped with a note on no", async () => {
+  const yes = createDeps({ ...READY, tools: { tailscale: "/usr/bin/tailscale" }, answers: [true] });
+  await bootstrap(config, yes.deps);
+  assert.ok(yes.ran.includes("brew install herdr"), yes.ran.join("\n"));
+
+  const no = createDeps({ ...READY, tools: { tailscale: "/usr/bin/tailscale" }, answers: [false] });
+  await bootstrap(config, no.deps);
+  assert.ok(!no.ran.some((line) => /herdr/.test(line)));
+  assert.ok(no.reports.some((line) => /Skipping herdr/.test(line)));
 });
 
 test("non-interactive runs never change anything they were not told to", async () => {

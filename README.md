@@ -31,7 +31,7 @@ You need Node.js 20+ on the computer (macOS or Linux), Tailscale signed in on th
 npx tavi-host pair
 ```
 
-That one command checks what the computer needs and asks before fixing each thing — *Tailscale isn't installed. Install it now? (Y/n)* — installs Tailscale and opens its sign-in link if needed, gives the host a private HTTPS address on your tailnet, runs the host in the background at login (launchd on macOS, systemd on Linux), offers [herdr](https://herdr.dev) and tmux, and then prints a QR code. In Tavi on the phone, tap **Scan pairing code**, confirm the fingerprint matches what the terminal shows, and you are in. `npx tavi-host doctor` shows every check without changing anything; `npx tavi-host pair --yes` answers yes to everything for scripts.
+That one command checks what the computer needs and asks before fixing each thing — *Tailscale isn't installed. Install it now? (Y/n)* — installs Tailscale and opens its sign-in link if needed, gives the host a private HTTPS address on your tailnet, runs the host in the background at login (launchd on macOS, systemd on Linux), offers [herdr](https://herdr.dev), and then prints a QR code. In Tavi on the phone, tap **Scan pairing code**, confirm the fingerprint matches what the terminal shows, and you are in. `npx tavi-host doctor` shows every check without changing anything; `npx tavi-host pair --yes` answers yes to everything for scripts.
 
 herdr is optional but is what makes the agent cards work: without it Tavi is a plain remote terminal. Enable HTTPS certificates for your tailnet once (Tailscale admin → DNS → HTTPS Certificates) if `tailscale serve` refuses.
 

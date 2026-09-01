@@ -114,7 +114,6 @@ export async function diagnose(config: HostConfig, deps: BootstrapDeps): Promise
     await checkServe(config, deps, tailscale.cli),
     await checkService(config, deps),
     await checkOptionalTool(deps, "herdr", "Agent cards and launching agents need herdr; the plain terminal works without it.", "Install herdr: https://herdr.dev"),
-    await checkOptionalTool(deps, "tmux", "herdr keeps agents alive in tmux so they survive the phone disconnecting.", "brew install tmux"),
   ];
 }
 
@@ -133,7 +132,6 @@ export async function bootstrap(config: HostConfig, deps: BootstrapDeps): Promis
   await ensureService(config, deps);
 
   await offerTool(deps, "herdr", "herdr isn't installed. It keeps your agents running and gives you the agent cards; without it Tavi is a plain remote terminal. Install it now?", installHerdrCommand(deps));
-  await offerTool(deps, "tmux", "tmux isn't installed. herdr uses it to keep agents alive when the phone disconnects. Install it now?", await installPackageCommand(deps, "tmux"));
 }
 
 async function ensureTailscale(deps: BootstrapDeps): Promise<string> {
@@ -255,15 +253,6 @@ function tailscaleInstallCommand(deps: BootstrapDeps): string[] | undefined {
 function installHerdrCommand(deps: BootstrapDeps): string[] | undefined {
   if (deps.operatingSystem === "darwin") return ["brew", "install", "herdr"];
   if (deps.operatingSystem === "linux") return ["sh", "-c", "curl -fsSL https://herdr.dev/install.sh | sh"];
-  return undefined;
-}
-
-async function installPackageCommand(deps: BootstrapDeps, pkg: string): Promise<string[] | undefined> {
-  if (deps.operatingSystem === "darwin") return ["brew", "install", pkg];
-  if (deps.operatingSystem !== "linux") return undefined;
-  if (await deps.which("apt-get")) return ["sudo", "apt-get", "install", "-y", pkg];
-  if (await deps.which("dnf")) return ["sudo", "dnf", "install", "-y", pkg];
-  if (await deps.which("pacman")) return ["sudo", "pacman", "-S", "--noconfirm", pkg];
   return undefined;
 }
 
