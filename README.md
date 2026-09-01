@@ -25,35 +25,27 @@ Native iPhone app
 
 ## Quick start on macOS
 
-Requirements: Node.js 20+, [herdr](https://herdr.dev) (the terminal workspace the agents run in), and Tailscale on both the computer and phone.
+You need [Tailscale](https://tailscale.com/download) signed in on both the Mac and the phone, Node.js 20+ on the Mac, and the Tavi app on the phone. Then, on the Mac:
 
 ```bash
-npm install
-npm run build
-npm run service:install
-tailscale serve --bg 8787
-npm run token
+npx tavi-host pair
 ```
 
-`tailscale serve` prints a private HTTPS address such as `https://studio-mac.example.ts.net`. Then pair the phone: `npm run pair` prints a QR code; in Tavi, tap **Scan pairing code**, confirm the fingerprint matches, and you are in. `npm run devices` lists paired phones and `npm run devices revoke <id>` removes one. (`npm run token` reveals the host's own token, which the CLI uses; phones no longer need it.) This install path is developer-grade for now — see #47 for the one-command tester install.
+That one command installs the host as a login service, exposes it as a private HTTPS address on your tailnet (`tailscale serve`), checks for [herdr](https://herdr.dev) and tmux, and prints a QR code. In Tavi on the phone, tap **Scan pairing code**, confirm the fingerprint matches what the terminal shows, and you are in. If anything is missing the command says exactly what to install and why, and `npx tavi-host doctor` re-checks every prerequisite without changing anything.
 
-The automatic background service is currently macOS-only. To run it in the foreground on any supported OS:
+herdr is optional but is what makes the agent cards work: without it Tavi is a plain remote terminal. Enable HTTPS certificates for your tailnet once (Tailscale admin → DNS → HTTPS Certificates) if `tailscale serve` refuses.
 
-```bash
-npm start
-```
+Afterwards the `tavi` command manages the host: `npx tavi-host devices` lists paired phones, `devices revoke <id>` cuts one off, `uninstall-service` removes the login service, `install-claude-hooks` lets Claude Code report permission waits to the phone. To update, run `npx tavi-host@latest pair` again. (`npx` runs from a temporary cache, so the first pair installs a permanent copy under `~/.tavi/runtime` and the service runs from there; `npm i -g tavi-host` gives you a plain `tavi` command instead.)
 
-To remove the macOS background service:
-
-```bash
-npm run service:uninstall
-```
+The login service is macOS-only for now; on Linux run `npx tavi-host` in a terminal and keep it open (#48 adds a systemd unit).
 
 ## Development
 
 ```bash
 npm install
-npm run dev
+npm run build && npm run service:install   # run this checkout as the login service
+npm run pair                               # same bootstrap as npx, from the checkout
+npm run dev                                # foreground host with reload, for iteration
 ```
 
 The default command runs only the local host service. Native client development is performed from the Xcode project once the SwiftUI workspace is created.

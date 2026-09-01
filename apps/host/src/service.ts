@@ -8,7 +8,8 @@ import { promisify } from "node:util";
 import type { HostConfig } from "./config.js";
 
 const execFileAsync = promisify(execFile);
-const LABEL = "com.farfield.tavi.host";
+export const SERVICE_LABEL = "com.farfield.tavi.host";
+const LABEL = SERVICE_LABEL;
 // The pre-rename label (#62): booted out and its plist removed on install.
 const LEGACY_LABEL = "com.parvezrob.mocha.host";
 
@@ -18,7 +19,8 @@ export interface ServiceOptions {
   execute?: Execute;
   homeDirectory?: string;
   operatingSystem?: NodeJS.Platform;
-  projectRoot?: string;
+  /** Directory holding this package's dist/ — a checkout's apps/host, a global install, or ~/.tavi/runtime. */
+  packageRoot?: string;
   userId?: number;
   /** How long to wait for a booted-out service to actually leave launchd. */
   bootoutTimeoutMs?: number;
@@ -32,7 +34,7 @@ interface ServiceRuntime {
   domain: string;
   execute: Execute;
   legacyPlist: string;
-  projectRoot: string;
+  packageRoot: string;
   retryIntervalMs: number;
 }
 
@@ -44,7 +46,7 @@ const TRANSIENT_BOOTSTRAP_ERROR = /Input\/output error|Operation now in progress
 
 export async function installService(config: HostConfig, options: ServiceOptions = {}): Promise<string> {
   const runtime = createRuntime(options);
-  const entrypoint = path.join(runtime.projectRoot, "apps", "host", "dist", "index.js");
+  const entrypoint = path.join(runtime.packageRoot, "dist", "index.js");
   const logFile = path.join(config.stateDir, "host.log");
   const legacyExists = await fileExists(runtime.legacyPlist);
 
@@ -57,7 +59,7 @@ export async function installService(config: HostConfig, options: ServiceOptions
   await chmod(logFile, 0o600);
   await writeFileAtomically(
     runtime.currentPlist,
-    launchAgentXml({ config, projectRoot: runtime.projectRoot, entrypoint, logFile }),
+    launchAgentXml({ config, packageRoot: runtime.packageRoot, entrypoint, logFile }),
   );
 
   await bootout(runtime, LEGACY_LABEL);
@@ -107,8 +109,7 @@ function createRuntime(options: ServiceOptions): ServiceRuntime {
     domain: `gui/${options.userId ?? userInfo().uid}`,
     execute: options.execute ?? execute,
     legacyPlist: path.join(launchAgents, `${LEGACY_LABEL}.plist`),
-    projectRoot:
-      options.projectRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.."),
+    packageRoot: options.packageRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
     retryIntervalMs: options.retryIntervalMs ?? 250,
   };
 }
@@ -193,7 +194,7 @@ async function fileExists(file: string): Promise<boolean> {
 
 function launchAgentXml(input: {
   config: HostConfig;
-  projectRoot: string;
+  packageRoot: string;
   entrypoint: string;
   logFile: string;
 }): string {
@@ -228,7 +229,7 @@ function launchAgentXml(input: {
       <string>${xml(input.entrypoint)}</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>${xml(input.projectRoot)}</string>
+    <string>${xml(input.packageRoot)}</string>
     <key>EnvironmentVariables</key>
     <dict>
 ${envXml}

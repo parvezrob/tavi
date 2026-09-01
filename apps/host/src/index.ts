@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { AttentionOverlay, AttentionReconciler, AttentiveAgentEvents } from "./attention.js";
+import { bootstrap, BootstrapError, defaultDeps, diagnose, durablePackageRoot, formatChecks } from "./bootstrap.js";
 import { installClaudeHooks } from "./claude-hooks.js";
 import { DeviceRegistry } from "./pairing.js";
 import { resolvePublicUrl, runPairCommand } from "./pair-command.js";
@@ -18,7 +19,37 @@ function describeFailure(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+const USAGE = `Tavi host ${VERSION} — pairs your phone with the coding agents on this computer.
+
+Usage: tavi <command>
+
+  pair [--url https://…]   Set everything up (service, Tailscale Serve) and show a pairing code
+  doctor                   Check every prerequisite without changing anything
+  devices [revoke <id>]    List paired phones, or cut one off
+  install-service          Run the host at login (macOS); uninstall-service removes it
+  install-claude-hooks     Report Claude Code permission waits to the phone
+  token                    Print this host's own token (for the CLI, never for a phone)
+  help                     This text
+
+With no command, runs the host in the foreground.`;
+
+const command = process.argv[2];
+if (command === "help" || command === "--help" || command === "-h") {
+  console.log(USAGE);
+  process.exit(0);
+}
+if (command === "--version" || command === "-v") {
+  console.log(VERSION);
+  process.exit(0);
+}
+
 const config = loadConfig();
+
+if (command === "doctor") {
+  const checks = await diagnose(config, defaultDeps(config));
+  console.log(`Tavi host ${VERSION}\n${formatChecks(checks)}`);
+  process.exit(checks.every((check) => check.ok || check.optional) ? 0 : 1);
+}
 
 if (process.argv[2] === "token") {
   process.stdout.write(`${config.token}\n`);
@@ -27,7 +58,7 @@ if (process.argv[2] === "token") {
 
 if (process.argv[2] === "install-service") {
   try {
-    const plist = await installService(config);
+    const plist = await installService(config, { packageRoot: await durablePackageRoot(config) });
     console.log(`Tavi now starts automatically. LaunchAgent: ${plist}`);
     process.exit(0);
   } catch (error) {
@@ -43,9 +74,19 @@ if (process.argv[2] === "uninstall-service") {
 }
 
 if (process.argv[2] === "pair") {
-  const publicUrl = await resolvePublicUrl(config, process.argv.slice(3));
-  await runPairCommand(config, publicUrl);
-  process.exit(0);
+  try {
+    await bootstrap(config, defaultDeps(config));
+    const publicUrl = await resolvePublicUrl(config, process.argv.slice(3));
+    await runPairCommand(config, publicUrl);
+    process.exit(0);
+  } catch (error) {
+    if (error instanceof BootstrapError) {
+      console.error(`Not ready to pair yet.\n${error.message}\n\nFix the above and run \`tavi pair\` again; \`tavi doctor\` shows every check.`);
+    } else {
+      console.error(describeFailure(error));
+    }
+    process.exit(1);
+  }
 }
 
 if (process.argv[2] === "devices") {
@@ -70,6 +111,12 @@ if (process.argv[2] === "devices") {
     }
   }
   process.exit(0);
+}
+
+const KNOWN = ["token", "install-service", "uninstall-service", "pair", "devices", "install-claude-hooks"];
+if (command !== undefined && !KNOWN.includes(command)) {
+  console.error(`Unknown command: ${command}\n\n${USAGE}`);
+  process.exit(2);
 }
 
 if (process.argv[2] === "install-claude-hooks") {
@@ -104,7 +151,7 @@ server.on("close", () => reconciler.stop());
 server.listen(config.port, config.bindHost, () => {
   console.log(`Tavi ${VERSION} is running on http://${config.bindHost}:${config.port}`);
   console.log(`Machine: ${config.machineName}`);
-  console.log("Run `npm run token` in this folder to reveal the phone pairing token.");
+  console.log("Run `tavi pair` to pair a phone.");
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

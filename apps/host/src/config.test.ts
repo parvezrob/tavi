@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import { ConfigurationError, loadConfig } from "./config.js";
+import { ConfigurationError, loadConfig, VERSION } from "./config.js";
 
 const LEGACY_TOKEN = "legacy-token-that-is-long-enough-to-preserve";
 
@@ -112,3 +112,8 @@ function statExists(file: string): boolean {
     return false;
   }
 }
+
+test("VERSION matches the published package version", () => {
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+  assert.equal(VERSION, packageJson.version);
+});

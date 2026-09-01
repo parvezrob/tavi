@@ -155,7 +155,7 @@ function createFixture(context: TestContext, fixtureOptions: FixtureOptions = {}
     },
     homeDirectory,
     operatingSystem: "darwin",
-    projectRoot: "/project/tavi",
+    packageRoot: "/project/tavi/apps/host",
     retryIntervalMs: 10,
     userId: 501,
   };
