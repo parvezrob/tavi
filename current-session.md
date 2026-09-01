@@ -30,4 +30,4 @@
 - **Phone ↔ host health:** `AgentDirectory.health` connecting/live/stale/offline/revoked; "Connecting…" bounded to 5 s then probe → Offline sticky across foregrounds; retries back off 2 → 30 s.
 - **Preview (#58, PRD §7.11):** door `https://<name>.ts.net:8443` → `127.0.0.1:8788`; `/api/preview/{door,candidates,stop}`, `POST /api/preview`, `/api/preview/{id}[/keepalive]`; tickets in memory, 120 s grace; Vite binds `[::1]` on macOS so the host probes both loopbacks.
 - **Files (#25 #57 #61, PRD §7.10):** `/api/changes`, `/api/changes/file`, `/api/files{,/stat,/content,/raw}` — realpath **then** roots, secrets by name; phone `Features/Files/`.
-- Open issues: #27–#29 (parked), #37 epic, #39 test seam, #47 (acceptance timing only), #49 WSL2 doc, #52 polish, #54 P3, #58 (built; durability pass + owner test + publish left), #59.
+- Open issues: #27–#29 (parked), #37 epic (now also carries the outside-tester acceptance run from #47), #39 test seam, #49 WSL2 doc, #52 polish, #54 P3, #58 (built; durability pass + owner test + publish left), #59.
