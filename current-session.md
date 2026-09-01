@@ -2,7 +2,7 @@
 
 > Every agent starts here. This file holds the live state of the project *right now* and the next piece of work. Update it before ending a session (or at any significant milestone); move the previous state into [`handoffs.md`](./handoffs.md). Keep it short — details belong in the linked docs.
 
-**Last updated:** 2026-09-01 (#21 root-caused and fixed, host deployed; #54 P1–P2.1 and #55 shipped; #56–#59 filed; #44 step-2 spike answered (not built); next: #56 voice or #54 P3 once the name is decided)
+**Last updated:** 2026-09-01 (#21 root-caused and fixed, host deployed; #54 P1–P2.1 and #55 shipped; #56–#59 filed; #44 closed as-is; #10 scroll fixed; next: #56 voice or #54 P3 once the name is decided)
 
 ## Next work
 
@@ -66,7 +66,7 @@ Then, in order: #26 (project-grouped home + tmux card removal), #25 (diff glance
 - Prompt delivery hardened: launch-pending retry, typing fallback via `send_keys` (spaces travel as "Space", idle-pane guard), post-prompt Enter nudge. Herdr quirk: owner's sessions run in manual mode — phone prompts can still occasionally sit unsubmitted.
 - Feature decisions 2026-08-26 recorded in `docs/ROADMAP.md` (adopted #23–#29, rejected list). Multi-host = Phase D item 3; push notifications = Phase E item 1.
 - Deploy loop: `docs/DEVELOPMENT.md`. `service:install` is first-try reliable since #21; still confirm `/api/health` after a deploy.
-- Open issues (audited 2026-09-01; #21, #26, #38, #40 closed): #44 (owner decision after the step-2 spike), #47–#50 platform track, #54 P3 (name-gated), #56–#59 features, #52 home polish, #10/#51 owner device checks, #25 diff glance, #27–#29 parked, #37 epic, #39 test seam.
+- Open issues (audited 2026-09-01; #21, #26, #38, #40 closed): #44 (owner decision after the step-2 spike), #47–#50 platform track, #54 P3 (name-gated), #56–#59 features, #52 home polish, #10/#51/#44 closed 2026-09-01 (#10 scroll root-caused: Ghostty wants pixel deltas, we sent points — a 3× undercount on the phone; fixed in 95eb1af, owner-verified), #25 diff glance, #27–#29 parked, #37 epic, #39 test seam.
 - **App Store readiness (2026-08):** milestone “App Store review readiness” + epic #37 gate any Apple submission. `codebase-scan.html` (#30) is a second-agent audit whose claims were re-verified against the code — input only, never the tracker.
 - **Security hygiene #31–#36 shipped and closed** (`0a02cf9` host, `b32b9c4` iOS): token in Keychain with one-time migration off AppStorage + truthful storage copy on both connect screens; Claude hook runs `claude-hook-relay.js` so the token never hits argv (reinstalled on the owner Mac); dev env seeding is DEBUG-only; CORS headers deleted; `~/.mocha` forced 0700/0600; AgentDirectory on an ephemeral URLSession.
 - Host and phone both run the #42 build (deployed + installed 2026-08-31).
