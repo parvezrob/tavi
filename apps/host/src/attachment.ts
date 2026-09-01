@@ -2,6 +2,13 @@ import { randomUUID } from "node:crypto";
 
 export const RESUME_BUFFER_BYTES = 1024 * 1024;
 export const DETACHED_RETENTION_MS = 120_000;
+// How long a released pty keeps the phone's size before it is handed back
+// to the desktop (#63). A reconnect flap — network blip, path change, a busy
+// host — re-claims within a few seconds; resizing wide and back in between
+// made the agent's TUI redraw at 174 columns and reflow at 41, garbling the
+// transcript the person was reading. Longer than the phone's reconnect
+// backoff, far shorter than retention.
+export const DETACH_GRACE_MS = 8_000;
 const MAX_BUFFER_CHUNK_BYTES = 64 * 1024;
 
 export interface TerminalSize {
@@ -33,6 +40,9 @@ export interface AttachmentOptions {
   // `undefined` — or having no way to ask — leaves the size alone (small but
   // complete beats large and cropped).
   detachedSize?: (() => Promise<TerminalSize | undefined>) | undefined;
+  // How long after release to wait before applying `detachedSize`; a claim
+  // inside the window cancels it (#63).
+  detachGraceMs?: number | undefined;
 }
 
 // One pty per session that survives WebSocket drops. Output accumulates in a
@@ -44,6 +54,7 @@ export class TerminalAttachment {
   private readonly maxBufferBytes: number;
   private readonly onDispose: () => void;
   private readonly detachedSize: (() => Promise<TerminalSize | undefined>) | undefined;
+  private readonly detachGraceMs: number;
   private readonly retentionMs: number;
   private readonly terminal: TerminalProcessLike;
 
@@ -55,6 +66,7 @@ export class TerminalAttachment {
   private firstBufferedOffset = 0;
   private nextOffset = 0;
   private retentionTimer: NodeJS.Timeout | undefined;
+  private detachTimer: NodeJS.Timeout | undefined;
 
   constructor(terminal: TerminalProcessLike, options: AttachmentOptions = {}) {
     this.terminal = terminal;
@@ -62,6 +74,7 @@ export class TerminalAttachment {
     this.maxBufferBytes = options.maxBufferBytes ?? RESUME_BUFFER_BYTES;
     this.onDispose = options.onDispose ?? (() => undefined);
     this.detachedSize = options.detachedSize;
+    this.detachGraceMs = options.detachGraceMs ?? DETACH_GRACE_MS;
 
     terminal.onData((data) => {
       this.append(Buffer.from(data, "utf8"));
@@ -118,6 +131,9 @@ export class TerminalAttachment {
     const previous = this.client;
     this.client = client;
     this.cancelRetention();
+    // A re-claim inside the grace window is a flap, not a detach: the pty
+    // keeps the phone's size and the desktop never sees a resize.
+    this.cancelDetach();
     previous?.onSuperseded();
   }
 
@@ -127,10 +143,25 @@ export class TerminalAttachment {
     if (this.disposed) return;
     this.scheduleRetention();
     if (!this.detachedSize) return;
+    this.cancelDetach();
+    this.detachTimer = setTimeout(() => {
+      this.detachTimer = undefined;
+      this.handBackToDesktop();
+    }, this.detachGraceMs);
+    this.detachTimer.unref?.();
+  }
+
+  private handBackToDesktop(): void {
+    if (!this.detachedSize || this.client !== undefined || this.disposed) return;
     void this.detachedSize().then((size) => {
-      // A phone may have re-claimed in the meantime; its size then wins.
+      // A phone may have re-claimed while herdr was asked; its size then wins.
       if (size && this.client === undefined && !this.disposed) this.safeResize(size);
     });
+  }
+
+  private cancelDetach(): void {
+    if (this.detachTimer) clearTimeout(this.detachTimer);
+    this.detachTimer = undefined;
   }
 
   private safeResize(size: TerminalSize): void {
@@ -155,6 +186,7 @@ export class TerminalAttachment {
     if (this.disposed) return;
     this.disposed = true;
     this.cancelRetention();
+    this.cancelDetach();
     this.client = undefined;
     if (!this.exited) {
       try {
@@ -202,9 +234,9 @@ export class TerminalAttachment {
 
 export class AttachmentStore {
   private readonly attachments = new Map<string, TerminalAttachment>();
-  private readonly options: Pick<AttachmentOptions, "retentionMs" | "maxBufferBytes">;
+  private readonly options: Pick<AttachmentOptions, "retentionMs" | "maxBufferBytes" | "detachGraceMs">;
 
-  constructor(options: Pick<AttachmentOptions, "retentionMs" | "maxBufferBytes"> = {}) {
+  constructor(options: Pick<AttachmentOptions, "retentionMs" | "maxBufferBytes" | "detachGraceMs"> = {}) {
     this.options = options;
   }
 

@@ -112,6 +112,7 @@ test("release hands a herdr pane back to the desktop's own size (#44)", async ()
   const process = new FakeProcess();
   const attachment = new TerminalAttachment(process, {
     retentionMs: 60_000,
+    detachGraceMs: 1,
     detachedSize: async () => ({ cols: 174, rows: 49 }),
   });
   const phone = makeClient();
@@ -119,7 +120,7 @@ test("release hands a herdr pane back to the desktop's own size (#44)", async ()
   attachment.resize(44, 22);
 
   attachment.release(phone);
-  await new Promise((resolve) => setTimeout(resolve, 5));
+  await new Promise((resolve) => setTimeout(resolve, 15));
   // herdr keeps whatever size it is told, so the desktop's own rect is the
   // only honest size to hand back.
   assert.deepEqual(process.resizes.at(-1), { cols: 174, rows: 49 });
@@ -130,6 +131,7 @@ test("release leaves the size alone when the desktop size is unknown", async () 
   const process = new FakeProcess();
   const attachment = new TerminalAttachment(process, {
     retentionMs: 60_000,
+    detachGraceMs: 1,
     detachedSize: async () => undefined,
   });
   const phone = makeClient();
@@ -137,7 +139,7 @@ test("release leaves the size alone when the desktop size is unknown", async () 
   attachment.resize(44, 22);
 
   attachment.release(phone);
-  await new Promise((resolve) => setTimeout(resolve, 5));
+  await new Promise((resolve) => setTimeout(resolve, 15));
   assert.deepEqual(process.resizes.at(-1), { cols: 44, rows: 22 });
   attachment.dispose();
 });
@@ -147,11 +149,14 @@ test("a phone that re-claims before the desktop size arrives keeps its own size"
   let resolveSize: (size: { cols: number; rows: number }) => void = () => undefined;
   const attachment = new TerminalAttachment(process, {
     retentionMs: 60_000,
+    detachGraceMs: 1,
     detachedSize: () => new Promise((resolve) => (resolveSize = resolve)),
   });
   const first = makeClient();
   attachment.claim(first);
   attachment.release(first);
+  // The grace elapses and herdr is asked; the phone comes back before it answers.
+  await new Promise((resolve) => setTimeout(resolve, 10));
   const second = makeClient();
   attachment.claim(second);
   attachment.resize(44, 22);
@@ -160,6 +165,83 @@ test("a phone that re-claims before the desktop size arrives keeps its own size"
   await new Promise((resolve) => setTimeout(resolve, 5));
   assert.deepEqual(process.resizes.at(-1), { cols: 44, rows: 22 });
   attachment.dispose();
+});
+
+test("a drop that re-claims inside the grace window never resizes the desktop (#63)", async () => {
+  const process = new FakeProcess();
+  let asked = 0;
+  const attachment = new TerminalAttachment(process, {
+    retentionMs: 60_000,
+    detachGraceMs: 30,
+    detachedSize: async () => {
+      asked += 1;
+      return { cols: 174, rows: 49 };
+    },
+  });
+  const phone = makeClient();
+  attachment.claim(phone);
+  attachment.resize(41, 28);
+
+  attachment.release(phone);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const again = makeClient();
+  attachment.claim(again);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  // No resize at all after the phone's own — the flap was invisible to the Mac.
+  assert.deepEqual(process.resizes, [{ cols: 41, rows: 28 }]);
+  assert.equal(asked, 0);
+  attachment.dispose();
+});
+
+test("a release that outlives the grace window hands back exactly once (#63)", async () => {
+  const process = new FakeProcess();
+  let asked = 0;
+  const attachment = new TerminalAttachment(process, {
+    retentionMs: 60_000,
+    detachGraceMs: 10,
+    detachedSize: async () => {
+      asked += 1;
+      return { cols: 174, rows: 49 };
+    },
+  });
+  const phone = makeClient();
+  attachment.claim(phone);
+  attachment.resize(41, 28);
+
+  attachment.release(phone);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(process.resizes, [{ cols: 41, rows: 28 }], "resized before the grace elapsed");
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.deepEqual(process.resizes, [{ cols: 41, rows: 28 }, { cols: 174, rows: 49 }]);
+  assert.equal(asked, 1);
+
+  // A later re-claim is a real client with a real grid.
+  const later = makeClient();
+  attachment.claim(later);
+  attachment.resize(41, 28);
+  assert.deepEqual(process.resizes.at(-1), { cols: 41, rows: 28 });
+  attachment.dispose();
+});
+
+test("dispose inside the grace window cancels the hand-back", async () => {
+  const process = new FakeProcess();
+  let asked = 0;
+  const attachment = new TerminalAttachment(process, {
+    retentionMs: 60_000,
+    detachGraceMs: 10,
+    detachedSize: async () => {
+      asked += 1;
+      return { cols: 174, rows: 49 };
+    },
+  });
+  const phone = makeClient();
+  attachment.claim(phone);
+  attachment.release(phone);
+  attachment.dispose();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(asked, 0);
+  assert.equal(process.resizes.length, 0);
 });
 
 test("unclaimed attachment disposes after retention", async () => {
