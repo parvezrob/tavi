@@ -106,9 +106,17 @@ async function startScriptedHerdr(context: TestContext, socketPath: string): Pro
     },
   };
 
+  const openSockets = new Set<Socket>();
   const server = createServer((socket) => {
+    // The feed under test tears its side down in context.after; a reply
+    // still in flight then hits a closed pipe. That is expected, never a
+    // test failure (it surfaced as a CI-only "write EPIPE" after the test).
+    openSockets.add(socket);
+    socket.on("error", () => undefined);
+    socket.once("close", () => openSockets.delete(socket));
     let buffered = "";
     socket.on("data", (chunk) => {
+      if (!socket.writable) return;
       buffered += chunk.toString("utf8");
       let lineEnd = buffered.indexOf("\n");
       while (lineEnd !== -1) {
@@ -146,6 +154,7 @@ async function startScriptedHerdr(context: TestContext, socketPath: string): Pro
     });
   });
   context.after(() => {
+    for (const socket of openSockets) socket.destroy();
     server.close();
   });
   await new Promise<void>((resolve, reject) => {
