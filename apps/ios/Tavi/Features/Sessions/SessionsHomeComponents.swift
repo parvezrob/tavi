@@ -1,165 +1,65 @@
 import SwiftUI
 
-// Building blocks of the Sessions home. Each card is a single tap target
-// whose accessibility label reads as one sentence, and every color comes
-// from TaviTheme so the surface stays quiet and coherent.
+// Building blocks of the Sessions home (home v3, 2026-09-02). The home is
+// two kinds of object and nothing else: a labelled section, and a card of
+// rows. Every row has the same skeleton — a glyph tile that says which
+// kind of agent it is, a primary line that says which one (your name for
+// it, else its folder), a quiet secondary line, and one trailing fact.
+// Colour is spent once: amber on what needs you. Every colour comes from
+// TaviTheme so the surface stays a single instrument panel.
 
-struct SectionEyebrow: View {
+// A section label in the Orca register: small caps, wide tracking, and
+// an optional trailing count. The count is the only place a section
+// shouts, and only "Needs you" is allowed to shout in amber.
+struct SectionHeader: View {
     let title: String
+    var count: Int? = nil
+    var countTint: Color = TaviTheme.textSecondary
 
     var body: some View {
-        Text(title)
-            .font(.caption.weight(.semibold))
-            .kerning(1.1)
-            .textCase(.uppercase)
-            .foregroundStyle(TaviTheme.textSecondary)
-            .padding(.top, 6)
-            .accessibilityAddTraits(.isHeader)
-    }
-}
-
-// One-line summary of everything blocked, pinned above the sections; the
-// tap is the fastest route to the first agent that is waiting on the user.
-struct NeedsYouBanner: View {
-    let count: Int
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: "clock.badge.exclamationmark")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(TaviTheme.statusBlocked)
-                Text("Needs you")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(TaviTheme.textPrimary)
-                Spacer(minLength: 8)
-                // Plain text: "^[…](inflect:)" turned "waiting" into
-                // "waited" on the phone (#50 live pass).
-                Text("\(count) waiting")
-                    .font(.subheadline)
-                    .foregroundStyle(TaviTheme.statusBlocked)
-                Image(systemName: "chevron.right")
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .kerning(1.1)
+                .textCase(.uppercase)
+                .foregroundStyle(TaviTheme.textSecondary)
+            if let count {
+                Text("\(count)")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(TaviTheme.textSecondary)
+                    .monospacedDigit()
+                    .foregroundStyle(countTint)
             }
-            .padding(.vertical, 14)
-            .padding(.horizontal, 14)
-            .taviCard(stripe: TaviTheme.statusBlocked)
+            Spacer(minLength: 0)
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("sessions.needsYou")
+        .padding(.leading, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
-// Full card for needs-you and active agents: identity, status, freshness,
-// and a short sanitized excerpt of the live terminal.
-struct AgentCard: View {
+// Which kind of agent, as a glyph on a small tile. The tile is the row's
+// anchor: five Claude Codes in a column no longer need the words "Claude
+// Code" five times, and the tint carries the state — amber while it waits
+// on you, quiet otherwise.
+struct AgentGlyphTile: View {
     let agent: AgentSummary
-    let preview: String?
-    let observedAt: Date?
-    // Under a project header the folder is already on screen; the card then
-    // shows only the agent's own title, if it set one. Cards in the flat
-    // needs-you list keep the full location.
-    var showsLocation = true
-    // Which computer, when several are paired (#50): the flat needs-you
-    // list is the one place with no computer header above it, and two
-    // machines can hold the same folder name.
-    var computerName: String? = nil
-    let action: () -> Void
-
-    private var location: String {
-        [computerName, agent.userTabName ?? agent.projectName].compactMap { $0 }.joined(separator: " · ")
-    }
-
-    private var status: AgentStatusStyle { .of(agent.status) }
+    var tint: Color = TaviTheme.textSecondary
 
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(status.color)
-                        .frame(width: 8, height: 8)
-                    Text(agent.displayName)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(TaviTheme.textPrimary)
-                    Spacer(minLength: 8)
-                    // A blocked card already says "needs you" twice — the
-                    // amber stripe and its place in the flat list — so the
-                    // word would be a third telling (#54). Running cards
-                    // keep theirs: the dot alone can't say "Working".
-                    if agent.homeSection != .needsYou {
-                        Text(status.label)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(status.color)
-                    }
-                }
-
-                let showsFreshness = observedAt.map {
-                    FreshnessRule.shows(status: agent.status, observedAt: $0)
-                } ?? false
-                if showsLocation || agent.secondaryIdentity != nil || showsFreshness {
-                    HStack(spacing: 8) {
-                        if showsLocation {
-                            Text(location)
-                                .font(.footnote)
-                                .foregroundStyle(TaviTheme.textSecondary)
-                                .lineLimit(1)
-                        } else if let title = agent.secondaryIdentity {
-                            Text(title)
-                                .font(.footnote)
-                                .foregroundStyle(TaviTheme.textSecondary)
-                                .lineLimit(1)
-                        }
-                        Spacer(minLength: 8)
-                        if let observedAt, showsFreshness {
-                            FreshnessLabel(observedAt: observedAt)
-                        }
-                    }
-                }
-
-                if showsLocation {
-                    HStack(spacing: 5) {
-                        Image(systemName: "folder")
-                            .font(.caption2)
-                        Text(agent.abbreviatedPath)
-                            .font(.system(size: 11, design: .monospaced))
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                    }
-                    .foregroundStyle(TaviTheme.textSecondary.opacity(0.8))
-                }
-
-                if let preview, !preview.isEmpty {
-                    Text(preview)
-                        .font(.system(size: 11, weight: .regular, design: .monospaced))
-                        .foregroundStyle(TaviTheme.textSecondary)
-                        .lineLimit(4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background(
-                            TaviTheme.well,
-                            in: RoundedRectangle(cornerRadius: TaviTheme.wellRadius, style: .continuous)
-                        )
-                }
-            }
-            .padding(14)
-            .taviCard(stripe: status.color)
-        }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(agent.displayName), \(location), \(status.label)")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("sessions.agent.\(agent.id)")
+        Image(systemName: agent.kindGlyph)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(tint)
+            .frame(width: 34, height: 34)
+            .background(TaviTheme.well, in: RoundedRectangle(cornerRadius: TaviTheme.wellRadius, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
 
-// One waiting agent as a row in the needs-you block (#50 live pass: five
-// full cards in a column read as a wall, not a list). Name, then where
-// (computer · folder, or your name for the tab), then — when the host
-// has one — the line the agent is asking on. The clock says how long it
-// has been waiting.
+// One waiting agent. Primary: your name for it, else its folder — the
+// line most likely to tell two waiting agents apart. Secondary: the kind,
+// and the computer when several are on screen. Third, when the host has
+// one: the question, in the agent's own words. Trailing: how long it has
+// waited. No chevron — the tap opens the decision sheet, not a screen.
 struct NeedsYouRow: View {
     let agent: AgentSummary
     let preview: String?
@@ -167,8 +67,10 @@ struct NeedsYouRow: View {
     var computerName: String? = nil
     let action: () -> Void
 
-    private var location: String {
-        [computerName, agent.userTabName ?? agent.projectName].compactMap { $0 }.joined(separator: " · ")
+    private var primary: String { agent.secondaryIdentity ?? agent.projectName }
+
+    private var secondary: String {
+        [agent.displayName, computerName].compactMap { $0 }.joined(separator: " · ")
     }
 
     // The last non-empty line of the sanitized preview: the question, in
@@ -182,88 +84,31 @@ struct NeedsYouRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .top, spacing: 10) {
-                Circle()
-                    .fill(TaviTheme.statusBlocked)
-                    .frame(width: 7, height: 7)
-                    .padding(.top, 6)
+            HStack(alignment: .top, spacing: 12) {
+                AgentGlyphTile(agent: agent, tint: TaviTheme.statusBlocked)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(agent.displayName)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(TaviTheme.textPrimary)
-                    Text(location)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(primary)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(TaviTheme.textPrimary)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        if let observedAt {
+                            FreshnessLabel(observedAt: observedAt)
+                        }
+                    }
+                    Text(secondary)
                         .font(.caption)
                         .foregroundStyle(TaviTheme.textSecondary)
                         .lineLimit(1)
                     if let askingLine {
                         Text(askingLine)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(TaviTheme.textSecondary.opacity(0.85))
+                            .font(.footnote)
+                            .foregroundStyle(TaviTheme.textPrimary.opacity(0.8))
                             .lineLimit(1)
+                            .padding(.top, 3)
                     }
                 }
-                Spacer(minLength: 8)
-                HStack(spacing: 6) {
-                    if let observedAt {
-                        FreshnessLabel(observedAt: observedAt)
-                    }
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(TaviTheme.textSecondary)
-                }
-                .padding(.top, 2)
-            }
-            .padding(.vertical, 11)
-            .padding(.horizontal, 14)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(agent.displayName), \(location), needs you")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("sessions.agent.\(agent.id)")
-    }
-}
-
-// Compact row for done and idle agents; several rows share one card.
-// Always under a project header, so the folder is not repeated; the
-// status word is, because a dot alone cannot tell Done from Idle.
-struct RecentAgentRow: View {
-    let agent: AgentSummary
-    let observedAt: Date?
-    let action: () -> Void
-
-    private var status: AgentStatusStyle { .of(agent.status) }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(status.color)
-                    .frame(width: 7, height: 7)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(agent.displayName)
-                        .font(.subheadline)
-                        .foregroundStyle(TaviTheme.textPrimary)
-                    // The user's own name for the task (#55) is what tells
-                    // four same-kind rows apart — #52's honest answer.
-                    if let title = agent.secondaryIdentity {
-                        Text(title)
-                            .font(.caption)
-                            .foregroundStyle(TaviTheme.textSecondary)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer(minLength: 8)
-                Text(status.label)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(status.color)
-                if let observedAt, FreshnessRule.shows(status: agent.status, observedAt: observedAt) {
-                    FreshnessLabel(observedAt: observedAt)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(TaviTheme.textSecondary)
             }
             .padding(.vertical, 12)
             .padding(.horizontal, 14)
@@ -271,21 +116,158 @@ struct RecentAgentRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(agent.displayName), \(agent.projectName), \(status.label)")
+        .accessibilityLabel("\(primary), \(secondary), needs you")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("sessions.agent.\(agent.id)")
     }
 }
 
-// One computer per chip (#50), in the strip at the top of the home:
-// the dot is its health, the word after the name is the health when it
-// is anything but live, and a tap filters the home to that computer.
-// This is the whole host tier — sessions below are flat by state, the
-// way Orca, T3 Code, and the v1 mockup all do it. With one computer the
-// strip is a single status pill.
+// One folder as one card: its name and computer on top, its agents as
+// rows beneath. A running agent's row carries a short excerpt of its
+// screen; done and idle rows are a single line. The path stays — a
+// folder name alone never stands in for a place — but as the quiet
+// second line of the header, said once per folder.
+struct ProjectCard: View {
+    let project: HomeProject
+    // Named when several computers are on screen (#50): two machines can
+    // hold the same folder.
+    var computerName: String? = nil
+    let preview: (AgentSummary) -> String?
+    let observedAt: (AgentSummary) -> Date?
+    let onOpen: (AgentSummary) -> Void
+
+    private var agents: [AgentSummary] { project.active + project.recent }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider().overlay(TaviTheme.hairline)
+            ForEach(agents, id: \.cardIdentity) { agent in
+                ProjectAgentRow(agent: agent, preview: preview(agent), observedAt: observedAt(agent)) {
+                    onOpen(agent)
+                }
+                if agent.cardIdentity != agents.last?.cardIdentity {
+                    Divider().overlay(TaviTheme.hairline).padding(.leading, 60)
+                }
+            }
+        }
+        .taviCard()
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(project.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(TaviTheme.textPrimary)
+                    .lineLimit(1)
+                Text(project.abbreviatedPath)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(TaviTheme.textSecondary.opacity(0.7))
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+            Spacer(minLength: 8)
+            if let computerName {
+                Text(computerName)
+                    .font(.caption)
+                    .foregroundStyle(TaviTheme.textSecondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("sessions.project.\(project.path)")
+        .accessibilityValue(computerName ?? "")
+    }
+}
+
+// One agent under its folder. Primary: your name for it or its own
+// title, else the kind. The kind repeats as the second line only when
+// something else took the first. Trailing: the status word — a dot alone
+// cannot tell Done from Idle — then how long ago for finished work, and
+// the chevron that says this row pushes the terminal.
+struct ProjectAgentRow: View {
+    let agent: AgentSummary
+    let preview: String?
+    let observedAt: Date?
+    let action: () -> Void
+
+    private var status: AgentStatusStyle { .of(agent.status) }
+    private var primary: String { agent.secondaryIdentity ?? agent.displayName }
+    private var secondary: String? { agent.secondaryIdentity == nil ? nil : agent.displayName }
+    private var isRunning: Bool { agent.homeSection == .active }
+
+    private var showsFreshness: Bool {
+        observedAt.map { FreshnessRule.shows(status: agent.status, observedAt: $0) } ?? false
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 12) {
+                    AgentGlyphTile(agent: agent, tint: isRunning ? TaviTheme.statusWorking : TaviTheme.textSecondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(primary)
+                            .font(.subheadline.weight(isRunning ? .semibold : .regular))
+                            .foregroundStyle(TaviTheme.textPrimary)
+                            .lineLimit(1)
+                        if let secondary {
+                            Text(secondary)
+                                .font(.caption)
+                                .foregroundStyle(TaviTheme.textSecondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    HStack(spacing: 8) {
+                        Text(status.label)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(isRunning ? status.color : TaviTheme.textSecondary)
+                        if let observedAt, showsFreshness, !isRunning {
+                            FreshnessLabel(observedAt: observedAt)
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(TaviTheme.textSecondary.opacity(0.6))
+                    }
+                }
+                if isRunning, let preview, !preview.isEmpty {
+                    Text(preview)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(TaviTheme.textSecondary)
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(TaviTheme.well, in: RoundedRectangle(cornerRadius: TaviTheme.wellRadius, style: .continuous))
+                }
+            }
+            .padding(.vertical, 11)
+            .padding(.horizontal, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(primary), \(agent.displayName), \(status.label)")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("sessions.agent.\(agent.id)")
+    }
+}
+
+// One computer per chip (#50), in the strip at the top of the home: the
+// dot is its health, the word after the name is the health when it is
+// anything but live, and the amber numeral is how many of its agents are
+// waiting on you — so the strip is also the fleet at a glance. A tap
+// filters the home to that computer. With one computer the strip is a
+// single pill that opens the computer's sheet, and the numeral stays off:
+// the "Needs you" header right beneath already says it.
 struct ComputerChip: View {
     let computer: HomeComputer
     let isSelected: Bool
+    var showsWaitingCount = true
     let action: () -> Void
 
     var body: some View {
@@ -307,6 +289,15 @@ struct ComputerChip: View {
                         .foregroundStyle(HostHealthLabel.color(for: computer.health))
                         .lineLimit(1)
                 }
+                if showsWaitingCount, computer.waitingCount > 0 {
+                    Text("\(computer.waitingCount)")
+                        .font(.caption2.weight(.bold))
+                        .monospacedDigit()
+                        .foregroundStyle(TaviTheme.accentInk)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(TaviTheme.accent, in: Capsule())
+                }
             }
             .foregroundStyle(isSelected ? TaviTheme.textPrimary : TaviTheme.textSecondary)
             .padding(.horizontal, 12)
@@ -318,7 +309,7 @@ struct ComputerChip: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(computer.name)
-        .accessibilityValue(computer.health.label(latencyMilliseconds: computer.latencyMilliseconds))
+        .accessibilityValue(computer.summary)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityIdentifier("sessions.computer.\(computer.id)")
     }
@@ -392,76 +383,18 @@ struct HostHealthLabel: View {
     }
 }
 
-// A project is a folder agents live in: its name leads, the path is the
-// quiet second line, and the count says how much is going on there.
-struct ProjectHeader: View {
-    let project: HomeProject
-    // Named when the home shows several computers at once (#50): two
-    // machines can hold the same folder, and there is no computer tier
-    // above this header any more.
-    var computerName: String? = nil
-
-    // Plain text on purpose: "^[…](inflect:)" only inflects when the Text
-    // is built from a literal key; a String var takes the verbatim overload
-    // and renders the markup itself. Always the total, then what is going
-    // on, so two headers on one screen count the same thing.
-    private var summary: String {
-        var parts = [project.agentCount == 1 ? "1 agent" : "\(project.agentCount) agents"]
-        if !project.active.isEmpty { parts.append("\(project.active.count) running") }
-        if !project.needsYou.isEmpty { parts.append("\(project.needsYou.count) waiting above") }
-        return parts.joined(separator: " · ")
-    }
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(project.name)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(TaviTheme.textPrimary)
-                    .lineLimit(1)
-                HStack(spacing: 4) {
-                    if let computerName {
-                        Text(computerName)
-                            .font(.system(size: 11))
-                            .foregroundStyle(TaviTheme.textSecondary)
-                        Text("·")
-                            .font(.system(size: 11))
-                            .foregroundStyle(TaviTheme.textSecondary.opacity(0.6))
-                    }
-                    Text(project.abbreviatedPath)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(TaviTheme.textSecondary.opacity(0.8))
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                }
-            }
-            Spacer(minLength: 8)
-            Text(summary)
-                .font(.caption)
-                .foregroundStyle(TaviTheme.textSecondary)
-        }
-        .padding(.top, 6)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-        .accessibilityIdentifier("sessions.project.\(project.path)")
-        .accessibilityValue(computerName ?? "")
-    }
-}
-
-// "Seen" is deliberate: this clock starts when the phone observed the
-// status, which is all the client can honestly claim.
+// How long since the phone observed the status — which is all the client
+// can honestly claim. Words only: a clock glyph repeated down a list was
+// texture, not information.
 struct FreshnessLabel: View {
     let observedAt: Date
 
     var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "clock")
-                .font(.caption2)
-            Text(observedAt, style: .relative)
-                .font(.caption2)
-                .monospacedDigit()
-        }
-        .foregroundStyle(TaviTheme.textSecondary)
+        Text(observedAt, style: .relative)
+            .font(.caption2)
+            .monospacedDigit()
+            .foregroundStyle(TaviTheme.textSecondary)
+            .lineLimit(1)
     }
 }
 

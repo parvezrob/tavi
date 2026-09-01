@@ -103,6 +103,56 @@ final class TaviScreenshotAudit: XCTestCase {
         }
     }
 
+    // The several-computer home (#50) without a second machine on hand:
+    // the same live host seeded twice under two names is enough to look at
+    // the chip strip, the computer on every row, and the project cards
+    // below the fold. Skips like the audit above.
+    @MainActor
+    func testCaptureHomeTwoComputers() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["TAVI_AUDIT"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_AUDIT=1 to capture the design-audit screens.")
+        }
+        guard let host = environment["TAVI_DEV_HOST"],
+              let token = environment["TAVI_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_DEV_HOST/TOKEN to run the audit against a live host.")
+        }
+        let app = XCUIApplication()
+        app.launchEnvironment["TAVI_DEV_RESET"] = "1"
+        app.launchEnvironment["TAVI_DEV_HOST"] = "\(host),\(host):443"
+        app.launchEnvironment["TAVI_DEV_HOST_NAMES"] = "MacBook Air,robin-PC"
+        app.launchEnvironment["TAVI_DEV_TOKEN"] = token
+        app.launch()
+        let anyCard = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sessions.agent.'")).firstMatch
+        XCTAssertTrue(anyCard.waitForExistence(timeout: 30), "The home never showed agents.")
+        sleep(2)
+        keep("audit-03b-home-two-computers-top")
+        // A waiting row opens the decision sheet, which names the computer.
+        let waiting = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sessions.agent.'")).firstMatch
+        if app.staticTexts["sessions.needsYou"].exists || app.otherElements["sessions.needsYou"].exists {
+            waiting.tap()
+            XCTAssertTrue(app.staticTexts["Needs you"].waitForExistence(timeout: 5), "The waiting row did not open the decision sheet.")
+            sleep(1)
+            keep("audit-03b2-decision-sheet-from-row")
+            app.swipeDown(velocity: .fast)
+            sleep(1)
+        }
+        app.swipeUp()
+        sleep(1)
+        keep("audit-03c-home-two-computers-scrolled")
+        app.swipeUp()
+        sleep(1)
+        keep("audit-03d-home-two-computers-end")
+        // Filter to one computer: the chip's own name drops off its rows.
+        let chip = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sessions.computer.address'")).element(boundBy: 1)
+        if chip.exists {
+            app.swipeDown(); app.swipeDown()
+            chip.tap()
+            sleep(1)
+            keep("audit-03e-home-filtered")
+        }
+    }
+
     // MARK: - Helpers (self-contained; the main suite's are private)
 
     @MainActor

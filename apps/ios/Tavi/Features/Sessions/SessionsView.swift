@@ -35,24 +35,19 @@ struct SessionsView: View {
     @State private var selectedHostId: String?
     // The computer whose sheet was opened from its chip.
     @State private var chipSheet: HostFleet.Entry?
-    // Held for the needs-you banner's scroll-to-cards tap.
-    @State private var homeScrollProxy: ScrollViewProxy?
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    // Deliberately not lazy: the home holds a handful of
-                    // rows, and LazyVStack's subview caching served a stale
-                    // card (old status pill) after a row moved sections.
-                    VStack(alignment: .leading, spacing: 12) {
-                        homeContent
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 2)
-                    .padding(.bottom, 28)
+            ScrollView {
+                // Deliberately not lazy: the home holds a handful of rows,
+                // and LazyVStack's subview caching served a stale card (old
+                // status pill) after a row moved sections.
+                VStack(alignment: .leading, spacing: 20) {
+                    homeContent
                 }
-                .onAppear { homeScrollProxy = proxy }
+                .padding(.horizontal, 16)
+                .padding(.top, 2)
+                .padding(.bottom, 28)
             }
             .background(TaviTheme.canvas.ignoresSafeArea())
             .navigationTitle("Tavi")
@@ -266,6 +261,14 @@ struct SessionsView: View {
             let shown = layout.computers.filter { selectedHostId == nil || $0.id == selectedHostId }
             let severalShown = shown.count > 1
             let needsYou = layout.needsYou.filter { agent in shown.contains { $0.id == agent.hostId } }
+            let projects = shown.flatMap { computer in
+                // A folder whose every agent is waiting above has nothing to
+                // show here; a header pointing upward was noise (owner,
+                // 2026-09-02 — supersedes the #26 "keeps its header" rule).
+                computer.projects
+                    .filter { !$0.active.isEmpty || !$0.recent.isEmpty }
+                    .map { HomeProjectItem(computer: computer, project: $0) }
+            }
 
             computerStrip(layout.computers)
 
@@ -275,67 +278,53 @@ struct SessionsView: View {
                 lastKnownBanner(computer)
             }
 
+            // Needs-you is flat and first, across every computer and
+            // project: a waiting agent never hides under a group. Said
+            // once — the header carries the count, the rows carry the
+            // agents; there is no banner repeating either (home v3). Row
+            // identity includes the status so a section move rebuilds the
+            // row instead of reusing a cached one. A row opens the decision
+            // sheet (approve/deny without the terminal).
             if !needsYou.isEmpty {
-                // With a single waiting agent the striped card below says
-                // everything the banner would; the banner earns its row only
-                // as a tally of several (#54).
-                // One header, never two: the banner is the section header
-                // when several wait; the eyebrow is when one does. The
-                // banner never picks an agent for you (owner call): its tap
-                // brings the waiting cards into view and you choose.
-                if needsYou.count > 1 {
-                    NeedsYouBanner(count: needsYou.count) {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            homeScrollProxy?.scrollTo("home.needsYou", anchor: .top)
+                VStack(alignment: .leading, spacing: 8) {
+                    SectionHeader(title: "Needs you", count: needsYou.count > 1 ? needsYou.count : nil, countTint: TaviTheme.accent)
+                        .accessibilityIdentifier("sessions.needsYou")
+                    VStack(spacing: 0) {
+                        ForEach(needsYou, id: \.cardIdentity) { agent in
+                            let directory = fleet.directory(for: agent.hostId)
+                            NeedsYouRow(
+                                agent: agent,
+                                preview: directory?.previews[agent.id],
+                                observedAt: directory?.statusObservedAt[agent.id],
+                                computerName: severalShown ? computerName(for: agent.hostId) : nil
+                            ) {
+                                guard directory != nil else { return }
+                                decisionAgent = DecisionTarget(agent: agent)
+                            }
+                            if agent.cardIdentity != needsYou.last?.cardIdentity {
+                                Divider().overlay(TaviTheme.hairline).padding(.leading, 60)
+                            }
                         }
                     }
-                } else {
-                    SectionEyebrow(title: "Needs you")
+                    .taviCard()
                 }
-                Color.clear.frame(height: 0).id("home.needsYou")
-                // Needs-you is flat and first, across every computer and
-                // project: a waiting agent never hides under a group. One
-                // block of rows, not a column of cards. Identity includes
-                // the status so a section move always rebuilds the row
-                // instead of reusing a cached one. A row opens the decision
-                // sheet (approve/deny without the terminal).
-                VStack(spacing: 0) {
-                    ForEach(needsYou, id: \.cardIdentity) { agent in
-                        let directory = fleet.directory(for: agent.hostId)
-                        NeedsYouRow(
-                            agent: agent,
-                            preview: directory?.previews[agent.id],
-                            observedAt: directory?.statusObservedAt[agent.id],
-                            computerName: severalShown ? computerName(for: agent.hostId) : nil
-                        ) {
-                            guard directory != nil else { return }
-                            decisionAgent = DecisionTarget(agent: agent)
-                        }
-                        if agent.cardIdentity != needsYou.last?.cardIdentity {
-                            Divider().overlay(TaviTheme.hairline)
-                        }
-                    }
-                }
-                .taviCard(stripe: TaviTheme.statusBlocked)
             }
 
             // Project → agents (#26), one list across every computer shown
-            // (#50): the project header names its computer when more than
-            // one is on screen. Running work sits as full cards under its
-            // folder; finished and idle work shares one compact card below
-            // them. A blocked agent is only in the flat list above — its
-            // project header counts it, never repeats it.
-            ForEach(shown) { computer in
-                // A folder whose every agent is waiting above has nothing to
-                // show here; a header pointing upward was noise (owner,
-                // 2026-09-02 — supersedes the #26 "keeps its header" rule).
-                ForEach(computer.projects.filter { !$0.active.isEmpty || !$0.recent.isEmpty }) { project in
-                    ProjectHeader(project: project, computerName: severalShown ? computer.name : nil)
-                    ForEach(project.active, id: \.cardIdentity) { agent in
-                        agentCard(agent, showsLocation: false, computerName: nil) { openAgent(agent) }
-                    }
-                    if !project.recent.isEmpty {
-                        recentCard(project.recent)
+            // (#50): each folder is one card, naming its computer when more
+            // than one is on screen. A blocked agent is only in the block
+            // above — its folder never repeats it.
+            if !projects.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    SectionHeader(title: "Projects")
+                    ForEach(projects, id: \.id) { item in
+                        ProjectCard(
+                            project: item.project,
+                            computerName: severalShown ? item.computer.name : nil,
+                            preview: { fleet.directory(for: $0.hostId)?.previews[$0.id] },
+                            observedAt: { fleet.directory(for: $0.hostId)?.statusObservedAt[$0.id] },
+                            onOpen: { openAgent($0) }
+                        )
                     }
                 }
             }
@@ -362,7 +351,11 @@ struct SessionsView: View {
                     AllComputersChip(isSelected: selectedHostId == nil) { selectedHostId = nil }
                 }
                 ForEach(computers) { computer in
-                    ComputerChip(computer: computer, isSelected: computers.count > 1 && selectedHostId == computer.id) {
+                    ComputerChip(
+                        computer: computer,
+                        isSelected: computers.count > 1 && selectedHostId == computer.id,
+                        showsWaitingCount: computers.count > 1
+                    ) {
                         if computers.count > 1 {
                             selectedHostId = selectedHostId == computer.id ? nil : computer.id
                         } else {
@@ -419,18 +412,6 @@ struct SessionsView: View {
         fleet.entries.map { JumpSource(hostId: $0.host.id, name: $0.host.displayName, directory: $0.directory) }
     }
 
-    private func agentCard(_ agent: AgentSummary, showsLocation: Bool, computerName: String?, action: @escaping () -> Void) -> some View {
-        let directory = fleet.directory(for: agent.hostId)
-        return AgentCard(
-            agent: agent,
-            preview: directory?.previews[agent.id],
-            observedAt: directory?.statusObservedAt[agent.id],
-            showsLocation: showsLocation,
-            computerName: computerName,
-            action: action
-        )
-    }
-
     // The computer's name, only when there is more than one to tell apart
     // (#50); with a single computer the name is noise on every screen.
     private func computerLabel(for hostId: String) -> String? {
@@ -438,28 +419,19 @@ struct SessionsView: View {
         return computerName(for: hostId)
     }
 
+    // A folder on a computer: two computers can hold the same path, so the
+    // list identity is both.
+    private struct HomeProjectItem: Identifiable {
+        let computer: HomeComputer
+        let project: HomeProject
+        var id: String { "\(computer.id)|\(project.id)" }
+    }
+
     // One agent to decide on, keyed by host + pane so two computers'
     // same-numbered panes never share a sheet identity.
     private struct DecisionTarget: Identifiable {
         let agent: AgentSummary
         var id: String { agent.cardIdentity }
-    }
-
-    private func recentCard(_ agents: [AgentSummary]) -> some View {
-        VStack(spacing: 0) {
-            ForEach(agents, id: \.cardIdentity) { agent in
-                RecentAgentRow(
-                    agent: agent,
-                    observedAt: fleet.directory(for: agent.hostId)?.statusObservedAt[agent.id]
-                ) {
-                    openAgent(agent)
-                }
-                if agent.id != agents.last?.id {
-                    Divider().overlay(TaviTheme.hairline)
-                }
-            }
-        }
-        .taviCard()
     }
 
     // MARK: - Empty and degraded states
@@ -680,9 +652,20 @@ struct SessionsView: View {
     private func seedFromDevelopmentEnvironmentIfNeeded() {
         // Release builds must never persist an injected credential (#33).
         #if DEBUG
+        // TAVI_DEV_HOST takes a comma-separated list so a simulator can show
+        // a several-computer home (the same Mac twice is enough to look at
+        // the layout); TAVI_DEV_HOST_NAMES names them in the same order.
         let environment = ProcessInfo.processInfo.environment
-        if !fleet.isConfigured, let host = environment["TAVI_DEV_HOST"], !host.isEmpty {
-            fleet.add(.typed(address: host), credential: environment["TAVI_DEV_TOKEN"] ?? "")
+        if !fleet.isConfigured, let hosts = environment["TAVI_DEV_HOST"], !hosts.isEmpty {
+            let addresses = hosts.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            let names = (environment["TAVI_DEV_HOST_NAMES"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            for (index, address) in addresses.enumerated() where !address.isEmpty {
+                let host = PairedHost.typed(address: address)
+                fleet.add(host, credential: environment["TAVI_DEV_TOKEN"] ?? "")
+                if index < names.count, !names[index].isEmpty {
+                    fleet.rename(hostId: host.id, alias: names[index])
+                }
+            }
         }
         #endif
     }

@@ -2,6 +2,16 @@
 
 > Append-only log of completed work sessions, newest first. Each entry is what the *next* agent needs to know about that session: what shipped, what was learned, what was left open. The live starting point is always [`current-session.md`](./current-session.md); prune entries older than a few sessions — git history keeps everything.
 
+## 2026-09-02 (late) — #50 home v3: one grammar for the home, on the owner's "design is messy" call
+
+**Shipped (main; nothing host-side):** `SessionsHomeComponents` rebuilt around two objects — `SectionHeader` (small caps + trailing count, amber only for needs-you) and cards of rows (`NeedsYouRow`, `ProjectCard` + `ProjectAgentRow`) on one skeleton: `AgentGlyphTile` (SF Symbol per kind via `AgentSummary.kindGlyph`; tint = state) · primary = `secondaryIdentity ?? projectName` · secondary = `displayName · computer` · one trailing fact. Removed: `NeedsYouBanner` (+ the scroll proxy), `AgentCard`, `RecentAgentRow`, `ProjectHeader`, the amber stripe on the block. Chips show a waiting numeral when several computers are paired. DEBUG seed: `TAVI_DEV_HOST` accepts a comma list, `TAVI_DEV_HOST_NAMES` aliases in order. Audit harness gained `testCaptureHomeTwoComputers` (strip, scrolled cards, decision sheet from a row, filtered). PRD §7.3 + DEVELOPMENT.md updated. Design page: https://claude.ai/code/artifact/2a2d609e-d2bd-418e-b55a-b7621823a098.
+
+**Verified:** baseline and v3 screenshots on the simulator against the live Mac (one computer; two via the seed); 109/109 unit tests; live `testHomeGroupsAgentsByComputerAndProject` green; full suite as the final gate: 130 tests, 125 passed, 4 skipped (two audit captures without `TAVI_AUDIT`, the two Claude-permission tests whose staged agent never blocked), 1 failed — `testLiveTypingEchoesToTheScreenWhileKeyboardIsUp`, untouched by this change and running beside the device build; green on its own re-run. Device build installed on the phone (`com.farfield.tavi`, profile → 2026-09-08).
+
+**Learned:** the "messy" read came from mixed vocabularies, not any one element — a banner card above a block, headers floating beside cards, and the least-differentiating fact (the kind) in the loudest slot. Demoting repetition (kind → glyph) and lifting what differs (name/folder) fixed more than any colour change. The two Claude-permission live tests (`testNeedsYouSurvivesVisitingTheBlockedAgent`, `testAnswerWaitingPermissionFromNeedsYouCard`) skip themselves when the staged Claude never reaches `blocked` within 150 s — happened twice tonight; environmental, not the home.
+
+**Open:** owner's look on the phone; the three design calls on the page (identical blank waiting rows, the path line under project headers, "Idle" on every recent row); then the #50 remaining acceptance list in current-session.
+
 ## 2026-09-02 (night) — #50 multi-host: built, cold-reviewed, home reshaped twice on the owner's real screens
 
 **Shipped (all on main, CI green; nothing host-side changed — no publish):**

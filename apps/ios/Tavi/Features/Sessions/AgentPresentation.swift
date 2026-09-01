@@ -46,6 +46,21 @@ extension AgentSummary {
         }
     }
 
+    // The kind as a glyph, for the tile that anchors every home row. SF
+    // Symbols only, achromatic by design: the tile's tint is the state,
+    // never a vendor colour. Kinds without a natural mark share the chip.
+    var kindGlyph: String {
+        switch agent {
+        case "shell": "terminal"
+        case "claude": "asterisk"
+        case "codex": "chevron.left.forwardslash.chevron.right"
+        case "gemini": "sparkles"
+        case "copilot": "airplane"
+        case "cursor": "cursorarrow"
+        default: "cpu"
+        }
+    }
+
     // The most recognizable identity line we have: the agent's own title
     // when it set one, otherwise the project directory name. A title that
     // just repeats the agent name (Herdr's default) adds nothing next to
