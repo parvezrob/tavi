@@ -112,12 +112,15 @@ export function markStarted(layout: RuntimeLayout, version: string): boolean {
 export interface UpdaterSchedule {
   initialDelayMs?: number;
   intervalMs?: number;
+  /** After a failed check (npm unreachable, tarball not propagated yet) — sooner than the daily interval. */
+  retryMs?: number;
   setTimer?: (fn: () => void, ms: number) => { unref?: () => void };
 }
 
 export function startUpdater(deps: UpdaterDeps, schedule: UpdaterSchedule = {}): { checkNow: () => Promise<UpdateOutcome>; stop: () => void } {
   const initial = schedule.initialDelayMs ?? 2 * 60_000;
   const interval = schedule.intervalMs ?? 24 * 60 * 60_000;
+  const retry = schedule.retryMs ?? 60 * 60_000;
   const setTimer = schedule.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
   let inFlight: Promise<UpdateOutcome> | undefined;
   let stopped = false;
@@ -132,13 +135,12 @@ export function startUpdater(deps: UpdaterDeps, schedule: UpdaterSchedule = {}):
   };
   const tick = (): void => {
     if (stopped) return;
-    void checkNow()
-      .then((outcome) => {
-        if (outcome.status === "failed") deps.log(`Update check: ${outcome.reason}`);
-      })
-      .finally(() => {
-        if (!stopped) setTimer(tick, jitter(interval)).unref?.();
-      });
+    void checkNow().then((outcome) => {
+      if (stopped) return;
+      const failed = outcome.status === "failed";
+      if (failed) deps.log(`Update check: ${outcome.reason}; trying again in about an hour.`);
+      setTimer(tick, jitter(failed ? retry : interval)).unref?.();
+    });
   };
   setTimer(tick, initial).unref?.();
   return { checkNow, stop: () => { stopped = true; } };
