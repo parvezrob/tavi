@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { arch, platform } from "node:os";
+import path from "node:path";
 import * as pty from "node-pty";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { bearerToken, isAuthorized } from "./auth.js";
@@ -30,6 +31,9 @@ import {
 import type { AttachCommand, HostInfo, ServerTerminalMessage, WorkspaceInfo } from "./types.js";
 import { InputError, safeSessionId } from "./validation.js";
 import { scanWorkspaces } from "./workspaces.js";
+import { diffFile, listChanges } from "./changes.js";
+import { MAX_RAW_BYTES, listDirectory, readTextContent, resolveWithinRoots, statFile } from "./files.js";
+import { createReadStream } from "node:fs";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_PREVIEW_CHARACTERS = 4_096;
@@ -717,6 +721,93 @@ async function routeRequest(
       return;
     }
     sendJson(response, 200, result);
+    return;
+  }
+
+  // Read-only files (#25 changes, #61 mentioned, #57 browse). Every route
+  // takes the agent's `cwd` and a `path` (absolute, or relative to cwd);
+  // `resolveWithinRoots` follows symlinks first and checks the configured
+  // roots second, so nothing outside them is reachable by any spelling.
+  // Nothing here writes.
+  if (url.pathname === "/api/changes" && request.method === "GET") {
+    const cwd = await resolveWithinRoots(url.searchParams.get("cwd") ?? "", "/", config.roots);
+    if (!cwd.ok) {
+      sendJson(response, cwd.status, { error: cwd.error, ...(cwd.outsideRoots ? { outsideRoots: true } : {}) });
+      return;
+    }
+    const result = await listChanges(cwd.path);
+    if (!result.ok) {
+      sendJson(response, result.status, { error: result.error, ...(result.notRepository ? { notRepository: true } : {}) });
+      return;
+    }
+    sendJson(response, 200, { repository: result.repository, branch: result.branch ?? null, files: result.files, truncated: result.truncated });
+    return;
+  }
+
+  if (url.pathname === "/api/changes/file" && request.method === "GET") {
+    const cwd = await resolveWithinRoots(url.searchParams.get("cwd") ?? "", "/", config.roots);
+    if (!cwd.ok) {
+      sendJson(response, cwd.status, { error: cwd.error, ...(cwd.outsideRoots ? { outsideRoots: true } : {}) });
+      return;
+    }
+    const result = await diffFile(cwd.path, url.searchParams.get("path") ?? "");
+    if (!result.ok) {
+      sendJson(response, result.status, { error: result.error });
+      return;
+    }
+    sendJson(response, 200, result.diff);
+    return;
+  }
+
+  const filesRoute = url.pathname === "/api/files" || url.pathname === "/api/files/stat" || url.pathname === "/api/files/content" || url.pathname === "/api/files/raw";
+  if (filesRoute && request.method === "GET") {
+    const cwdParam = url.searchParams.get("cwd") ?? "";
+    const target = url.searchParams.get("path") ?? ".";
+    const resolved = await resolveWithinRoots(target, path.isAbsolute(cwdParam) ? cwdParam : "/", config.roots);
+    if (!resolved.ok) {
+      sendJson(response, resolved.status, { error: resolved.error, ...(resolved.outsideRoots ? { outsideRoots: true } : {}) });
+      return;
+    }
+    if (url.pathname === "/api/files/stat") {
+      sendJson(response, 200, { ...(await statFile(resolved.path)), relativePath: resolved.relativePath });
+      return;
+    }
+    if (url.pathname === "/api/files") {
+      const info = await statFile(resolved.path);
+      if (info.kind !== "directory") {
+        sendJson(response, 400, { error: "That is a file, not a folder." });
+        return;
+      }
+      sendJson(response, 200, { ...(await listDirectory(resolved.path)), relativePath: resolved.relativePath });
+      return;
+    }
+    if (url.pathname === "/api/files/content") {
+      const result = await readTextContent(resolved.path);
+      if (!result.ok) {
+        sendJson(response, result.status, { error: result.error, preview: result.preview, size: result.size, mime: result.mime });
+        return;
+      }
+      sendJson(response, 200, { ...result.content, relativePath: resolved.relativePath });
+      return;
+    }
+    // /api/files/raw: images and PDFs, streamed whole, size-capped. Text and
+    // everything else go through /content, which knows how to refuse.
+    const info = await statFile(resolved.path);
+    if (info.preview !== "image" && info.preview !== "pdf") {
+      sendJson(response, 415, { error: "Only images and PDFs are served raw.", preview: info.preview, size: info.size, mime: info.mime });
+      return;
+    }
+    if (info.size > MAX_RAW_BYTES) {
+      sendJson(response, 413, { error: "This file is too large to preview on the phone.", preview: info.preview, size: info.size, mime: info.mime });
+      return;
+    }
+    response.writeHead(200, {
+      "Content-Type": info.mime,
+      "Content-Length": String(info.size),
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    });
+    createReadStream(resolved.path).on("error", () => response.destroy()).pipe(response);
     return;
   }
 

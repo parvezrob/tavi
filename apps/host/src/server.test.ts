@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Server } from "node:http";
@@ -1043,3 +1043,60 @@ class FakeTerminal {
     this.exitListener({ exitCode, ...(signal === undefined ? {} : { signal }) });
   }
 }
+
+test("read-only file routes: auth required, roots enforced after realpath, content served, raw for images only (#57 #61 #25)", async () => {
+  const base = mkdtempSync(path.join(tmpdir(), "tavi-files-route-"));
+  const root = path.join(base, "Projects");
+  const outside = path.join(base, "outside");
+  mkdirSync(path.join(root, "app"), { recursive: true });
+  mkdirSync(outside);
+  writeFileSync(path.join(root, "app", "notes.md"), "# notes\n");
+  writeFileSync(path.join(outside, "settings.json"), "{}\n");
+  symlinkSync(path.join(outside, "settings.json"), path.join(root, "app", "link.json"));
+  writeFileSync(path.join(root, "app", "pixel.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00]));
+
+  const server = await createTaviServer({ config: { ...config, roots: [root] } });
+  await listen(server);
+  try {
+    const address = server.address() as AddressInfo;
+    const origin = `http://127.0.0.1:${address.port}`;
+    const headers = { Authorization: `Bearer ${config.token}` };
+    const cwd = encodeURIComponent(path.join(root, "app"));
+
+    assert.equal((await fetch(`${origin}/api/files/content?cwd=${cwd}&path=notes.md`)).status, 401);
+
+    const content = await fetch(`${origin}/api/files/content?cwd=${cwd}&path=notes.md`, { headers });
+    assert.equal(content.status, 200);
+    const body = (await content.json()) as { content: string; relativePath: string; mime: string };
+    assert.equal(body.content, "# notes\n");
+    assert.equal(body.relativePath, "notes.md");
+    assert.equal(body.mime, "text/markdown");
+
+    const escaped = await fetch(`${origin}/api/files/content?cwd=${cwd}&path=link.json`, { headers });
+    assert.equal(escaped.status, 403);
+    assert.deepEqual(await escaped.json(), { error: "That file is outside your project folders.", outsideRoots: true });
+
+    const absoluteOutside = await fetch(`${origin}/api/files/stat?cwd=${cwd}&path=${encodeURIComponent(path.join(outside, "settings.json"))}`, { headers });
+    assert.equal(absoluteOutside.status, 403);
+
+    const listing = await fetch(`${origin}/api/files?cwd=${cwd}&path=.`, { headers });
+    assert.equal(listing.status, 200);
+    const entries = ((await listing.json()) as { entries: { name: string }[] }).entries.map((entry) => entry.name);
+    assert.deepEqual(entries, ["link.json", "notes.md", "pixel.png"]);
+
+    const raw = await fetch(`${origin}/api/files/raw?cwd=${cwd}&path=pixel.png`, { headers });
+    assert.equal(raw.status, 200);
+    assert.equal(raw.headers.get("content-type"), "image/png");
+    assert.equal((await raw.arrayBuffer()).byteLength, 5);
+    const rawText = await fetch(`${origin}/api/files/raw?cwd=${cwd}&path=notes.md`, { headers });
+    assert.equal(rawText.status, 415);
+
+    const changes = await fetch(`${origin}/api/changes?cwd=${cwd}`, { headers });
+    assert.equal(changes.status, 404);
+    assert.equal(((await changes.json()) as { notRepository?: true }).notRepository, true);
+    const changesOutside = await fetch(`${origin}/api/changes?cwd=${encodeURIComponent(outside)}`, { headers });
+    assert.equal(changesOutside.status, 403);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

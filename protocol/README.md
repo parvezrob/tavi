@@ -151,6 +151,33 @@ Renames a Herdr tab (#55) — the user's own name for the task the pane is doing
 | `404` | Herdr is not configured on this host. |
 | `503` | Herdr is configured but could not rename the tab. |
 
+### `GET /api/changes?cwd=…` — what an agent changed (#25)
+
+Read-only view of the uncommitted work in the git repository that contains `cwd` (an absolute path inside the configured roots; `403` + `{ "outsideRoots": true }` otherwise, `404` + `{ "notRepository": true }` when no repository contains it). Response:
+
+```json
+{ "repository": "/Users/me/Projects/app", "branch": "main", "truncated": false,
+  "files": [{ "path": "src/a.ts", "code": " M", "state": "modified", "staged": false, "unstaged": true, "additions": 2, "deletions": 1, "secret": false },
+            { "path": "renamed.txt", "code": "R ", "state": "renamed", "from": "old.txt", "staged": true, "unstaged": false, "secret": false }] }
+```
+
+`state` is one of `modified`, `added`, `deleted`, `renamed`, `untracked`, `conflict`, `other`; `path` is relative to `repository`. Counts are working tree vs `HEAD` and absent for binary files. `secret: true` marks a file the redaction rule refuses to show (by name: `.env*`, `*.pem`, `*.key`, `id_rsa*`, anything with `credentials`/`secret`, `.npmrc`/`.netrc`/`.pypirc`) — listed, never diffed. At most 500 files (`truncated`). Three fixed git invocations run under `execFile` with a timeout; no mutating git operation exists on this path.
+
+### `GET /api/changes/file?cwd=…&path=…` — one file's diff
+
+`path` is a `files[].path` from `/api/changes`. Unified diff of the working tree against `HEAD` (staged and unstaged together); untracked files come back as all additions. `{ "path", "diff", "truncated", "binary" }`; the diff is cut at 256 KB on a line boundary and marked `truncated`. `400` for a path that leaves the repository, `403` for a secret, `404` when git knows no such file.
+
+### `GET /api/files…` — read-only files (#57, #61)
+
+All four routes take `cwd` (absolute) and `path` (absolute, or relative to `cwd`). Resolution is: join, **`realpath`**, then containment against the configured roots (themselves realpath'd) — a symlink that points out of a root is refused *after* realpath, which is the rule that makes "nothing outside the roots is reachable" true. Refusals: `403` + `{ "outsideRoots": true }` for anything outside (existing or not — the host says nothing more), `403` for anything under a `.git` directory, `404` for a missing file inside the roots, `400` for a malformed path.
+
+- `GET /api/files/stat` → `{ "path", "relativePath", "name", "kind": "file"|"directory"|"other", "size", "modifiedAt", "preview": "text"|"image"|"pdf"|"binary"|"secret"|"directory", "mime" }`. The phone uses this to keep only real, showable files in "Files mentioned".
+- `GET /api/files` → a directory listing: `{ "path", "relativePath", "truncated", "entries": [{ "name", "kind", "size", "ignored", "preview" }] }` — folders first, then files, alphabetical; `.gitignore`d entries last with `ignored: true`, dimmed on the phone and never hidden. `.git` is listed but nothing under it opens. At most 2 000 entries. `400` when `path` is a file.
+- `GET /api/files/content` → text: `{ "path", "relativePath", "size", "mime", "encoding": "utf-8"|"utf-16le"|"utf-16be"|"latin1", "content", "truncated", "lines" }`. Over 1 MB is cut on a line boundary and marked. Refused with `{ "error", "preview", "size", "mime" }`: `400` for a folder, `403` for a secret (rule above), `415` for binary — the phone says "binary, 2.3 MB" instead of rendering garbage. Binary is a first-8 KB NUL sniff, with UTF-16 BOMs recognised as text.
+- `GET /api/files/raw` → the bytes of an image or PDF with its `Content-Type`, up to 16 MB (`413` beyond; `415` for anything that is not an image or PDF). Never text.
+
+Nothing under `/api/files` or `/api/changes` writes, renames, deletes, or runs anything but the fixed git reads above.
+
 ## Terminal WebSocket
 
 Connect to:
