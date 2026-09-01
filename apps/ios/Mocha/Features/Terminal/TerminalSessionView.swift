@@ -18,6 +18,9 @@ struct TerminalSessionView: View {
     @State private var composerText = ""
     @State private var composerError: String?
     @State private var composerSending = false
+    // Voice lands in compose mode only (#56): the session lives inside the
+    // composer and edits its draft, nothing else. Live mode has no mic.
+    @State private var dictation = DictationSession(makeEngine: { SpeechDictationEngine() })
     @State private var inputMode: TerminalInputMode = .compose
     // The real keyboard signal: the Ghostty surface raises the keyboard
     // from UIKit (a tap on it becomes first responder) entirely outside
@@ -354,6 +357,7 @@ struct TerminalSessionView: View {
     }
 
     private func switchToLive() {
+        dictation.cancel()
         withAnimation(.easeInOut(duration: 0.2)) { inputMode = .live }
         composerFocused = false
         controller.bridge.focusTerminal()
@@ -392,6 +396,8 @@ struct TerminalSessionView: View {
                 )
                 .accessibilityIdentifier("terminal.composer")
 
+                dictationButton
+
                 Button {
                     sendComposer()
                 } label: {
@@ -400,6 +406,7 @@ struct TerminalSessionView: View {
                 }
                 .disabled(
                     composerSending
+                        || dictation.state.isActive
                         || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         || !controller.connectionState.canSubmitInput
                 )
@@ -410,7 +417,70 @@ struct TerminalSessionView: View {
                 Text(composerError)
                     .font(.caption)
                     .foregroundStyle(MochaTheme.statusBlocked)
+            } else if let caption = dictationCaption {
+                HStack(spacing: 6) {
+                    Text(caption.text)
+                        .font(.caption)
+                        .foregroundStyle(caption.isFailure ? MochaTheme.statusBlocked : MochaTheme.textSecondary)
+                        .lineLimit(2)
+                    if caption.offersSettings, let url = URL(string: UIApplication.openSettingsURLString) {
+                        Link("Settings", destination: url)
+                            .font(.caption.weight(.semibold))
+                    }
+                }
+                .accessibilityIdentifier("terminal.dictationStatus")
             }
+        }
+        .onDisappear { dictation.cancel() }
+    }
+
+    // One button, three honest looks: plain mic, a spinner while permission
+    // or the model download is pending, and a filled red mic while listening.
+    // The transcript is never sent by this button or by anything else here —
+    // Send stays a separate, deliberate tap.
+    private var dictationButton: some View {
+        Button {
+            switch dictation.state {
+            case .idle, .failed:
+                dictation.dismissFailure()
+                composerError = nil
+                dictation.start(draft: composerText) { composerText = $0 }
+            case .preparing, .listening:
+                dictation.stop()
+            }
+        } label: {
+            switch dictation.state {
+            case .preparing:
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 28, height: 28)
+            case .listening:
+                Image(systemName: "mic.fill")
+                    .font(.title2)
+                    .foregroundStyle(.red)
+                    .symbolEffect(.pulse, options: .repeating)
+            case .idle, .failed:
+                Image(systemName: "mic")
+                    .font(.title2)
+            }
+        }
+        .disabled(composerSending || !controller.connectionState.canSubmitInput)
+        .accessibilityLabel(dictation.state.isActive ? "Stop dictating" : "Dictate")
+        .accessibilityIdentifier("terminal.dictate")
+    }
+
+    private var dictationCaption: (text: String, isFailure: Bool, offersSettings: Bool)? {
+        switch dictation.state {
+        case .idle:
+            return nil
+        case .preparing(.permission):
+            return ("Waiting for microphone access…", false, false)
+        case .preparing(.downloadingModel):
+            return ("Downloading the on-device speech model — first time only.", false, false)
+        case .listening:
+            return ("Listening. Tap the mic to stop, then edit and send.", false, false)
+        case let .failed(failure):
+            return (failure.message, true, failure.isPermissionDenied)
         }
     }
 

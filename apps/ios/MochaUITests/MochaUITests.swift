@@ -269,6 +269,36 @@ final class MochaUITests: XCTestCase {
         )
     }
 
+    // #56: the mic is part of the composer and nowhere else. Live mode
+    // streams keys to a pty; a transcript must never have that path.
+    @MainActor
+    func testDictateButtonLivesOnlyInComposeMode() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["MOCHA_DEV_HOST"],
+              let token = environment["MOCHA_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_MOCHA_DEV_HOST/TOKEN to run the live dictation test.")
+        }
+        let paneId = try await createDisposableShell(host: host, token: token)
+        let app = launchIntoAgent(paneId, host: host, token: token)
+
+        let surface = app.descendants(matching: .any)["terminal.surface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+
+        let composer = app.descendants(matching: .any)["terminal.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 10), "Compose mode is the default input surface.")
+        let dictate = app.buttons["terminal.dictate"]
+        XCTAssertTrue(dictate.exists, "The composer offers dictation.")
+        XCTAssertTrue(dictate.isEnabled)
+        XCTAssertFalse(app.buttons["terminal.composerSend"].isEnabled, "Nothing to send yet.")
+
+        app.buttons["terminal.keyboard"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["terminal.liveHint"].waitForExistence(timeout: 5))
+        XCTAssertFalse(dictate.exists, "Live mode has no mic — voice never streams into a pty.")
+
+        app.buttons["terminal.composeMode"].tap()
+        XCTAssertTrue(dictate.waitForExistence(timeout: 5))
+    }
+
     // #45 acceptance: a fresh phone pairs from a code the host printed, sees
     // the host's fingerprint before consenting, and lands on live sessions
     // with a credential of its own. The simulator has no camera, so this
