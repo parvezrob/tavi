@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { AttentionOverlay, AttentionReconciler, AttentiveAgentEvents } from "./attention.js";
-import { bootstrap, BootstrapError, defaultDeps, diagnose, durablePackageRoot, formatChecks } from "./bootstrap.js";
+import { bootstrap, BootstrapError, defaultDeps, diagnose, durablePackageRoot, formatChecks, serviceEntrypoint } from "./bootstrap.js";
 import { installClaudeHooks } from "./claude-hooks.js";
 import { DeviceRegistry } from "./pairing.js";
 import { resolvePublicUrl, runPairCommand } from "./pair-command.js";
@@ -8,6 +8,10 @@ import { loadConfig, VERSION } from "./config.js";
 import { HerdrService } from "./herdr.js";
 import { HerdrEventFeed } from "./herdr-events.js";
 import { installService, uninstallService } from "./service.js";
+import { isManagedRuntime, runtimeLayout } from "./runtime.js";
+import { defaultUpdaterDeps, markStarted, startUpdater, type UpdateOutcome } from "./updater.js";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const SHUTDOWN_DEADLINE_MS = 2_000;
 
@@ -28,6 +32,7 @@ Usage: tavi <command>
   devices [revoke <id>]    List paired phones, or cut one off
   install-service          Run the host at login (macOS); uninstall-service removes it
   install-claude-hooks     Report Claude Code permission waits to the phone
+  update                   Check for a newer Tavi now (the background host also checks daily)
   token                    Print this host's own token (for the CLI, never for a phone)
   help                     This text
 
@@ -58,7 +63,8 @@ if (process.argv[2] === "token") {
 
 if (process.argv[2] === "install-service") {
   try {
-    const plist = await installService(config, { packageRoot: await durablePackageRoot(config) });
+    const packageRoot = await durablePackageRoot(config);
+    const plist = await installService(config, { packageRoot, entrypoint: serviceEntrypoint(config, packageRoot) });
     console.log(`Tavi now starts automatically. LaunchAgent: ${plist}`);
     process.exit(0);
   } catch (error) {
@@ -114,7 +120,37 @@ if (process.argv[2] === "devices") {
   process.exit(0);
 }
 
-const KNOWN = ["token", "install-service", "uninstall-service", "pair", "devices", "install-claude-hooks"];
+if (command === "update") {
+  const response = await fetch(`http://${config.bindHost}:${config.port}/api/update`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${config.token}` },
+  }).catch(() => undefined);
+  if (!response) {
+    console.error("Tavi isn't running in the background on this computer. Run `npx tavi-host pair` first.");
+    process.exit(1);
+  }
+  const outcome = (await response.json()) as UpdateOutcome;
+  if (outcome.status === "updated") {
+    process.stdout.write(`Updating ${outcome.from} → ${outcome.to}, restarting…`);
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const health = await fetch(`http://${config.bindHost}:${config.port}/api/health`, { signal: AbortSignal.timeout(1500) }).catch(() => undefined);
+      const body = health?.ok ? ((await health.json().catch(() => ({}))) as { version?: string }) : {};
+      if (body.version === outcome.to) {
+        console.log(` done. Tavi ${outcome.to} is running.`);
+        process.exit(0);
+      }
+    }
+    console.log(" it is taking longer than expected; check `npx tavi-host doctor` in a minute.");
+    process.exit(1);
+  }
+  if (outcome.status === "current") console.log(`Tavi ${outcome.version} is the latest version.`);
+  else console.log(`Not updated: ${outcome.reason}`);
+  process.exit(outcome.status === "failed" ? 1 : 0);
+}
+
+const KNOWN = ["token", "install-service", "uninstall-service", "pair", "devices", "install-claude-hooks", "update"];
 if (command !== undefined && !KNOWN.includes(command)) {
   console.error(`Unknown command: ${command}\n\n${USAGE}`);
   process.exit(2);
@@ -151,9 +187,34 @@ reconciler.start();
 // `doctor`/`pair` working (and able to explain the failure) on a machine
 // where that module did not build.
 const { createTaviServer } = await import("./server.js");
-const server = await createTaviServer({ config, herdr, agentEvents, attention });
+// Self-update only applies to the managed runtime (~/.tavi/runtime); a
+// checkout or global install is whoever installed it's to update.
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const managed = isManagedRuntime(packageRoot, config.stateDir);
+const autoUpdate = managed && process.env.TAVI_AUTO_UPDATE !== "off";
+const updater = autoUpdate
+  ? startUpdater(
+      defaultUpdaterDeps({
+        currentVersion: VERSION,
+        layout: runtimeLayout(config.stateDir),
+        // SIGTERM runs the graceful shutdown below; the supervisor restarts us on the new version.
+        restart: () => setTimeout(() => process.kill(process.pid, "SIGTERM"), 500).unref(),
+      }),
+    )
+  : undefined;
+const server = await createTaviServer({
+  config,
+  herdr,
+  agentEvents,
+  attention,
+  update: async () =>
+    updater
+      ? updater.checkNow()
+      : { status: "skipped", reason: managed ? "automatic updates are off (TAVI_AUTO_UPDATE=off)" : "this host runs from a checkout or global install; update it there" },
+});
 server.on("close", () => reconciler.stop());
 server.listen(config.port, config.bindHost, () => {
+  if (managed && markStarted(runtimeLayout(config.stateDir), VERSION)) console.log(`Updated to Tavi ${VERSION}.`);
   console.log(`Tavi ${VERSION} is running on http://${config.bindHost}:${config.port}`);
   console.log(`Machine: ${config.machineName}`);
   console.log("Run `tavi pair` to pair a phone.");

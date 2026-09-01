@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { userInfo } from "node:os";
 import { createInterface } from "node:readline/promises";
 import path from "node:path";
@@ -9,6 +9,7 @@ import { type HostConfig, VERSION } from "./config.js";
 import { installService, SERVICE_LABEL } from "./service.js";
 import { LINUX_UNIT } from "./service-linux.js";
 import { installHerdrService } from "./herdr-service.js";
+import { isManagedRuntime, packageRootFor, runtimeLayout, switchCurrent, versionPrefix, writeLauncher } from "./runtime.js";
 import { HerdrService } from "./herdr.js";
 
 // `tavi pair` on a fresh Mac (#47): everything a tester would otherwise do by
@@ -108,7 +109,8 @@ export function defaultDeps(config: HostConfig, options: { assumeYes?: boolean }
       return typeof body.version === "string" ? body.version : "unknown";
     },
     installService: async () => {
-      await installService(config, { packageRoot: await durablePackageRoot(config) });
+      const packageRoot = await durablePackageRoot(config);
+      await installService(config, { packageRoot, entrypoint: serviceEntrypoint(config, packageRoot) });
     },
     herdrRunning: async () => (await new HerdrService({ socketPath: config.herdrSocket }).listAgents()).available,
     startHerdr: async (herdrPath) => {
@@ -116,7 +118,7 @@ export function defaultDeps(config: HostConfig, options: { assumeYes?: boolean }
     },
     startForSession: async () => {
       const root = await durablePackageRoot(config);
-      const child = spawn(process.execPath, [path.join(root, "dist", "index.js")], {
+      const child = spawn(process.execPath, [serviceEntrypoint(config, root)], {
         detached: true,
         stdio: "ignore",
         env: { ...process.env, TAVI_STATE_DIR: config.stateDir },
@@ -552,8 +554,10 @@ async function checkOptionalTool(deps: BootstrapDeps, tool: string, detail: stri
 // `npx tavi-host` runs from npm's ephemeral cache, which is no place for a
 // login service to live: the cache gets pruned and a later `npx` of a newer
 // version would not touch the service. So the first pair installs a durable
-// copy under ~/.tavi/runtime and the service runs from there. A git checkout
-// or `npm i -g` is already durable and is used in place.
+// copy under ~/.tavi/runtime/versions/<version>, points `current` at it, and
+// the service runs it through the launcher — which is also what lets the
+// host update itself afterwards (src/updater.ts). A git checkout or
+// `npm i -g` is already durable and is used in place.
 export async function durablePackageRoot(
   config: HostConfig,
   options: {
@@ -565,24 +569,36 @@ export async function durablePackageRoot(
 ): Promise<string> {
   const packageRoot = options.packageRoot ?? currentPackageRoot();
   const env = options.env ?? process.env;
-  if (!isEphemeral(packageRoot, env)) return packageRoot;
+  if (!isEphemeral(packageRoot, env) && !isManagedRuntime(packageRoot, config.stateDir)) return packageRoot;
 
   const version = readVersion(packageRoot);
-  const prefix = path.join(config.stateDir, "runtime");
-  const target = path.join(prefix, "node_modules", PACKAGE_NAME);
-  if (existsSync(target) && readVersion(target) === version) return target;
-
-  const spec = env.TAVI_PACKAGE_SPEC ?? `${PACKAGE_NAME}@${version}`;
-  const report = options.report ?? ((message: string) => console.log(message));
-  report("Keeping a permanent copy of Tavi on this computer (one moment)…");
-  const execute =
-    options.execute ??
-    (async (command: string, args: string[]) => (await execFileAsync(command, args, { timeout: 180_000 })).stdout);
-  await execute("npm", ["install", "--prefix", prefix, "--no-audit", "--no-fund", "--loglevel=error", spec]);
-  if (!existsSync(path.join(target, "dist", "index.js"))) {
-    throw new Error(`npm reported success but ${target} has no dist/index.js.`);
+  if (!/^\d+\.\d+\.\d+/.test(version)) throw new Error(`Cannot read Tavi's version from ${packageRoot}/package.json.`);
+  const layout = runtimeLayout(config.stateDir);
+  const target = packageRootFor(layout, version);
+  if (!(existsSync(target) && readVersion(target) === version)) {
+    const spec = env.TAVI_PACKAGE_SPEC ?? `${PACKAGE_NAME}@${version}`;
+    const report = options.report ?? ((message: string) => console.log(message));
+    report("Keeping a permanent copy of Tavi on this computer (one moment)…");
+    const execute =
+      options.execute ??
+      (async (command: string, args: string[]) => (await execFileAsync(command, args, { timeout: 180_000 })).stdout);
+    await execute("npm", ["install", "--prefix", versionPrefix(layout, version), "--no-audit", "--no-fund", "--loglevel=error", spec]);
+    if (!existsSync(path.join(target, "dist", "index.js"))) {
+      throw new Error(`npm reported success but ${target} has no dist/index.js.`);
+    }
+  }
+  switchCurrent(layout, version);
+  writeLauncher(layout);
+  // Layout before 0.1.6 put the copy straight under runtime/; it is dead weight now.
+  for (const stale of ["node_modules", "package.json", "package-lock.json"]) {
+    rmSync(path.join(layout.root, stale), { recursive: true, force: true });
   }
   return target;
+}
+
+/** The managed runtime runs through its launcher (rollback, self-update); anything else runs dist/index.js directly. */
+export function serviceEntrypoint(config: HostConfig, packageRoot: string): string {
+  return isManagedRuntime(packageRoot, config.stateDir) ? runtimeLayout(config.stateDir).launcher : path.join(packageRoot, "dist", "index.js");
 }
 
 function isEphemeral(packageRoot: string, env: NodeJS.ProcessEnv): boolean {

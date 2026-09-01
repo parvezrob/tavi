@@ -22,6 +22,8 @@ export interface ServiceOptions {
   operatingSystem?: NodeJS.Platform;
   /** Directory holding this package's dist/ — a checkout's apps/host, a global install, or ~/.tavi/runtime. */
   packageRoot?: string;
+  /** What the service runs; defaults to <packageRoot>/dist/index.js. The managed runtime passes its launcher. */
+  entrypoint?: string;
   userId?: number;
   /** How long to wait for a booted-out service to actually leave launchd. */
   bootoutTimeoutMs?: number;
@@ -48,7 +50,7 @@ const TRANSIENT_BOOTSTRAP_ERROR = /Input\/output error|Operation now in progress
 export async function installService(config: HostConfig, options: ServiceOptions = {}): Promise<string> {
   if ((options.operatingSystem ?? platform()) === "linux") return installSystemdService(config, options);
   const runtime = createRuntime(options);
-  const entrypoint = path.join(runtime.packageRoot, "dist", "index.js");
+  const entrypoint = options.entrypoint ?? path.join(runtime.packageRoot, "dist", "index.js");
   const logFile = path.join(config.stateDir, "host.log");
   const legacyExists = await fileExists(runtime.legacyPlist);
 

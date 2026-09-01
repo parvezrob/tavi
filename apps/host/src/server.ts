@@ -55,6 +55,8 @@ export interface TaviServerOptions {
   devices?: DeviceRegistry;
   pairing?: PairingSessions;
   spawnTerminal?: typeof pty.spawn;
+  /** Checks npm for a newer host and applies it (the managed runtime's self-update). */
+  update?: () => Promise<unknown>;
   attachmentRetentionMs?: number;
   attachmentBufferBytes?: number;
   // How often an open WebSocket re-checks that its credential still exists,
@@ -86,6 +88,7 @@ export async function createTaviServer(options: TaviServerOptions) {
     devices = new DeviceRegistry(config.stateDir),
     pairing = new PairingSessions(),
     spawnTerminal = pty.spawn,
+    update,
   } = options;
   const eventsWss = new WebSocketServer({
     noServer: true,
@@ -133,6 +136,7 @@ export async function createTaviServer(options: TaviServerOptions) {
         herdr,
         listWorkspaces,
         attention,
+        update,
         projects,
         agentKinds,
         devices,
@@ -303,6 +307,7 @@ interface RouteContext {
   authorized: (request: IncomingMessage) => boolean;
   herdr?: HerdrAgentSource | undefined;
   attention?: AttentionOverlay | undefined;
+  update?: (() => Promise<unknown>) | undefined;
 }
 
 async function routeRequest(
@@ -310,7 +315,7 @@ async function routeRequest(
   response: ServerResponse,
   context: RouteContext,
 ): Promise<void> {
-  const { config, herdr, listWorkspaces, attention, projects, agentKinds, devices, pairing, authorized } = context;
+  const { config, herdr, listWorkspaces, attention, projects, agentKinds, devices, pairing, authorized, update } = context;
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
   if (url.pathname === "/api/health" && request.method === "GET") {
@@ -669,6 +674,12 @@ async function routeRequest(
     // picker's recent list.
     projects.remember(candidate.path);
     sendJson(response, 201, { paneId: result.paneId, tabId: result.tabId });
+    return;
+  }
+
+  if (url.pathname === "/api/update" && request.method === "POST") {
+    const outcome = update ? await update() : { status: "skipped", reason: "this host does not manage its own updates" };
+    sendJson(response, 200, outcome);
     return;
   }
 

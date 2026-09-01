@@ -47,7 +47,7 @@ export async function installSystemdService(config: HostConfig, options: Service
   const homeDirectory = options.homeDirectory ?? homedir();
   const packageRoot = options.packageRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const unitFile = path.join(homeDirectory, ".config", "systemd", "user", LINUX_UNIT);
-  const entrypoint = path.join(packageRoot, "dist", "index.js");
+  const entrypoint = options.entrypoint ?? path.join(packageRoot, "dist", "index.js");
   const logFile = path.join(config.stateDir, "host.log");
 
   await mkdir(path.dirname(unitFile), { recursive: true });

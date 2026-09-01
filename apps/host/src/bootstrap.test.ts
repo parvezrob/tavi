@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import { bootstrap, BootstrapError, type BootstrapDeps, diagnose, durablePackageRoot, formatChecks } from "./bootstrap.js";
+import { bootstrap, BootstrapError, type BootstrapDeps, diagnose, durablePackageRoot, formatChecks, serviceEntrypoint } from "./bootstrap.js";
 import { type HostConfig, VERSION } from "./config.js";
 
 const config: HostConfig = {
@@ -337,7 +337,7 @@ test("a checkout or global install is used in place; the npx cache gets a durabl
   const npx = path.join(home, ".npm", "_npx", "abc123", "node_modules", "tavi-host");
   writePackage(npx, "0.1.0");
   const installs: string[] = [];
-  const runtime = path.join(local.stateDir, "runtime", "node_modules", "tavi-host");
+  const runtime = path.join(local.stateDir, "runtime", "versions", "0.1.0", "node_modules", "tavi-host");
   const resolved = await durablePackageRoot(local, {
     packageRoot: npx,
     env: {},
@@ -350,8 +350,12 @@ test("a checkout or global install is used in place; the npx cache gets a durabl
   });
   assert.equal(resolved, runtime);
   assert.deepEqual(installs, [
-    `npm install --prefix ${path.join(local.stateDir, "runtime")} --no-audit --no-fund --loglevel=error tavi-host@0.1.0`,
+    `npm install --prefix ${path.join(local.stateDir, "runtime", "versions", "0.1.0")} --no-audit --no-fund --loglevel=error tavi-host@0.1.0`,
   ]);
+  assert.equal(readlinkSync(path.join(local.stateDir, "runtime", "current")), path.join("versions", "0.1.0"));
+  assert.equal(existsSync(path.join(local.stateDir, "runtime", "launcher.mjs")), true);
+  assert.equal(serviceEntrypoint(local, runtime), path.join(local.stateDir, "runtime", "launcher.mjs"));
+  assert.equal(serviceEntrypoint(local, checkout), path.join(checkout, "dist", "index.js"));
 
   // Same version already there: no second install.
   installs.length = 0;
@@ -364,7 +368,7 @@ test("TAVI_PACKAGE_SPEC overrides what the durable copy is installed from (tarba
   const npx = path.join(home, "_npx", "x", "node_modules", "tavi-host");
   writePackage(npx, "0.1.0");
   const local: HostConfig = { ...config, stateDir: path.join(home, ".tavi") };
-  const runtime = path.join(local.stateDir, "runtime", "node_modules", "tavi-host");
+  const runtime = path.join(local.stateDir, "runtime", "versions", "0.1.0", "node_modules", "tavi-host");
   let spec = "";
   await durablePackageRoot(local, {
     packageRoot: npx,
