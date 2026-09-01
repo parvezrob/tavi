@@ -100,3 +100,7 @@ Tailscale documents that Serve proxies a localhost service over tailnet-only HTT
 Tavi can attach to any herdr pane and can launch any CLI herdr knows. It cannot take over an arbitrary process that was started in a normal terminal or inside a vendor's GUI app; that process must already be running in herdr, or be resumed from a new CLI session using the vendor's own resume command.
 
 That boundary is intentional. The universal primitive is the terminal, which preserves vendor independence and avoids maintaining a brittle adapter for every agent.
+
+## Licensing
+
+The host package (`apps/host`, published to npm as [`tavi-host`](https://www.npmjs.com/package/tavi-host)) is licensed under the [Apache License 2.0](./apps/host/LICENSE) — it runs with shell access on your computer, so it should be readable and freely auditable. Everything else in this repository, including the Tavi iOS app, is © 2026 Farfield, all rights reserved. "Tavi" and "Farfield" are names of Farfield.

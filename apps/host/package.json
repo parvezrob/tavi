@@ -1,15 +1,15 @@
 {
   "name": "tavi-host",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Tavi host \u2014 pairs your iPhone with the coding agents already running on this computer, over your own Tailscale network. Terminal Agent Vantage and Intervention, by Farfield.",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/parvezrob/mocha.git",
+    "url": "git+https://github.com/parvezrob/tavi.git",
     "directory": "apps/host"
   },
-  "homepage": "https://github.com/parvezrob/mocha#readme",
-  "bugs": "https://github.com/parvezrob/mocha/issues",
+  "homepage": "https://github.com/parvezrob/tavi#readme",
+  "bugs": "https://github.com/parvezrob/tavi/issues",
   "type": "module",
   "bin": {
     "tavi": "dist/index.js"
@@ -17,7 +17,8 @@
   "files": [
     "dist",
     "!dist/**/*.test.*",
-    "scripts/ensure-node-pty.mjs"
+    "scripts/ensure-node-pty.mjs",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=20"
