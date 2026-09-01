@@ -7,10 +7,10 @@ import test, { type TestContext } from "node:test";
 import type { HostConfig } from "./config.js";
 import { installService, type ServiceOptions, uninstallService } from "./service.js";
 
-const CURRENT_LABEL = "com.parvezrob.mocha.host";
-const LEGACY_LABEL = "dev.agent-deck.host";
+const CURRENT_LABEL = "com.farfield.tavi.host";
+const LEGACY_LABEL = "com.parvezrob.mocha.host";
 
-test("installs the Mocha service and removes the stopped legacy plist", async (context) => {
+test("installs the Tavi service and removes the stopped legacy plist", async (context) => {
   const fixture = createFixture(context);
   const legacyPlist = fixture.plist(LEGACY_LABEL);
   mkdirSync(path.dirname(legacyPlist), { recursive: true });
@@ -22,10 +22,10 @@ test("installs the Mocha service and removes the stopped legacy plist", async (c
   assert.equal(installed, fixture.plist(CURRENT_LABEL));
   assert.equal(existsSync(legacyPlist), false);
   assert.match(contents, new RegExp(`<string>${CURRENT_LABEL}</string>`));
-  assert.match(contents, /<key>MOCHA_HERDR_SOCKET<\/key>/);
+  assert.match(contents, /<key>TAVI_HERDR_SOCKET<\/key>/);
   assert.match(contents, /<key>LANG<\/key>\s*<string>[^<]*UTF-8<\/string>/i);
-  assert.doesNotMatch(contents, /<key>MOCHA_TOKEN<\/key>/);
-  assert.doesNotMatch(contents, /<key>DECK_/);
+  assert.doesNotMatch(contents, /<key>TAVI_TOKEN<\/key>/);
+  assert.doesNotMatch(contents, /<key>MOCHA_/);
   if (process.platform === "darwin") {
     assert.match(execFileSync("plutil", ["-lint", installed], { encoding: "utf8" }), /OK/);
   }
@@ -79,12 +79,12 @@ test("gives up with a clear message when the old instance never exits", async (c
 
   await assert.rejects(
     () => installService(fixture.config, fixture.options),
-    /still running .*launchctl bootout gui\/501\/com\.parvezrob\.mocha\.host/,
+    /still running .*launchctl bootout gui\/501\/com\.farfield\.tavi\.host/,
   );
   assert.equal(fixture.launchctl().some((command) => command.startsWith("bootstrap")), false);
 });
 
-test("restores the legacy service if the Mocha service cannot bootstrap", async (context) => {
+test("restores the legacy service if the Tavi service cannot bootstrap", async (context) => {
   const fixture = createFixture(context, {
     fail: (command) => {
       if (command === `bootstrap gui/501 ${fixture.plist(CURRENT_LABEL)}`) {
@@ -132,7 +132,7 @@ interface FixtureOptions {
 // `lingerMs`, and `print` fails once it is gone — exactly the signals the
 // installer relies on.
 function createFixture(context: TestContext, fixtureOptions: FixtureOptions = {}) {
-  const homeDirectory = mkdtempSync(path.join(tmpdir(), "mocha-service-test-"));
+  const homeDirectory = mkdtempSync(path.join(tmpdir(), "tavi-service-test-"));
   context.after(() => rmSync(homeDirectory, { recursive: true, force: true }));
   const commands: string[] = [];
   const loaded = new Set(fixtureOptions.loaded ?? []);
@@ -155,7 +155,7 @@ function createFixture(context: TestContext, fixtureOptions: FixtureOptions = {}
     },
     homeDirectory,
     operatingSystem: "darwin",
-    projectRoot: "/project/mocha",
+    projectRoot: "/project/tavi",
     retryIntervalMs: 10,
     userId: 501,
   };
@@ -164,9 +164,9 @@ function createFixture(context: TestContext, fixtureOptions: FixtureOptions = {}
     port: 8787,
     token: "test-token-that-is-long-enough",
     shell: "/bin/zsh",
-    herdrSocket: "/tmp/mocha-test-herdr.sock",
+    herdrSocket: "/tmp/tavi-test-herdr.sock",
     roots: ["/project"],
-    stateDir: path.join(homeDirectory, ".mocha"),
+    stateDir: path.join(homeDirectory, ".tavi"),
     machineName: "Studio",
   };
 

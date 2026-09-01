@@ -1,4 +1,4 @@
-# Mocha implementation plan
+# Tavi implementation plan
 
 **Status:** Phase 1 implementation complete; physical-iPhone qualification pending
 **Updated:** 2026-08-19
@@ -26,7 +26,7 @@ The native iOS app should consume a versioned evolution of this host protocol. W
 - Treat [`assets/agent-deck-v1-home-terminal.png`](./assets/agent-deck-v1-home-terminal.png) as the approved V1 Home + Terminal visual target; validate its primary customer journey on a real iPhone before expanding the screen set.
 - Treat [`assets/agent-deck-v1-pairing-flow.png`](./assets/agent-deck-v1-pairing-flow.png) as the approved V1 scan-first onboarding target.
 - Use the installed Xcode 26.6 toolchain and configure a free Personal Team for device testing.
-- Create the minimal iPhone-first SwiftUI workspace with product/target/module `Mocha`, bundle identifier `com.parvezrob.mocha`, minimum deployment target iOS 26, and Swift 6 language mode.
+- Create the minimal iPhone-first SwiftUI workspace with product/target/module `Tavi`, bundle identifier `com.farfield.tavi`, minimum deployment target iOS 26, and Swift 6 language mode.
 - Add a reproducible local script for the pinned GhosttyKit XCFramework and record the exact upstream/fork commit plus downstream patches. Do not rebuild GhosttyKit on GitHub-hosted CI without owner approval.
 - Build a recorded terminal corpus from Codex, Claude Code, tmux, Herdr, shell, Unicode, and high-frequency redraw cases.
 - Add host-side timestamping and connection diagnostics needed for latency measurement.
@@ -43,9 +43,9 @@ The native iOS app should consume a versioned evolution of this host protocol. W
 
 ### Terminal dependency decision
 
-The first spike follows Moshi's proven shape: Ghostty's native Metal surface with an external byte-input/write-callback backend. Mocha pins the `wiedymi/ghostty` custom-I/O fork at `91fe505e60bbe72ff08c881d2882acad6a56cb9f` and builds it through [`scripts/build-ghosttykit.sh`](../scripts/build-ghosttykit.sh). The repository owns a minimal patch set for macOS 26 SDK compatibility and the fork's missing callback process-info case; the generated XCFramework remains an ignored local artifact.
+The first spike follows Moshi's proven shape: Ghostty's native Metal surface with an external byte-input/write-callback backend. Tavi pins the `wiedymi/ghostty` custom-I/O fork at `91fe505e60bbe72ff08c881d2882acad6a56cb9f` and builds it through [`scripts/build-ghosttykit.sh`](../scripts/build-ghosttykit.sh). The repository owns a minimal patch set for macOS 26 SDK compatibility and the fork's missing callback process-info case; the generated XCFramework remains an ignored local artifact.
 
-This pin is an experiment behind `AgentTerminalView`, not a stability claim. Ghostty issue [#13021](https://github.com/ghostty-org/ghostty/issues/13021) reports an iOS device use-after-free during surface teardown on the same fork revision. GitHub issue [#5](https://github.com/parvezrob/mocha/issues/5) is a release-blocking physical-device lifecycle gate. Mocha does not ship this renderer until repeated create/destroy, background/foreground, lock/unlock, and session-switch tests pass without the crash.
+This pin is an experiment behind `AgentTerminalView`, not a stability claim. Ghostty issue [#13021](https://github.com/ghostty-org/ghostty/issues/13021) reports an iOS device use-after-free during surface teardown on the same fork revision. GitHub issue [#5](https://github.com/parvezrob/tavi/issues/5) is a release-blocking physical-device lifecycle gate. Tavi does not ship this renderer until repeated create/destroy, background/foreground, lock/unlock, and session-switch tests pass without the crash.
 
 ### Scope
 
@@ -89,7 +89,7 @@ Qualify:
 
 ### Phase 1 implementation evidence (2026-08-19)
 
-The code-complete simulator slice now includes the pinned GhosttyKit Metal renderer, secure WebSocket transport, strict `mocha.v1` messages, bounded frames, heartbeat, resize, explicit connection states, bounded exponential reconnect, deliberate composer/quick-key input, and no ambiguous input replay. Authentication and protocol failures are covered before a PTY can be spawned; malformed input is never written to the terminal.
+The code-complete simulator slice now includes the pinned GhosttyKit Metal renderer, secure WebSocket transport, strict `tavi.v1` messages, bounded frames, heartbeat, resize, explicit connection states, bounded exponential reconnect, deliberate composer/quick-key input, and no ambiguous input replay. Authentication and protocol failures are covered before a PTY can be spawned; malformed input is never written to the terminal.
 
 | Check | Evidence | Result |
 |---|---|---|
@@ -104,7 +104,7 @@ The code-complete simulator slice now includes the pinned GhosttyKit Metal rende
 | Input-to-output | 23 ms from deliberate input submission to the first returned PTY output | Provisional simulator measurement |
 | Memory | 217,200 KiB resident for the debug simulator process during a connected session | Provisional; not a release budget |
 
-These numbers establish a reproducible local baseline, not phone performance. GitHub issue [#4](https://github.com/parvezrob/mocha/issues/4) remains open for the physical-device checklist. Ghostty lifecycle issue [#5](https://github.com/parvezrob/mocha/issues/5) remains release-blocking until repeated real-device create/destroy, background/foreground, lock/unlock, network switching, sustained corpus output, selection/paste, and Codex/Claude Code TUI tests pass without the reported teardown fault.
+These numbers establish a reproducible local baseline, not phone performance. GitHub issue [#4](https://github.com/parvezrob/tavi/issues/4) remains open for the physical-device checklist. Ghostty lifecycle issue [#5](https://github.com/parvezrob/tavi/issues/5) remains release-blocking until repeated real-device create/destroy, background/foreground, lock/unlock, network switching, sustained corpus output, selection/paste, and Codex/Claude Code TUI tests pass without the reported teardown fault.
 
 ## 4. Phase 2 — stable host protocol and providers
 
@@ -162,7 +162,7 @@ Implement the route hierarchy and recovery behavior defined in [`V1_SCREEN_AND_N
 Suggested modules:
 
 ```text
-MochaApp
+TaviApp
   AppCoordinator
   AppShell
   Pairing
@@ -184,7 +184,7 @@ Core
 
 ### Pairing security
 
-- `mocha pair` shows a QR containing host URL, machine fingerprint, and single-use bootstrap secret.
+- `tavi pair` shows a QR containing host URL, machine fingerprint, and single-use bootstrap secret.
 - App shows a human-verifiable machine name/fingerprint.
 - Bootstrap exchange creates a random device credential and invalidates the QR secret.
 - Credential lives in Keychain and can be protected by biometry.
@@ -296,7 +296,7 @@ The iOS app consumes capabilities, not provider APIs. Each host adapter declares
 
 Use the official local Codex app-server through stdio or a localhost/Unix-socket path owned by the host. Do not expose its experimental, unsupported remote WebSocket transport directly.
 
-Initialize with an honest Mocha `clientInfo`; do not impersonate another Codex client. Default to the stable API surface and gate experimental methods behind development-only flags.
+Initialize with an honest Tavi `clientInfo`; do not impersonate another Codex client. Default to the stable API surface and gate experimental methods behind development-only flags.
 
 Capabilities can include:
 
@@ -313,7 +313,7 @@ The adapter is capability-gated and can be disabled without affecting terminal a
 
 Ship two explicitly different modes:
 
-1. **Enhanced terminal:** official interactive Claude Code runs in tmux/Herdr and owns subscription authentication. Optional user-approved hooks deliver lifecycle/tool metadata to localhost. Mocha receives no Claude credential and makes no Anthropic model request.
+1. **Enhanced terminal:** official interactive Claude Code runs in tmux/Herdr and owns subscription authentication. Optional user-approved hooks deliver lifecycle/tool metadata to localhost. Tavi receives no Claude credential and makes no Anthropic model request.
 2. **Structured product adapter:** Claude Agent SDK or structured CLI mode uses a Claude Console API key or supported cloud-provider credential kept on the host. Never offer Claude.ai login or route a user's Free/Pro/Max credentials.
 
 An optional local conversation projection over the interactive CLI must remain local-only, opt-in, authority-labeled, kill-switchable, and blocked from public release until the current terms interpretation is reviewed or clarified in writing.
@@ -402,6 +402,6 @@ The browser prototype and web deployment configuration have been removed. Do not
 
 ## 12. Immediate next work
 
-1. Generate the minimal iOS 26, iPhone-first Xcode project with `com.parvezrob.mocha` and Swift 6 strict concurrency.
+1. Generate the minimal iOS 26, iPhone-first Xcode project with `com.farfield.tavi` and Swift 6 strict concurrency.
 2. Run the terminal/transport spike and pin the qualified GhosttyKit source before implementing the complete app shell.
 3. Plan iPad-specific layout, keyboard, and interaction optimization only after the iPhone V1 gates pass.

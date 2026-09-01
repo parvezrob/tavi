@@ -1,12 +1,12 @@
-# Mocha
+# Tavi
 
-Mocha is a fast, phone-first remote control surface for coding agents already running on your computers. It does not wrap Claude Code, Codex, or other tools in a new agent framework. It gives you a durable terminal session and a much better mobile interface for launching, watching, and steering them.
+**Tavi** — *Terminal Agent Vantage and Intervention* — by Farfield. Tavi is a fast, phone-first remote control surface for coding agents already running on your computers. It does not wrap Claude Code, Codex, or other tools in a new agent framework. It gives you a durable terminal session and a much better mobile interface for launching, watching, and steering them.
 
 ## Product planning
 
 The maintained PRD, research, feature landscape, implementation plan, and visual review report live in [`docs/`](./docs/README.md). The product is a native SwiftUI app with a minimum deployment target of iOS 26 and an iPhone-first V1. iPad optimization and Android follow after the iPhone product and protocol are proven.
 
-All implementation work is governed by the non-negotiable [`Mocha development principles`](./docs/DEVELOPMENT_PRINCIPLES.md). The SwiftUI app is the only client product; Mocha does not ship or maintain a browser client. The platform-neutral host contract lives in [`protocol/`](./protocol/README.md).
+All implementation work is governed by the non-negotiable [`Tavi development principles`](./docs/DEVELOPMENT_PRINCIPLES.md). The SwiftUI app is the only client product; Tavi does not ship or maintain a browser client. The platform-neutral host contract lives in [`protocol/`](./protocol/README.md).
 
 ## How it works
 
@@ -18,7 +18,7 @@ Native iPhone app
    Tailscale Serve
         │ localhost only
         ▼
- Mocha host ── node-pty ── herdr ── codex / claude / shell / anything
+ Tavi host ── node-pty ── herdr ── codex / claude / shell / anything
 ```
 
 [herdr](https://herdr.dev) owns process lifetime, so an agent keeps running when the phone locks, changes networks, or disconnects. The host only translates terminal input/output to a small WebSocket protocol. There is no cloud relay and no agent-specific orchestration layer.
@@ -35,7 +35,7 @@ tailscale serve --bg 8787
 npm run token
 ```
 
-`tailscale serve` prints a private HTTPS address such as `https://studio-mac.example.ts.net`. Then pair the phone: `npm run pair` prints a QR code; in Mocha, tap **Scan pairing code**, confirm the fingerprint matches, and you are in. `npm run devices` lists paired phones and `npm run devices revoke <id>` removes one. (`npm run token` reveals the host's own token, which the CLI uses; phones no longer need it.) This install path is developer-grade for now — see #47 for the one-command tester install.
+`tailscale serve` prints a private HTTPS address such as `https://studio-mac.example.ts.net`. Then pair the phone: `npm run pair` prints a QR code; in Tavi, tap **Scan pairing code**, confirm the fingerprint matches, and you are in. `npm run devices` lists paired phones and `npm run devices revoke <id>` removes one. (`npm run token` reveals the host's own token, which the CLI uses; phones no longer need it.) This install path is developer-grade for now — see #47 for the one-command tester install.
 
 The automatic background service is currently macOS-only. To run it in the foreground on any supported OS:
 
@@ -84,12 +84,12 @@ Copy [`.env.example`](./.env.example) or set environment variables before runnin
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `MOCHA_HOST` | `127.0.0.1` | Bind address. Keep localhost when using Tailscale Serve. |
-| `MOCHA_PORT` | `8787` | Local host port. |
-| `MOCHA_TOKEN` | generated | Pairing token. Existing prototype credentials migrate atomically to `~/.mocha/config.json`. |
-| `MOCHA_ROOTS` | common folders in home | Comma-separated roots shown in the project launcher. |
-| `MOCHA_SHELL` | login shell | Shell used to identify shell sessions. |
-| `MOCHA_MACHINE_NAME` | hostname | Display name sent to the phone. |
+| `TAVI_HOST` | `127.0.0.1` | Bind address. Keep localhost when using Tailscale Serve. |
+| `TAVI_PORT` | `8787` | Local host port. |
+| `TAVI_TOKEN` | generated | Pairing token. Existing prototype credentials migrate atomically to `~/.tavi/config.json`. |
+| `TAVI_ROOTS` | common folders in home | Comma-separated roots shown in the project launcher. |
+| `TAVI_SHELL` | login shell | Shell used to identify shell sessions. |
+| `TAVI_MACHINE_NAME` | hostname | Display name sent to the phone. |
 
 If you change configuration after installing the macOS service, run `npm run service:install` again so the LaunchAgent receives the new values.
 
@@ -97,7 +97,7 @@ If you change configuration after installing the macOS service, run `npm run ser
 
 - The host binds to localhost by default. Tailscale Serve terminates HTTPS and makes it reachable only inside your tailnet.
 - Every API and terminal connection also requires a random per-computer pairing token.
-- Tokens are stored locally on the phone and computer. Mocha has no account, telemetry, or hosted backend.
+- Tokens are stored locally on the phone and computer. Tavi has no account, telemetry, or hosted backend.
 - Treat the token as shell access. Anyone who has it and can reach the service can execute commands as your user.
 - Do not use Tailscale Funnel or expose port `8787` directly to the public internet.
 
@@ -105,6 +105,6 @@ Tailscale documents that Serve proxies a localhost service over tailnet-only HTT
 
 ## Current boundary
 
-Mocha can attach to any herdr pane and can launch any CLI herdr knows. It cannot take over an arbitrary process that was started in a normal terminal or inside a vendor's GUI app; that process must already be running in herdr, or be resumed from a new CLI session using the vendor's own resume command.
+Tavi can attach to any herdr pane and can launch any CLI herdr knows. It cannot take over an arbitrary process that was started in a normal terminal or inside a vendor's GUI app; that process must already be running in herdr, or be resumed from a new CLI session using the vendor's own resume command.
 
 That boundary is intentional. The universal primitive is the terminal, which preserves vendor independence and avoids maintaining a brittle adapter for every agent.

@@ -3,7 +3,7 @@ import path from "node:path";
 import { readStateFile, writeStateFile } from "./state-file.js";
 
 // Pairing (#45) and per-device credentials (#46). A phone never sees the
-// host's shared token: `mocha pair` mints a single-use, short-lived secret,
+// host's shared token: `tavi pair` mints a single-use, short-lived secret,
 // the phone redeems it once, and gets a credential of its own that can be
 // revoked on the host without touching any other phone.
 
@@ -79,7 +79,7 @@ export class DeviceRegistry {
       }
       this.report(`Ignoring an unreadable host identity (${file}); a new one will be created.`);
     } else if (read.status === "unreadable") {
-      this.report(`Mocha could not read the host identity (${file}): ${read.reason}. A new one will be created.`);
+      this.report(`Tavi could not read the host identity (${file}): ${read.reason}. A new one will be created.`);
     }
     const key = randomBytes(32);
     writeStateFile(file, { version: IDENTITY_SCHEMA_VERSION, key: key.toString("base64url") });
@@ -149,7 +149,7 @@ export class DeviceRegistry {
       // Failing closed here would lock every phone out because of a disk
       // hiccup; failing open would let anyone in. Neither: no devices
       // authorize until the file is readable again, and the log says why.
-      this.report(`Mocha could not read the paired devices (${this.file}): ${read.reason}. No paired phone can connect until this is fixed.`);
+      this.report(`Tavi could not read the paired devices (${this.file}): ${read.reason}. No paired phone can connect until this is fixed.`);
       return [];
     }
     const stored = read.value as { version?: unknown; devices?: unknown };
@@ -172,7 +172,7 @@ export class DeviceRegistry {
     try {
       writeStateFile(this.file, { version: DEVICES_SCHEMA_VERSION, devices });
     } catch (error) {
-      this.report(`Mocha could not save the paired devices (${this.file}): ${describe(error)}.`);
+      this.report(`Tavi could not save the paired devices (${this.file}): ${describe(error)}.`);
       throw error;
     }
   }
@@ -238,7 +238,7 @@ export function encodePairingPayload(payload: PairingPayload): string {
   ]
     .map(([key, value]) => `${key}=${encodeURIComponent(value ?? "")}`)
     .join("&");
-  return `mocha://pair?${query}`;
+  return `tavi://pair?${query}`;
 }
 
 export function decodePairingPayload(text: string): PairingPayload | undefined {
@@ -248,7 +248,7 @@ export function decodePairingPayload(text: string): PairingPayload | undefined {
   } catch {
     return undefined;
   }
-  if (url.protocol !== "mocha:" || url.host !== "pair") return undefined;
+  if (url.protocol !== "tavi:" || url.host !== "pair") return undefined;
   const get = (key: string) => url.searchParams.get(key)?.trim() ?? "";
   const payload = { url: get("u"), secret: get("s"), fingerprint: get("f"), hostName: get("n") };
   return payload.url && payload.secret && payload.fingerprint ? payload : undefined;

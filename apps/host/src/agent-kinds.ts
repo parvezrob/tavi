@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 
 // Not an agent herdr launches: a plain shell in the chosen folder, which
-// Mocha then *reports* to herdr as an agent so it lists and attaches like
+// Tavi then *reports* to herdr as an agent so it lists and attaches like
 // one (herdr refuses to attach an unreported pane). Always available — it
 // is the pane's own shell.
 export const SHELL_KIND = "shell";

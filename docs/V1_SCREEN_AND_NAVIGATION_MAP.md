@@ -1,4 +1,4 @@
-# Mocha V1 screen and navigation map
+# Tavi V1 screen and navigation map
 
 **Status:** Locked product-navigation contract for V1 planning
 **Updated:** 2026-08-19
@@ -8,7 +8,7 @@ This document defines which surfaces exist in V1, how users enter and leave them
 
 ## 1. Navigation model in one sentence
 
-Mocha has two persistent roots—**Sessions** and **Inbox**—plus a separate **New** action; pairing replaces the app shell until at least one host is trusted, while the terminal becomes a focused full-screen surface that can be minimized without ending work.
+Tavi has two persistent roots—**Sessions** and **Inbox**—plus a separate **New** action; pairing replaces the app shell until at least one host is trusted, while the terminal becomes a focused full-screen surface that can be minimized without ending work.
 
 ## 2. Locked navigation principles
 
@@ -152,7 +152,7 @@ Settings are not a bottom tab in V1. Host management is one tap from the persist
 - The full-screen terminal hides the bottom dock but preserves the underlying tab and navigation path.
 - The top header always shows project/session identity plus host/provider context.
 - Minimize/dismiss detaches the phone presentation only; it never sends process termination.
-- When returning to a parked Herdr target, Mocha refocuses the expected workspace/tab before enabling input.
+- When returning to a parked Herdr target, Tavi refocuses the expected workspace/tab before enabling input.
 - The app may retain several active session controllers, but only one terminal surface is foregrounded. Memory and scrollback remain bounded.
 - If the input delivery result is ambiguous, sending is disabled until the exact target is resynchronized; uncertain bytes are never replayed automatically.
 - `Jump` is an accelerator, not the only navigation route. Status, labels, and rows remain accessible to VoiceOver and do not depend on color alone.
@@ -215,7 +215,7 @@ The terminal is presented from the app coordinator rather than owned by one tab,
 
 ## 12. V1 exclusions
 
-- Provider-account login or OAuth inside Mocha.
+- Provider-account login or OAuth inside Tavi.
 - A permanent Hosts or Settings bottom tab.
 - Files, source control, preview browser, usage analytics, and worktree management as root destinations.
 - A provider-specific Claude or Codex navigation hierarchy.

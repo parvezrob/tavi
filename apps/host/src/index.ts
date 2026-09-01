@@ -6,7 +6,7 @@ import { resolvePublicUrl, runPairCommand } from "./pair-command.js";
 import { loadConfig, VERSION } from "./config.js";
 import { HerdrService } from "./herdr.js";
 import { HerdrEventFeed } from "./herdr-events.js";
-import { createMochaServer } from "./server.js";
+import { createTaviServer } from "./server.js";
 import { installService, uninstallService } from "./service.js";
 
 const SHUTDOWN_DEADLINE_MS = 2_000;
@@ -28,17 +28,17 @@ if (process.argv[2] === "token") {
 if (process.argv[2] === "install-service") {
   try {
     const plist = await installService(config);
-    console.log(`Mocha now starts automatically. LaunchAgent: ${plist}`);
+    console.log(`Tavi now starts automatically. LaunchAgent: ${plist}`);
     process.exit(0);
   } catch (error) {
-    console.error(`Mocha service installation failed.\n${describeFailure(error)}`);
+    console.error(`Tavi service installation failed.\n${describeFailure(error)}`);
     process.exit(1);
   }
 }
 
 if (process.argv[2] === "uninstall-service") {
   const plists = await uninstallService();
-  console.log(`Mocha service removed: ${plists.join(", ")}`);
+  console.log(`Tavi service removed: ${plists.join(", ")}`);
   process.exit(0);
 }
 
@@ -56,14 +56,14 @@ if (process.argv[2] === "devices") {
     if (registry.revoke(target)) {
       console.log(`Revoked ${target}. That phone can no longer reach this Mac.`);
     } else {
-      console.error(`No paired device named or numbered ${target}. Run \`mocha devices\` to list them.`);
+      console.error(`No paired device named or numbered ${target}. Run \`tavi devices\` to list them.`);
       process.exit(1);
     }
     process.exit(0);
   }
   const devices = registry.list();
   if (devices.length === 0) {
-    console.log("No phones are paired. Run `mocha pair` to add one.");
+    console.log("No phones are paired. Run `tavi pair` to add one.");
   } else {
     for (const device of devices) {
       console.log(`${device.id}  ${device.name}  paired ${device.pairedAt}  last seen ${device.lastSeenAt ?? "never"}`);
@@ -76,7 +76,7 @@ if (process.argv[2] === "install-claude-hooks") {
   const { settingsPath, changed } = installClaudeHooks(config);
   console.log(
     changed
-      ? `Claude Code hooks installed in ${settingsPath} (backup written alongside). New Claude sessions report permission waits to Mocha.`
+      ? `Claude Code hooks installed in ${settingsPath} (backup written alongside). New Claude sessions report permission waits to Tavi.`
       : `Claude Code hooks already installed in ${settingsPath}.`,
   );
   process.exit(0);
@@ -99,10 +99,10 @@ const reconciler = new AttentionReconciler({
   },
 });
 reconciler.start();
-const server = await createMochaServer({ config, herdr, agentEvents, attention });
+const server = await createTaviServer({ config, herdr, agentEvents, attention });
 server.on("close", () => reconciler.stop());
 server.listen(config.port, config.bindHost, () => {
-  console.log(`Mocha ${VERSION} is running on http://${config.bindHost}:${config.port}`);
+  console.log(`Tavi ${VERSION} is running on http://${config.bindHost}:${config.port}`);
   console.log(`Machine: ${config.machineName}`);
   console.log("Run `npm run token` in this folder to reveal the phone pairing token.");
 });

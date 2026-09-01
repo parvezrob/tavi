@@ -1,4 +1,4 @@
-# Mocha product requirements document
+# Tavi product requirements document
 
 **Status:** Approved for initial implementation
 **Version:** 0.2
@@ -8,9 +8,9 @@
 
 ## 1. Product summary
 
-Mocha is a native mobile control plane for terminal coding agents running on computers the user controls. It aggregates durable Herdr agent sessions across hosts, identifies sessions needing attention when a trustworthy signal exists, resumes the exact terminal, and enables short, safe interventions from a phone.
+Tavi is a native mobile control plane for terminal coding agents running on computers the user controls. It aggregates durable Herdr agent sessions across hosts, identifies sessions needing attention when a trustworthy signal exists, resumes the exact terminal, and enables short, safe interventions from a phone.
 
-Mocha does not run models, proxy provider API calls, or replace Codex, Claude Code, or other official CLIs.
+Tavi does not run models, proxy provider API calls, or replace Codex, Claude Code, or other official CLIs.
 
 ## 2. Problem statement
 
@@ -25,7 +25,7 @@ Enable a user away from their computer to identify, inspect, and unblock the rig
 - Build a model router, agent framework, or orchestration runtime.
 - Reimplement vendor conversation storage.
 - Manage or sell provider accounts/subscriptions.
-- Require a hosted Mocha relay.
+- Require a hosted Tavi relay.
 - Build a full mobile IDE in v1.
 - Parse arbitrary terminal output into authoritative agent state.
 - Support Android before the iOS workflow and protocol are validated.
@@ -43,7 +43,7 @@ Has a laptop, desktop, and remote devbox. Opens one home screen, sees status and
 
 ### User C: terminal fallback
 
-Runs an unsupported CLI or ordinary shell. Mocha cannot supply structured status, but it can still list, attach, reconnect, and provide a high-quality native terminal.
+Runs an unsupported CLI or ordinary shell. Tavi cannot supply structured status, but it can still list, attach, reconnect, and provide a high-quality native terminal.
 
 ## 6. Product principles
 
@@ -61,7 +61,7 @@ Runs an unsupported CLI or ordinary shell. Mocha cannot supply structured status
 ### 7.1 App shell and onboarding
 
 - Native SwiftUI app with a minimum deployment target of iOS 26, optimized for iPhone in V1.
-- Product/target/module name `Mocha`, bundle identifier `com.parvezrob.mocha`, and durable internal namespace `mocha`.
+- Product/target/module name `Tavi`, bundle identifier `com.farfield.tavi`, and durable internal namespace `tavi`.
 - iPad-specific layout and interaction optimization is planned after the iPhone V1 and is not an initial release gate.
 - Dark-first, Orca-clean visual baseline: near-black canvas, quiet charcoal groups, restrained borders, system typography, consistent radii, and sparse semantic color. Avoid glow, gradients, ornamental depth, and dashboard spectacle.
 - System-provided Liquid Glass for the functional layer—navigation, toolbars, menus, sheets, and tab surfaces—not custom glass containers in the content layer.
@@ -127,8 +127,8 @@ Removed (#53, 2026-08-31). Herdr is the only backend; there is no separate multi
 - `Terminal` and `Chat` are sibling views of the same durable session; opening Chat never starts a hidden second agent.
 - Chat appears only when the adapter advertises `conversation.read` and `conversation.send`.
 - Every message, tool card, approval, and state includes source authority and freshness.
-- Codex structured chat uses the official local app-server through the host, with honest client identity and no provider credential crossing the Mocha protocol.
-- Claude Code subscription sessions remain official interactive CLI sessions controlled through the terminal; Mocha does not offer Claude.ai login or handle Claude subscription OAuth.
+- Codex structured chat uses the official local app-server through the host, with honest client identity and no provider credential crossing the Tavi protocol.
+- Claude Code subscription sessions remain official interactive CLI sessions controlled through the terminal; Tavi does not offer Claude.ai login or handle Claude subscription OAuth.
 - A fully structured Claude product adapter requires API-key or supported cloud-provider authentication kept on the host.
 - Local Claude conversation projection is opt-in, local-only, visibly labeled, kill-switchable, and release-gated on current terms review or written clarification.
 - Unsupported or ambiguous content falls back visibly to `Open terminal`; it is never converted into a fabricated structured action.
@@ -149,7 +149,7 @@ Removed (#53, 2026-08-31). Herdr is the only backend; there is no separate multi
 - Production connection requires TLS.
 - Per-device credentials; revocable at the host.
 - Keychain storage and optional Face ID gate.
-- No provider credentials cross the Mocha protocol.
+- No provider credentials cross the Tavi protocol.
 - Redact secrets from logs and diagnostics.
 - Warn against public port exposure and Tailscale Funnel.
 - Confirm file upload, session destruction, and other high-impact actions.
@@ -171,7 +171,7 @@ Removed (#53, 2026-08-31). Herdr is the only backend; there is no separate multi
 ## 9. Later scope
 
 - Optional `Terminal | Chat` switch against the same durable session.
-- Codex rich adapter via the official local app-server behind the Mocha host protocol.
+- Codex rich adapter via the official local app-server behind the Tavi host protocol.
 - Claude enhanced terminal projection only after current terms review; fully structured Claude adapter uses API-key/cloud-provider authentication.
 - Structured approvals, tool events, queued versus steering prompts only where an authoritative capability exists.
 - Additional provider adapters only when a documented interface exists.
@@ -258,7 +258,7 @@ Show cached context as stale → display last seen and path diagnostics → with
 
 | Display state | Meaning | Acceptable authority |
 | --- | --- | --- |
-| Needs attention | Explicit approval/question/blocking input is known. | Herdr lifecycle authority, documented provider protocol, explicit Mocha hook. |
+| Needs attention | Explicit approval/question/blocking input is known. | Herdr lifecycle authority, documented provider protocol, explicit Tavi hook. |
 | Working | Agent is actively processing or executing. | Herdr lifecycle authority, provider protocol, declared screen manifest with provenance. |
 | Done / ready to review | Work completed since the user last viewed it. | Herdr rollup/event or provider protocol. |
 | Idle | Session exists and is not known to be active/blocked. | Multiplexer plus authority-specific state. |

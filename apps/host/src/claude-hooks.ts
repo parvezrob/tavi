@@ -4,11 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { HostConfig } from "./config.js";
 
-// Installs Claude Code lifecycle hooks that report to the Mocha host
+// Installs Claude Code lifecycle hooks that report to the Tavi host
 // (issue #22): Notification carries permission requests, and
 // PostToolUse/Stop/UserPromptSubmit prove resolution. The hook command is a
 // relay script so the pairing token never appears in another process's argv
-// (issue #32); the relay reads it from ~/.mocha/config.json at fire time,
+// (issue #32); the relay reads it from ~/.tavi/config.json at fire time,
 // stays silent on stdout (UserPromptSubmit stdout would become model
 // context), and times out fast so a down host can never stall Claude.
 const HOOK_EVENTS = [
@@ -18,7 +18,7 @@ const HOOK_EVENTS = [
   "Stop",
   "UserPromptSubmit",
 ] as const;
-// Both markers identify Mocha-owned entries: the relay filename for current
+// Both markers identify Tavi-owned entries: the relay filename for current
 // installs, the endpoint path for pre-relay curl commands being replaced.
 const HOOK_MARKERS = ["claude-hook-relay.js", "/api/hooks/claude"];
 
@@ -49,17 +49,17 @@ export function installClaudeHooks(
 
   for (const event of HOOK_EVENTS) {
     const entries = Array.isArray(hooks[event]) ? (hooks[event] as unknown[]) : [];
-    const withoutMocha = entries.filter(
+    const withoutTavi = entries.filter(
       (entry) => !HOOK_MARKERS.some((marker) => JSON.stringify(entry).includes(marker)),
     );
-    const next = [...withoutMocha, { hooks: [{ type: "command", command, timeout: 5 }] }];
+    const next = [...withoutTavi, { hooks: [{ type: "command", command, timeout: 5 }] }];
     if (JSON.stringify(entries) !== JSON.stringify(next)) changed = true;
     hooks[event] = next;
   }
 
   if (changed) {
     if (existsSync(settingsPath)) {
-      copyFileSync(settingsPath, `${settingsPath}.mocha-backup`);
+      copyFileSync(settingsPath, `${settingsPath}.tavi-backup`);
     }
     settings.hooks = hooks;
     writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");

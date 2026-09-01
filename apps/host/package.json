@@ -1,10 +1,10 @@
 {
-  "name": "@mocha/host",
+  "name": "tavi-host",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "mocha": "dist/index.js"
+    "tavi": "dist/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

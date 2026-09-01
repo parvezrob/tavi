@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="590" viewBox="0 0 1200 590" role="img" aria-labelledby="title desc">
-  <title id="title">Mocha evidence-gated roadmap</title>
+  <title id="title">Tavi evidence-gated roadmap</title>
   <desc id="desc">A roadmap from product proof through native terminal, attention layer, review tools, and optional provider adapters, with gates between phases.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#12161b"/><stop offset="1" stop-color="#090b0d"/></linearGradient>

@@ -1,6 +1,6 @@
-# Mocha product source of truth
+# Tavi product source of truth
 
-This folder is the planning and research baseline for Mocha. It supersedes the early product note in [`PRODUCT.md`](./PRODUCT.md) whenever the documents disagree.
+This folder is the planning and research baseline for Tavi. It supersedes the early product note in [`PRODUCT.md`](./PRODUCT.md) whenever the documents disagree.
 
 ## Start here
 
@@ -26,4 +26,4 @@ When implementation and [`DEVELOPMENT_PRINCIPLES.md`](./DEVELOPMENT_PRINCIPLES.m
 
 ## Locked terminal baseline
 
-The native iOS client uses a pinned GhosttyKit build rendered with Metal, following the proven Moshi/Remux system pattern while retaining Mocha's direct Tailscale host protocol. Mocha owns the reproducible XCFramework and downstream patches; SwiftTerm is contingency-only.
+The native iOS client uses a pinned GhosttyKit build rendered with Metal, following the proven Moshi/Remux system pattern while retaining Tavi's direct Tailscale host protocol. Tavi owns the reproducible XCFramework and downstream patches; SwiftTerm is contingency-only.

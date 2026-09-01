@@ -1,10 +1,10 @@
-# Mocha host protocol
+# Tavi host protocol
 
 **Status:** current prototype contract
-**Protocol:** `mocha.v1`
+**Protocol:** `tavi.v1`
 **Updated:** 2026-08-31
 
-This document preserves the transport contract used by the native Mocha client. It is platform-neutral and is the compatibility baseline while the protocol evolves toward versioned capability negotiation.
+This document preserves the transport contract used by the native Tavi client. It is platform-neutral and is the compatibility baseline while the protocol evolves toward versioned capability negotiation.
 
 ## Transport and trust boundary
 
@@ -15,16 +15,15 @@ This document preserves the transport contract used by the native Mocha client. 
 - Treat the token as shell access. The current token is a bootstrap-era credential, not the final per-device pairing design.
 - JSON response bodies use UTF-8. Successful responses and errors are not cacheable.
 
-### Prototype namespace migration
+### Namespace migration (Mocha → Tavi, 2026-09-01, #62)
 
-- Active runtime identifiers use `mocha`: `MOCHA_*`, `~/.mocha`, `mocha-*`, and `mocha.v1`.
-- On first start, a valid legacy `~/.agent-deck/config.json` token is copied atomically into `~/.mocha/config.json`; the legacy file remains as a rollback source.
-- Conflicting current and legacy credentials stop startup with an actionable error. The host never guesses which shell-access credential is authoritative.
-- Legacy `DECK_*` environment variables are rejected. Reinstall the service or rename the variables explicitly.
+- Active runtime identifiers use `tavi`: `TAVI_*`, `~/.tavi`, `tavi-*`, the pairing URL scheme `tavi://pair`, and the WebSocket subprotocols `tavi.v1` / `tavi.v2` / `tavi.events.v1`. The previous spelling was `mocha.*`; there is no negotiation between the two, so a host and an app must be upgraded together.
+- On first start, an existing `~/.mocha` directory is moved to `~/.tavi` in one rename (token, paired devices, host identity, log) so no phone has to re-pair. If both directories exist with different tokens, startup stops with an actionable error — the host never guesses which shell-access credential is authoritative.
+- `MOCHA_*` environment variables still apply when the matching `TAVI_*` is unset (a service plist written before the rename exports them) and are reported once at startup; `npm run service:install` rewrites the plist. The launchd label moved from `com.parvezrob.mocha.host` to `com.farfield.tavi.host`; install boots the old label out and removes its plist.
 
 ## HTTP authentication
 
-Two kinds of bearer credential are accepted everywhere: the host's own token (`~/.mocha/config.json`, shown by `npm run token`; the CLI and pre-pairing dev flow) and any **paired device credential** minted by the pairing exchange below. Only the host token may start a pairing. Revoking a device on the host (`mocha devices revoke <id|name>`) invalidates its credential immediately.
+Two kinds of bearer credential are accepted everywhere: the host's own token (`~/.tavi/config.json`, shown by `npm run token`; the CLI and pre-pairing dev flow) and any **paired device credential** minted by the pairing exchange below. Only the host token may start a pairing. Revoking a device on the host (`tavi devices revoke <id|name>`) invalidates its credential immediately.
 
 Send the credential on every `/api/*` request except health and `POST /api/pair`:
 
@@ -52,7 +51,7 @@ Unauthenticated liveness and version check.
 
 ### `POST /api/pair/begin`
 
-Host-token only. Mints a single-use pairing secret that expires in 5 minutes (at most 5 may be outstanding; `429` beyond that). This is what `mocha pair` calls before printing the QR.
+Host-token only. Mints a single-use pairing secret that expires in 5 minutes (at most 5 may be outstanding; `429` beyond that). This is what `tavi pair` calls before printing the QR.
 
 ```json
 { "secret": "…", "expiresAt": "2026-08-31T12:00:00.000Z", "host": { "name": "studio-mac", "fingerprint": "8F2A 19C4 · 7B10 D6E9" } }
@@ -60,7 +59,7 @@ Host-token only. Mints a single-use pairing secret that expires in 5 minutes (at
 
 ### `POST /api/pair`
 
-**Unauthenticated.** Redeems a pairing secret for a device credential. The QR carries `mocha://pair?u=<https url>&s=<secret>&f=<fingerprint>&n=<host name>`; the phone shows `n`/`f` for the person to confirm against the Mac before calling this.
+**Unauthenticated.** Redeems a pairing secret for a device credential. The QR carries `tavi://pair?u=<https url>&s=<secret>&f=<fingerprint>&n=<host name>`; the phone shows `n`/`f` for the person to confirm against the Mac before calling this.
 
 ```json
 { "secret": "…", "deviceName": "Parvez's iPhone" }
@@ -114,7 +113,7 @@ Everything a client needs to choose where a new agent starts.
 
 `recent` merges the folders agents are running in right now (`active: true`) with the folders this host has previously launched an agent in. Folders with a live agent come first, then the most recently chosen; `lastUsedAt` is absent for a folder known only from a live agent, and a remembered folder that no longer exists on disk is omitted rather than offered. `name` is the folder's basename. `withinRoots` says whether the folder sits inside `roots`, so a client can mark the folders whose creation will require the confirmation described below instead of discovering it after a failed request. `workspaces` is the configured roots and their immediate visible child directories, Git roots first.
 
-`roots` may be empty — a host with none of the default project directories and no `MOCHA_ROOTS` configures no roots at all, and then *every* create requires the confirmation below. Path comparison is case- and Unicode-normalization-insensitive, matching the default macOS filesystem.
+`roots` may be empty — a host with none of the default project directories and no `TAVI_ROOTS` configures no roots at all, and then *every* create requires the confirmation below. Path comparison is case- and Unicode-normalization-insensitive, matching the default macOS filesystem.
 
 ### `POST /api/herdr/tabs`
 
@@ -133,7 +132,7 @@ Creates a Herdr tab and launches an agent in it.
 | `404` | Herdr is not configured on this host. |
 | `503` | Herdr is configured but could not create the tab. |
 
-**Compatibility.** Requiring `cwd` is a breaking change to this endpoint, made while Mocha is pre-MVP with a single first-party client shipped alongside the host. A client that omits `cwd` gets `400` on every create and must be updated with the host; there is no negotiated fallback. Deploy the host and the app together.
+**Compatibility.** Requiring `cwd` is a breaking change to this endpoint, made while Tavi is pre-MVP with a single first-party client shipped alongside the host. A client that omits `cwd` gets `400` on every create and must be updated with the host; there is no negotiated fallback. Deploy the host and the app together.
 
 ### `PATCH /api/herdr/tabs/{tabId}`
 
@@ -143,7 +142,7 @@ Renames a Herdr tab (#55) — the user's own name for the task the pane is doing
 { "label": "ship the fix" }
 ```
 
-`label` is trimmed and must be 1–120 characters after trimming (`400` otherwise). The host wraps `tab.rename`; Herdr owns the truth, and the applied label reaches every client through the agents feed — each agent in `GET /api/agents` (and the events snapshots) carries the tab's current label as `tabLabel` when the tab has one. Clients decide which labels are user-meaningful; Herdr's defaults (bare numbers, `mocha <kind>` on phone-created tabs) are not identity.
+`label` is trimmed and must be 1–120 characters after trimming (`400` otherwise). The host wraps `tab.rename`; Herdr owns the truth, and the applied label reaches every client through the agents feed — each agent in `GET /api/agents` (and the events snapshots) carries the tab's current label as `tabLabel` when the tab has one. Clients decide which labels are user-meaningful; Herdr's defaults (bare numbers, `tavi <kind>` on phone-created tabs) are not identity.
 
 | Status | Meaning |
 | --- | --- |
@@ -168,7 +167,7 @@ Send the access token in the standard authorization header:
 Authorization: Bearer <token>
 ```
 
-Offer only the `mocha.v1` WebSocket subprotocol. The server must select that exact protocol; a missing or unsupported protocol returns HTTP `400` before pane lookup or PTY creation. Authentication failure returns `401`, an unknown pane returns `404`, and a Herdr that is not running returns `503` before upgrade.
+Offer only the `tavi.v1` WebSocket subprotocol. The server must select that exact protocol; a missing or unsupported protocol returns HTTP `400` before pane lookup or PTY creation. Authentication failure returns `401`, an unknown pane returns `404`, and a Herdr that is not running returns `503` before upgrade.
 
 Every application frame is a UTF-8 JSON text frame no larger than 64 KiB. Binary frames return an error and close with code `1003`; oversized client frames return an error and close with code `1009`. The host chunks large PTY output into bounded frames and pauses the temporary PTY attachment when the WebSocket send buffer crosses its high-water mark. On connection the host creates the attachment using `TERM=xterm-256color` and true color.
 
@@ -222,9 +221,9 @@ Connection liveness probe:
 
 The shared compatibility fixtures live in [`fixtures/terminal-v1/`](./fixtures/terminal-v1/). They are synthetic and contain no captured prompts, terminal contents, credentials, or private paths.
 
-## Terminal WebSocket v2 (`mocha.v2`)
+## Terminal WebSocket v2 (`tavi.v2`)
 
-Clients should offer the `mocha.v2` subprotocol; the server prefers it and falls back to `mocha.v1` when only that is offered. v2 changes output delivery and reconnect semantics; client messages (`input`, `resize`, `ping`) and the `pong`/`exit`/`error` server messages are unchanged and remain JSON text frames.
+Clients should offer the `tavi.v2` subprotocol; the server prefers it and falls back to `tavi.v1` when only that is offered. v2 changes output delivery and reconnect semantics; client messages (`input`, `resize`, `ping`) and the `pong`/`exit`/`error` server messages are unchanged and remain JSON text frames.
 
 ### Persistent attachment
 

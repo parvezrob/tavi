@@ -1,16 +1,16 @@
-# Mocha research and product strategy
+# Tavi research and product strategy
 
 **Status:** Research baseline / draft for product review
 **Updated:** 2026-08-19
 **Research horizon:** current public product capabilities as of 2026-08-19
 **Primary platform:** native iOS in SwiftUI; Android after the core workflow and protocol are proven
-**Evidence base:** founder problem statement, current Mocha prototype, official product documentation, public source repositories, App Store listings, and platform documentation
+**Evidence base:** founder problem statement, current Tavi prototype, official product documentation, public source repositories, App Store listings, and platform documentation
 
 > This is desk research plus a strong founder-use-case signal. It is not yet customer validation. Product claims below are labeled as evidence, inference, or recommendation so that development does not mistake a hypothesis for a fact.
 
 ## 1. Executive conclusion
 
-Mocha should not be built as another mobile SSH client, another agent harness, or a provider-specific chat client.
+Tavi should not be built as another mobile SSH client, another agent harness, or a provider-specific chat client.
 
 It should be the **fastest private, vendor-neutral mobile control plane for coding work running on computers you own**.
 
@@ -25,7 +25,7 @@ The core mobile loop is:
 
 The full terminal remains essential because it is the universal compatibility layer. It should not be the entire product. The differentiating layer is a native attention queue, exact session resume, high-confidence state when a provider can supply it, and a visibly direct network path.
 
-![Mocha positioning map](./assets/positioning-map.svg)
+![Tavi positioning map](./assets/positioning-map.svg)
 
 ## 2. The problem we are solving
 
@@ -56,7 +56,7 @@ T3 Code calls itself an “agent harness control surface” and supports web, de
 
 **Evidence:** a unified inbox, structured chat, multi-host aggregation, source review, queued prompts, and notifications are valuable enough for multiple products to implement.
 
-**Tradeoff:** the richer the unification, the more the product tends to wrap provider CLIs, maintain provider adapters, depend on a desktop app, or route through hosted infrastructure. That is exactly the maintenance and lock-in surface Mocha is trying to minimize.
+**Tradeoff:** the richer the unification, the more the product tends to wrap provider CLIs, maintain provider adapters, depend on a desktop app, or route through hosted infrastructure. That is exactly the maintenance and lock-in surface Tavi is trying to minimize.
 
 ### 3.3 Terminal-first mobile developer tools
 
@@ -64,7 +64,7 @@ Moshi, Agentmux, ShadowTerm, and Remux demonstrate that a serious native phone t
 
 **Evidence:** “native terminal only” is not a differentiated product in 2026. It is a demanding foundation with an established feature baseline.
 
-**Opportunity:** these products often optimize for terminal breadth. Mocha can optimize for the narrower coding-agent intervention loop, a direct-path performance contract, and progressive provider intelligence without removing the raw terminal.
+**Opportunity:** these products often optimize for terminal breadth. Tavi can optimize for the narrower coding-agent intervention loop, a direct-path performance contract, and progressive provider intelligence without removing the raw terminal.
 
 ### 3.4 Agent-aware multiplexers
 
@@ -107,11 +107,11 @@ A developer or technical founder who:
 
 ### Value proposition
 
-**Mocha lets you supervise and steer any terminal coding agent from your phone with direct-network speed, durable sessions, and no mandatory cloud relay or new agent runtime.**
+**Tavi lets you supervise and steer any terminal coding agent from your phone with direct-network speed, durable sessions, and no mandatory cloud relay or new agent runtime.**
 
 ### Positioning statement
 
-For developers who run coding agents on computers they control, Mocha is a native mobile control plane that finds the session needing attention and returns the user to the exact terminal instantly. Unlike provider-native apps, it works across agents. Unlike harnesses, it does not replace the official CLI. Unlike generic SSH terminals, it organizes work around agent attention and intervention.
+For developers who run coding agents on computers they control, Tavi is a native mobile control plane that finds the session needing attention and returns the user to the exact terminal instantly. Unlike provider-native apps, it works across agents. Unlike harnesses, it does not replace the official CLI. Unlike generic SSH terminals, it organizes work around agent attention and intervention.
 
 ### The wedge
 
@@ -159,9 +159,9 @@ After the intervention loop is proven:
 
 ### Optional rich provider adapters
 
-Codex's official app-server is explicitly designed for embedding Codex into rich clients and exposes history, approvals, streamed events, threads, status, and authentication. Mocha should run it locally through stdio or a Unix socket behind the stable Mocha host protocol, identify itself honestly through `clientInfo`, and avoid depending on experimental methods. Its direct WebSocket transport is documented as experimental and unsupported for production. See [Codex app-server](https://developers.openai.com/codex/app-server) and [Codex authentication](https://developers.openai.com/codex/auth).
+Codex's official app-server is explicitly designed for embedding Codex into rich clients and exposes history, approvals, streamed events, threads, status, and authentication. Tavi should run it locally through stdio or a Unix socket behind the stable Tavi host protocol, identify itself honestly through `clientInfo`, and avoid depending on experimental methods. Its direct WebSocket transport is documented as experimental and unsupported for production. See [Codex app-server](https://developers.openai.com/codex/app-server) and [Codex authentication](https://developers.openai.com/codex/auth).
 
-Claude requires a different boundary. Anthropic's current guidance does not permit third-party products to offer Claude.ai login or route requests through users' Free, Pro, or Max subscription credentials; product integrations should use Claude Console API keys or supported cloud providers. Mocha can remain a remote terminal for an official Claude Code process authenticated by the user, and it can consume explicitly enabled local hooks, but it must not become a subscription-backed Claude API proxy. A fully structured Claude product adapter therefore uses API-key/cloud-provider authentication on the host. See [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance), [Claude Code authentication](https://code.claude.com/docs/en/authentication), and [Claude Code hooks](https://code.claude.com/docs/en/hooks).
+Claude requires a different boundary. Anthropic's current guidance does not permit third-party products to offer Claude.ai login or route requests through users' Free, Pro, or Max subscription credentials; product integrations should use Claude Console API keys or supported cloud providers. Tavi can remain a remote terminal for an official Claude Code process authenticated by the user, and it can consume explicitly enabled local hooks, but it must not become a subscription-backed Claude API proxy. A fully structured Claude product adapter therefore uses API-key/cloud-provider authentication on the host. See [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance), [Claude Code authentication](https://code.claude.com/docs/en/authentication), and [Claude Code hooks](https://code.claude.com/docs/en/hooks).
 
 Provider adapters should be capabilities, not the foundation. If an adapter breaks or is disabled, the user must still be able to attach to the same terminal session.
 
@@ -210,7 +210,7 @@ Copy the proven system shape, not Moshi's branding, pricing, or entire feature s
 5. tmux and Herdr keep work alive on the host; the phone reconnects to existing work.
 6. Structured attention and chat are projections over the authoritative terminal session, never a replacement runtime.
 
-Mocha intentionally differs at the connection layer for the first release: it retains the already-fast Mocha host protocol over direct Tailscale HTTPS/WebSocket. Mosh remains a later transport option if real roaming tests show a material gap. This keeps the Moshi-proven terminal experience without discarding our proven direct path or introducing two new subsystems at once.
+Tavi intentionally differs at the connection layer for the first release: it retains the already-fast Tavi host protocol over direct Tailscale HTTPS/WebSocket. Mosh remains a later transport option if real roaming tests show a material gap. This keeps the Moshi-proven terminal experience without discarding our proven direct path or introducing two new subsystems at once.
 
 ### Host and protocol
 
@@ -226,11 +226,11 @@ Mocha intentionally differs at the connection layer for the first release: it re
 
 ### Security promise
 
-Mocha should be able to state, truthfully:
+Tavi should be able to state, truthfully:
 
 - It does not receive or store the user's Codex, Claude, or other provider credentials.
 - It does not proxy model requests.
-- It does not require source code or transcripts to pass through an Mocha cloud service in direct mode.
+- It does not require source code or transcripts to pass through an Tavi cloud service in direct mode.
 - The host runs commands with the user's operating-system permissions; pairing therefore grants powerful shell access and must be treated accordingly.
 
 ### Required controls
@@ -247,9 +247,9 @@ Mocha should be able to state, truthfully:
 
 ### Vendor account risk
 
-Mocha should launch or attach to the official CLI already authenticated on the host. It should not impersonate vendor clients, automate consumer web sessions, copy OAuth tokens, or resell access. This design reduces—but cannot eliminate—terms-of-service risk because vendor terms and supported integration surfaces can change. Any structured adapter must use an official public interface or documented hook, undergo a terms review, and retain terminal fallback.
+Tavi should launch or attach to the official CLI already authenticated on the host. It should not impersonate vendor clients, automate consumer web sessions, copy OAuth tokens, or resell access. This design reduces—but cannot eliminate—terms-of-service risk because vendor terms and supported integration surfaces can change. Any structured adapter must use an official public interface or documented hook, undergo a terms review, and retain terminal fallback.
 
-For Anthropic specifically, do not provide Claude.ai login or route subscription credentials through an Mocha adapter. Enhanced terminal control can operate the user's official local Claude Code CLI without receiving its authentication, while a fully structured commercial Claude adapter must use an API key or supported cloud-provider credential kept on the host. Obtain written clarification before marketing a local transcript projection as a Claude-native chat replacement.
+For Anthropic specifically, do not provide Claude.ai login or route subscription credentials through an Tavi adapter. Enhanced terminal control can operate the user's official local Claude Code CLI without receiving its authentication, while a fully structured commercial Claude adapter must use an API key or supported cloud-provider credential kept on the host. Obtain written clarification before marketing a local transcript projection as a Claude-native chat replacement.
 
 ## 10. App Store strategy
 
@@ -344,7 +344,7 @@ Measure whether users can identify the next session to open in under five second
 | Native Swift/SwiftUI for iOS | Locked | Best path to system integration, touch/keyboard fidelity, terminal performance, and App Store-quality UX. |
 | Minimum deployment target | Locked | V1 requires iOS 26 or later; compatibility with earlier iOS releases is not a release goal. |
 | Device priority | Locked | V1 is designed, implemented, and release-gated for iPhone first. iPad-specific optimization is a later planned phase. |
-| Technical identity | Locked | Product/target/module `Mocha`, bundle identifier `com.parvezrob.mocha`, and durable internal `mocha` namespace. Active runtime identifiers are migrated; legacy state and tmux names remain supported only through explicit, tested compatibility paths. |
+| Technical identity | Locked | Product/target/module `Tavi`, bundle identifier `com.farfield.tavi`, and durable internal `tavi` namespace. Active runtime identifiers are migrated; legacy state and tmux names remain supported only through explicit, tested compatibility paths. |
 | Android later | Locked | Preserve protocol now; avoid splitting product discovery and terminal-engine work. |
 | Tailscale direct-first | Locked | Strong firsthand result and external evidence for direct-path performance; no mandatory hosted relay. |
 | Herdr only | Locked (revised 2026-08-31, #53) | Herdr supplies durability and attention semantics; the tmux lane was built, then removed as unused. |

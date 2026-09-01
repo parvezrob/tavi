@@ -6,7 +6,7 @@ import test from "node:test";
 import { scanWorkspaces } from "./workspaces.js";
 
 test("lists each root and its visible subfolders, git repositories first", async (context) => {
-  const root = mkdtempSync(path.join(tmpdir(), "mocha-workspaces-"));
+  const root = mkdtempSync(path.join(tmpdir(), "host-workspaces-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(path.join(root, "notes"));
   mkdirSync(path.join(root, "api", ".git"), { recursive: true });

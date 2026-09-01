@@ -11,7 +11,7 @@ import type { HostConfig } from "./config.js";
 const config = { port: 4820 } as HostConfig;
 
 test("hook command never carries the token or a token expansion", () => {
-  const command = claudeHookCommand(config, "/opt/mocha/dist/claude-hook-relay.js");
+  const command = claudeHookCommand(config, "/opt/tavi/dist/claude-hook-relay.js");
 
   assert.equal(command.includes("$("), false, "no shell expansion may produce the token");
   assert.equal(command.toLowerCase().includes("bearer"), false);
@@ -20,15 +20,15 @@ test("hook command never carries the token or a token expansion", () => {
 });
 
 test("install replaces the legacy curl command and keeps foreign hooks", () => {
-  const directory = mkdtempSync(path.join(tmpdir(), "mocha-hooks-test-"));
+  const directory = mkdtempSync(path.join(tmpdir(), "tavi-hooks-test-"));
   const settingsPath = path.join(directory, "settings.json");
   const foreign = { hooks: [{ type: "command", command: "say hi" }] };
-  const legacyMocha = {
+  const legacyTavi = {
     hooks: [{ type: "command", command: "curl -s http://127.0.0.1:4820/api/hooks/claude" }],
   };
   writeFileSync(
     settingsPath,
-    JSON.stringify({ hooks: { Notification: [foreign, legacyMocha] } }),
+    JSON.stringify({ hooks: { Notification: [foreign, legacyTavi] } }),
     "utf8",
   );
 
@@ -39,7 +39,7 @@ test("install replaces the legacy curl command and keeps foreign hooks", () => {
 });
 
 test("install is idempotent once the relay command is in place", () => {
-  const directory = mkdtempSync(path.join(tmpdir(), "mocha-hooks-test-"));
+  const directory = mkdtempSync(path.join(tmpdir(), "tavi-hooks-test-"));
   const settingsPath = path.join(directory, "settings.json");
 
   installClaudeHooks(config, settingsPath);
@@ -55,11 +55,11 @@ test("install is idempotent once the relay command is in place", () => {
 });
 
 test("relay posts stdin to the host with the token from the config file", async (context) => {
-  const home = mkdtempSync(path.join(tmpdir(), "mocha-relay-home-"));
+  const home = mkdtempSync(path.join(tmpdir(), "tavi-relay-home-"));
   context.after(() => rmSync(home, { recursive: true, force: true }));
-  mkdirSync(path.join(home, ".mocha"), { recursive: true });
+  mkdirSync(path.join(home, ".tavi"), { recursive: true });
   writeFileSync(
-    path.join(home, ".mocha", "config.json"),
+    path.join(home, ".tavi", "config.json"),
     JSON.stringify({ token: "relay-secret" }),
     "utf8",
   );

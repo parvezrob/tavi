@@ -95,7 +95,7 @@ export class ProjectHistory {
     const read = readStateFile(this.file);
     if (read.status === "missing") return [];
     if (read.status === "unreadable") {
-      this.report(`Mocha could not read the recent-projects list (${this.file}): ${read.reason}`);
+      this.report(`Tavi could not read the recent-projects list (${this.file}): ${read.reason}`);
       return [];
     }
     const parsed = read.value;
@@ -146,7 +146,7 @@ export class ProjectHistory {
       writeStateFile(this.file, { version: HISTORY_SCHEMA_VERSION, recent });
     } catch (error) {
       this.report(
-        `Mocha could not save the recent-projects list (${this.file}): ${describe(error)}. The agent still started.`,
+        `Tavi could not save the recent-projects list (${this.file}): ${describe(error)}. The agent still started.`,
       );
     }
   }

@@ -3,14 +3,14 @@ import qrcode from "qrcode-terminal";
 import type { HostConfig } from "./config.js";
 import { encodePairingPayload } from "./pairing.js";
 
-// `mocha pair`: ask the running host for a single-use code and show it as a
+// `tavi pair`: ask the running host for a single-use code and show it as a
 // QR the phone scans. It goes through the host's own API rather than the
 // state files so the code lives in the process that will redeem it.
 
 export async function resolvePublicUrl(config: HostConfig, args: string[]): Promise<string> {
   const flag = args.indexOf("--url");
   if (flag !== -1 && args[flag + 1]) return normalize(args[flag + 1] ?? "");
-  if (process.env.MOCHA_PUBLIC_URL) return normalize(process.env.MOCHA_PUBLIC_URL);
+  if (process.env.TAVI_PUBLIC_URL) return normalize(process.env.TAVI_PUBLIC_URL);
   const tailscale = await tailscaleDnsName();
   if (tailscale) return `https://${tailscale}`;
   throw new Error(
@@ -24,7 +24,7 @@ export async function runPairCommand(config: HostConfig, publicUrl: string): Pro
     headers: { Authorization: `Bearer ${config.token}` },
   }).catch(() => undefined);
   if (!response) {
-    throw new Error("The Mocha host is not running. Start it (`npm run service:install`) and try again.");
+    throw new Error("The Tavi host is not running. Start it (`npm run service:install`) and try again.");
   }
   const body = (await response.json()) as {
     secret?: string;
@@ -49,14 +49,14 @@ export async function runPairCommand(config: HostConfig, publicUrl: string): Pro
   console.log(`Host:        ${publicUrl}`);
   console.log(`Fingerprint: ${body.host.fingerprint}   ← the phone will show this; make sure it matches`);
   console.log(`Code expires: ${body.expiresAt}\n`);
-  console.log("In Mocha on the phone: Scan pairing code. No camera? Enter this instead:");
+  console.log("In Tavi on the phone: Scan pairing code. No camera? Enter this instead:");
   console.log(`  ${payload}\n`);
 }
 
 function normalize(url: string): string {
   const trimmed = url.trim().replace(/\/+$/, "");
   if (!/^https:\/\//.test(trimmed)) {
-    throw new Error(`The public URL must be HTTPS (got ${trimmed}). Mocha pairs only over Tailscale Serve.`);
+    throw new Error(`The public URL must be HTTPS (got ${trimmed}). Tavi pairs only over Tailscale Serve.`);
   }
   return trimmed;
 }

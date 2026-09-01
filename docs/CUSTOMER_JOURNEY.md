@@ -1,10 +1,10 @@
-# Mocha customer journey
+# Tavi customer journey
 
 **Status:** Product hypothesis for validation
 **Updated:** 2026-08-19
 **Primary journey:** Leave an agent running, intervene safely from a phone, then get out of the way
 
-This journey is the product spine for Mocha. It describes the experience we must make excellent before expanding into a broad mobile IDE. It is based on the founder's workflow and desk research; the assumptions marked below still require observation with external users.
+This journey is the product spine for Tavi. It describes the experience we must make excellent before expanding into a broad mobile IDE. It is based on the founder's workflow and desk research; the assumptions marked below still require observation with external users.
 
 ## 1. The job in one sentence
 
@@ -12,12 +12,12 @@ When coding work continues after I leave my computer, help me notice the session
 
 ## 2. Primary end-to-end journey
 
-| Stage | User context and goal | User question or anxiety | Mocha response | Success signal |
+| Stage | User context and goal | User question or anxiety | Tavi response | Success signal |
 | --- | --- | --- | --- | --- |
-| 1. Prepare at the desk | The user already has Codex, Claude Code, another CLI, or Herdr running on a computer they control. They want remote access without adopting a new agent runtime. | “Will this change how my agent runs or touch its login?” | Install the Mocha host, discover existing durable sessions, recommend Tailscale, and state clearly that official CLIs keep their own authentication and execution. | A real existing session appears without restarting the agent or copying provider credentials. |
+| 1. Prepare at the desk | The user already has Codex, Claude Code, another CLI, or Herdr running on a computer they control. They want remote access without adopting a new agent runtime. | “Will this change how my agent runs or touch its login?” | Install the Tavi host, discover existing durable sessions, recommend Tailscale, and state clearly that official CLIs keep their own authentication and execution. | A real existing session appears without restarting the agent or copying provider credentials. |
 | 2. Pair the phone | The user is still near the computer and can verify both devices. | “Am I accidentally exposing shell access?” | Scan a short-lived QR code, show the host name and fingerprint on both devices, issue a named per-device credential, store it in Keychain, and explain revocation. | Pairing and a private-path connection test complete in under two minutes. |
 | 3. Leave the computer | The laptop or desktop remains awake while the phone disconnects, locks, or changes networks. | “Will the process die when the app closes?” | Herdr owns session lifetime. The app explicitly says it is safe to leave and never implies that the phone owns the process. | The agent continues after the app is force-closed or the phone loses connectivity. |
-| 4. Return from the phone | A notification arrives later, or the user opens Mocha to check progress. They may be walking, commuting, or using one hand. | “What needs me now?” | Face ID, then an immediate cached attention view: needs action first, followed by working/recent sessions. Show host, project, agent identity, freshness, and connection state without a dashboard preamble. | The correct session is identified in under five seconds. |
+| 4. Return from the phone | A notification arrives later, or the user opens Tavi to check progress. They may be walking, commuting, or using one hand. | “What needs me now?” | Face ID, then an immediate cached attention view: needs action first, followed by working/recent sessions. Show host, project, agent identity, freshness, and connection state without a dashboard preamble. | The correct session is identified in under five seconds. |
 | 5. Inspect before acting | The user needs enough evidence to avoid answering the wrong prompt. | “What happened, and is this state trustworthy?” | Present a bounded recent preview, state provenance, timestamp, changed-file or tool context when authoritative, and a clear stale/unknown state when it is not. | The user can explain why the session needs them before sending input. |
 | 6. Make a short intervention | The common action is approve, deny, answer, steer, interrupt, or send a short prompt. | “Can I do this without fighting a tiny terminal?” | Offer capability-gated structured actions or Chat when available, plus a deliberate multiline composer, dictation later, confirmation for risky actions, and visible target identity. | Most interventions finish without opening the full terminal or laptop. |
 | 7. Escalate to terminal | Structured context is missing, ambiguous, or insufficient. | “Can I reach the exact real session—not a copy?” | Open the same host/session/window/pane in a native GhosttyKit terminal. Keep terminal content opaque and high-contrast; use Liquid Glass only for surrounding navigation and controls. | One tap reaches the exact live PTY with no hidden second agent. |
@@ -34,13 +34,13 @@ The design target is a **20–60 second visit**, not a long mobile coding sessio
 
 **Locked visual reference:** [`assets/agent-deck-v1-pairing-flow.png`](./assets/agent-deck-v1-pairing-flow.png). The approved structure is scan-first: keep the opening explanation brief, place the shell-access disclosure and fingerprint verification immediately before consent, and defer optional connection choices to fallback paths.
 
-1. **Explain the boundary.** “Your agents and their logins stay on your computer. Mocha connects to that computer.”
+1. **Explain the boundary.** “Your agents and their logins stay on your computer. Tavi connects to that computer.”
 2. **Choose the first host.** The desktop command creates a short-lived pairing QR code; manual entry is fallback only.
 3. **Verify identity.** Match host name and fingerprint before granting the phone shell-capable access.
 4. **Test the path.** Reveal identity, TLS, path, latency, and durable-session checks progressively during the pairing handshake; do not add a separate tutorial step unless the connection needs intervention.
 5. **Discover work.** Import existing Herdr sessions and label semantic state only when an authoritative source exists.
 6. **Run a guided intervention.** Demo mode teaches attention, inspection, action, terminal fallback, detach, and reconnect without requiring a live provider account.
-7. **Finish with trust controls.** Show the paired device name, where to revoke it, and a clear reminder that closing Mocha does not stop Herdr sessions.
+7. **Finish with trust controls.** Show the paired device name, where to revoke it, and a clear reminder that closing Tavi does not stop Herdr sessions.
 
 Onboarding should not ask users to sign in to Claude, ChatGPT, Codex, or another model provider. The installed official tools continue to own those accounts.
 
@@ -78,7 +78,7 @@ Onboarding should not ask users to sign in to Claude, ChatGPT, Codex, or another
 ## 6. Moments of truth
 
 1. **The first remote attach:** latency and terminal fidelity establish whether the product is credible.
-2. **The first correct attention alert:** the user must understand both what needs them and why Mocha believes it.
+2. **The first correct attention alert:** the user must understand both what needs them and why Tavi believes it.
 3. **The first network switch:** the session must recover without duplicate or missing input.
 4. **The first terminal fallback:** the user must land in the exact live session, not a reconstructed transcript.
 5. **The first security question:** the app must make local execution, provider authentication, transport, and revocation understandable.

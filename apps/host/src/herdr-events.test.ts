@@ -156,7 +156,7 @@ async function startScriptedHerdr(context: TestContext, socketPath: string): Pro
 }
 
 function temporarySocketPath(context: TestContext): string {
-  const socketPath = path.join(tmpdir(), `mocha-events-${randomBytes(6).toString("hex")}.sock`);
+  const socketPath = path.join(tmpdir(), `tavi-events-${randomBytes(6).toString("hex")}.sock`);
   context.after(() => {
     // The socket file is removed when the server closes; nothing else to do.
   });

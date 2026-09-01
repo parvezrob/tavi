@@ -1,5 +1,5 @@
 {
-  "name": "mocha",
+  "name": "tavi-workspace",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,16 +7,16 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace @mocha/host",
-    "check": "npm run check --workspace @mocha/host",
-    "dev": "npm run dev --workspace @mocha/host",
-    "dev:host": "npm run dev --workspace @mocha/host",
+    "build": "npm run build --workspace tavi-host",
+    "check": "npm run check --workspace tavi-host",
+    "dev": "npm run dev --workspace tavi-host",
+    "dev:host": "npm run dev --workspace tavi-host",
     "postinstall": "node scripts/ensure-node-pty.mjs",
-    "service:install": "npm run service:install --workspace @mocha/host",
-    "service:uninstall": "npm run service:uninstall --workspace @mocha/host",
-    "start": "npm run start --workspace @mocha/host",
-    "test": "npm run test --workspace @mocha/host",
-    "token": "npm run token --workspace @mocha/host"
+    "service:install": "npm run service:install --workspace tavi-host",
+    "service:uninstall": "npm run service:uninstall --workspace tavi-host",
+    "start": "npm run start --workspace tavi-host",
+    "test": "npm run test --workspace tavi-host",
+    "token": "npm run token --workspace tavi-host"
   },
   "devDependencies": {
     "typescript": "^5.9.2"

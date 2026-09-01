@@ -5,12 +5,12 @@ Host-side implementation: `apps/host/src/herdr.ts` (request/response) and `apps/
 
 ## Socket API basics
 
-- Unix socket at `~/.config/herdr/herdr.sock` (override: `MOCHA_HERDR_SOCKET`).
+- Unix socket at `~/.config/herdr/herdr.sock` (override: `TAVI_HERDR_SOCKET`).
 - Newline-delimited JSON: `{id, method, params}` → `{id, result}` or `{id, error: {code, message}}`.
 - Gate every integration on `ping` → `result.protocol === 17`. An unexpected protocol must degrade to "unavailable", never mis-parse.
 - Surface `error.message` to callers — it carries actionable detail (e.g. `agent_name_taken` explains which pane owns the name).
 
-## Methods Mocha uses
+## Methods Tavi uses
 
 | Method | Params | Result shape (verified) |
 | --- | --- | --- |
@@ -25,7 +25,7 @@ Host-side implementation: `apps/host/src/herdr.ts` (request/response) and `apps/
 | `tab.close` | `{tab_id}` | `{type: "ok"}` |
 | `events.subscribe` | `{subscriptions: [...]}` | `{type: "subscription_started"}`, then a stream of `{data, event}` lines on the same connection |
 
-CLI attach used by the terminal bridge: `herdr agent attach <pane_id>` (option `--takeover` exists; Mocha does not use it).
+CLI attach used by the terminal bridge: `herdr agent attach <pane_id>` (option `--takeover` exists; Tavi does not use it).
 
 ## Event subscription semantics (hard-won)
 
@@ -38,16 +38,16 @@ CLI attach used by the terminal bridge: `herdr agent attach <pane_id>` (option `
 
 ## agent.start traps
 
-- `name` must be **globally unique** across live agents; `kind` is the agent type (`claude`, `codex`). Using the kind as the name collides as soon as a second agent of that kind exists (`agent_name_taken`). Mocha appends a random suffix.
+- `name` must be **globally unique** across live agents; `kind` is the agent type (`claude`, `codex`). Using the kind as the name collides as soon as a second agent of that kind exists (`agent_name_taken`). Tavi appends a random suffix.
 - A pane fresh out of `tab.create` answers `"agent target pane ... is not an available shell"` until its shell boots (~1–2 s). Retry briefly; on final failure close the orphan tab so nothing invisible lingers.
 
 ## Shared-terminal sizing
 
-**Pane size is last-writer-wins, not smallest-client (verified live 2026-08-31, #44).** An external `agent attach` sets the pane's *terminal* size; herdr does not restore it when that client leaves, and its own viewer displays a fixed layout rect onto whatever the terminal is. While a phone (~44 cols) is attached the Mac is phone-sized too — inherent to a shared pty. On detach Mocha resizes the held pty back to the pane's viewer rect (`session.snapshot` → `layouts[].panes[].rect`, e.g. 174×49), which is exactly what the Mac displays. The earlier 250×80 "desktop-scale" claim was wrong here: it left the Mac looking at the top-left of an 80-row terminal with Claude's prompt off-screen. When herdr cannot say what the Mac shows, the size is left alone (#53 removed the old 250×80 tmux claim with the tmux lane).
+**Pane size is last-writer-wins, not smallest-client (verified live 2026-08-31, #44).** An external `agent attach` sets the pane's *terminal* size; herdr does not restore it when that client leaves, and its own viewer displays a fixed layout rect onto whatever the terminal is. While a phone (~44 cols) is attached the Mac is phone-sized too — inherent to a shared pty. On detach Tavi resizes the held pty back to the pane's viewer rect (`session.snapshot` → `layouts[].panes[].rect`, e.g. 174×49), which is exactly what the Mac displays. The earlier 250×80 "desktop-scale" claim was wrong here: it left the Mac looking at the top-left of an 80-row terminal with Claude's prompt off-screen. When herdr cannot say what the Mac shows, the size is left alone (#53 removed the old 250×80 tmux claim with the tmux lane).
 
 ## Reported agents (plain terminals)
 
-- herdr will not attach a pane that has no agent (`agent.attach` → `agent_not_found`) and has no shell kind. `pane.report_agent {pane_id, source, agent, state}` lets Mocha declare one: a pane reported as `agent: "shell", state: "idle", source: "mocha"` lists in `agent.list` with that kind and status, and `agent attach` / the host pty bridge accept it. Verified live 2026-08-31.
+- herdr will not attach a pane that has no agent (`agent.attach` → `agent_not_found`) and has no shell kind. `pane.report_agent {pane_id, source, agent, state}` lets Tavi declare one: a pane reported as `agent: "shell", state: "idle", source: "tavi"` lists in `agent.list` with that kind and status, and `agent attach` / the host pty bridge accept it. Verified live 2026-08-31.
 - herdr keeps a reported state: running commands in the pane did not flip `idle` to `working`/`done`, and the events feed carries the reported kind. A terminal therefore reads honestly as idle. Not yet verified: what happens if a real agent is later started by hand inside a reported pane.
 
 

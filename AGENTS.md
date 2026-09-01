@@ -1,4 +1,4 @@
-# Mocha agent rules
+# Tavi agent rules
 
 Keep this file lean. It routes work and protects shared boundaries; detailed engineering policy lives in linked sources.
 
@@ -11,7 +11,7 @@ Keep this file lean. It routes work and protects shared boundaries; detailed eng
 
 ## Product and engineering boundaries
 
-- Mocha is a native SwiftUI client plus a local API-only host. Do not reintroduce a web client, hosted relay, or agent harness without an explicit product decision.
+- Tavi is a native SwiftUI client plus a local API-only host. Do not reintroduce a web client, hosted relay, or agent harness without an explicit product decision.
 - Every agent is reachable as a real terminal over the versioned host protocol; herdr is the only backend (the tmux lane was removed in #53). Richer semantics are optional, capability-gated adapters on top.
 - Treat pairing credentials as shell access. Never commit or log secrets, tokens, prompts, terminal contents, or private files.
 - Clean, readable, reusable production code is mandatory. Follow SOLID, correct ACID boundaries, strict Swift concurrency, explicit ownership, and the repository definition of done.

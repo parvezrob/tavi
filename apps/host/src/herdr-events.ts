@@ -109,7 +109,7 @@ export class HerdrEventFeed implements AgentEventSource {
         ...REFRESH_SUBSCRIPTIONS.map((type) => ({ type })),
         ...agents.map((agent) => ({ type: "pane.agent_status_changed", pane_id: agent.id })),
       ];
-      const id = `mocha:events:${(this.subscriptionCounter += 1)}`;
+      const id = `tavi:events:${(this.subscriptionCounter += 1)}`;
       socket.write(`${JSON.stringify({ id, method: "events.subscribe", params: { subscriptions } })}\n`);
     });
     socket.on("data", (chunk) => {

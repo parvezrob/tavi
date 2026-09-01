@@ -8,7 +8,7 @@ When away from a computer, open one fast surface, see every active coding sessio
 
 ## Principles
 
-1. **Terminal-compatible, not agent-aware.** Mocha should never decide how an agent thinks or works.
+1. **Terminal-compatible, not agent-aware.** Tavi should never decide how an agent thinks or works.
 2. **Direct connection.** The default path is phone → private network → computer, with no relay account.
 3. **Disconnect is normal.** Backgrounding the phone must not affect the session.
 4. **Typing is the expensive action.** Mobile controls optimize for sending prompts, paste, interrupt, tab, escape, and arrow keys.

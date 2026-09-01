@@ -11,7 +11,7 @@ import {
 } from "./projects.js";
 
 function scratch(): string {
-  return mkdtempSync(path.join(tmpdir(), "mocha-projects-"));
+  return mkdtempSync(path.join(tmpdir(), "tavi-projects-"));
 }
 
 function directory(parent: string, name: string): string {

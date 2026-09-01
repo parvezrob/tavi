@@ -42,7 +42,7 @@ const WEBSOCKET_LOW_WATER_BYTES = 16 * 1024;
 const MAX_PENDING_OUTPUT_BYTES = 256 * 1024;
 const BACKPRESSURE_POLL_MILLISECONDS = 25;
 
-export interface MochaServerOptions {
+export interface TaviServerOptions {
   config: HostConfig;
   herdr?: HerdrAgentSource;
   // The folder scan behind `/api/projects`; injectable so tests need no
@@ -58,7 +58,7 @@ export interface MochaServerOptions {
   attachmentRetentionMs?: number;
   attachmentBufferBytes?: number;
   // How often an open WebSocket re-checks that its credential still exists,
-  // so `mocha devices revoke` cuts a live phone off, not just its next call.
+  // so `tavi devices revoke` cuts a live phone off, not just its next call.
   authorizationRecheckMs?: number;
 }
 
@@ -74,7 +74,7 @@ interface TerminalTarget {
   detachedSize?: () => Promise<TerminalSize | undefined>;
 }
 
-export async function createMochaServer(options: MochaServerOptions) {
+export async function createTaviServer(options: TaviServerOptions) {
   const {
     config,
     herdr,
@@ -327,7 +327,7 @@ async function routeRequest(
     const secret = typeof record.secret === "string" ? record.secret : "";
     const deviceName = typeof record.deviceName === "string" ? record.deviceName : "";
     if (!pairing.redeem(secret)) {
-      sendJson(response, 401, { error: "That pairing code is not valid any more. Run `mocha pair` on the Mac for a fresh one." });
+      sendJson(response, 401, { error: "That pairing code is not valid any more. Run `tavi pair` on the Mac for a fresh one." });
       return;
     }
     const { device, credential } = devices.add(deviceName);
@@ -659,7 +659,7 @@ async function routeRequest(
     const result = await herdr.createTab({
       agent,
       cwd: candidate.path,
-      label: agent === SHELL_KIND ? "mocha terminal" : agent ? `mocha ${agent}` : "mocha",
+      label: agent === SHELL_KIND ? "tavi terminal" : agent ? `tavi ${agent}` : "tavi",
     });
     if (!result.created) {
       sendJson(response, 503, { error: result.reason });

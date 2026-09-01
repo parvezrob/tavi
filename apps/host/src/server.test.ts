@@ -15,7 +15,7 @@ import { EVENTS_PROTOCOL, TERMINAL_PROTOCOL } from "./protocol.js";
 import type { HerdrAgentSource, HerdrTabRequest } from "./herdr.js";
 import { DeviceRegistry, PairingSessions } from "./pairing.js";
 import { ProjectHistory } from "./projects.js";
-import { createMochaServer } from "./server.js";
+import { createTaviServer } from "./server.js";
 import type { ServerTerminalMessage } from "./types.js";
 
 const config: HostConfig = {
@@ -23,7 +23,7 @@ const config: HostConfig = {
   port: 0,
   token: "test-token-that-is-long-enough",
   shell: "/bin/sh",
-  herdrSocket: "/tmp/mocha-test-herdr.sock",
+  herdrSocket: "/tmp/tavi-test-herdr.sock",
   roots: [],
   stateDir: "/tmp",
   machineName: "test-host",
@@ -73,12 +73,12 @@ test("agents endpoint serves herdr state and degrades honestly without it", asyn
           workspaceId: "wB",
           label: "~",
           focused: true,
-          tabs: [{ tabId: "wB:t1", label: "mocha", focused: true, agents: [] }],
+          tabs: [{ tabId: "wB:t1", label: "tavi", focused: true, agents: [] }],
         },
       ],
     }),
   };
-  const server = await createMochaServer({ config, herdr });
+  const server = await createTaviServer({ config, herdr });
   await listen(server);
 
   try {
@@ -131,7 +131,7 @@ test("agents endpoint serves herdr state and degrades honestly without it", asyn
     await close(server);
   }
 
-  const bareServer = await createMochaServer({ config });
+  const bareServer = await createTaviServer({ config });
   await listen(bareServer);
   try {
     const address = bareServer.address() as AddressInfo;
@@ -180,7 +180,7 @@ test("claude hook events overlay blocked status with hook authority", async () =
     decideAgent: async () => ({ decided: true as const, sent: "Enter" }),
     renameTab: async (_tabId: string, label: string) => ({ renamed: true as const, label }),
   };
-  const server = await createMochaServer({ config, herdr, attention });
+  const server = await createTaviServer({ config, herdr, attention });
   await listen(server);
 
   try {
@@ -261,7 +261,7 @@ test("decision endpoint fires only when an authority flags the agent as waiting"
     createTab: async () => ({ created: true as const, paneId: "wB:p9", tabId: "wB:t9" }),
     renameTab: async (_tabId: string, label: string) => ({ renamed: true as const, label }),
   };
-  const server = await createMochaServer({ config, herdr, attention });
+  const server = await createTaviServer({ config, herdr, attention });
   await listen(server);
 
   try {
@@ -302,10 +302,10 @@ test("decision endpoint fires only when an authority flags the agent as waiting"
 });
 
 test("a phone pairs with a single-use code and gets a credential of its own (#45, #46)", async () => {
-  const stateDir = mkdtempSync(path.join(tmpdir(), "mocha-pair-state-"));
+  const stateDir = mkdtempSync(path.join(tmpdir(), "tavi-pair-state-"));
   const devices = new DeviceRegistry(stateDir, undefined, () => {});
   const pairing = new PairingSessions();
-  const server = await createMochaServer({ config, devices, pairing });
+  const server = await createTaviServer({ config, devices, pairing });
   await listen(server);
 
   try {
@@ -414,9 +414,9 @@ test("a phone pairs with a single-use code and gets a credential of its own (#45
 });
 
 test("revoking a phone closes its open event stream within the recheck interval (#46)", async () => {
-  const devices = new DeviceRegistry(mkdtempSync(path.join(tmpdir(), "mocha-revoke-")), undefined, () => {});
+  const devices = new DeviceRegistry(mkdtempSync(path.join(tmpdir(), "tavi-revoke-")), undefined, () => {});
   const { device, credential } = devices.add("phone");
-  const server = await createMochaServer({
+  const server = await createTaviServer({
     config,
     devices,
     authorizationRecheckMs: 20,
@@ -441,7 +441,7 @@ test("revoking a phone closes its open event stream within the recheck interval 
 });
 
 test("closing the server drops open event streams instead of waiting for them (#21)", async () => {
-  const server = await createMochaServer({ config });
+  const server = await createTaviServer({ config });
   await listen(server);
   const port = (server.address() as AddressInfo).port;
   const websocket = new WebSocket(`ws://127.0.0.1:${port}/api/events`, EVENTS_PROTOCOL, {
@@ -462,8 +462,8 @@ test("closing the server drops open event streams instead of waiting for them (#
 });
 
 test("the project picker serves live agent folders, remembered choices, and roots", async () => {
-  const stateDir = mkdtempSync(path.join(tmpdir(), "mocha-picker-state-"));
-  const root = mkdtempSync(path.join(tmpdir(), "mocha-picker-root-"));
+  const stateDir = mkdtempSync(path.join(tmpdir(), "tavi-picker-state-"));
+  const root = mkdtempSync(path.join(tmpdir(), "tavi-picker-root-"));
   // Both folders exist on disk: the picker never offers one that is gone.
   const api = path.join(root, "api");
   const web = path.join(root, "web");
@@ -473,7 +473,7 @@ test("the project picker serves live agent folders, remembered choices, and root
   projects.remember(api);
 
   const herdr = stubHerdr({ cwd: web });
-  const server = await createMochaServer({
+  const server = await createTaviServer({
     config: { ...config, roots: [root] },
     listWorkspaces: async () => [{ name: "api", path: api, git: true }],
     herdr,
@@ -514,10 +514,10 @@ test("the project picker serves live agent folders, remembered choices, and root
 });
 
 test("creating an agent requires a real folder and confirmation outside the roots", async () => {
-  const stateDir = mkdtempSync(path.join(tmpdir(), "mocha-create-state-"));
-  const root = mkdtempSync(path.join(tmpdir(), "mocha-create-root-"));
+  const stateDir = mkdtempSync(path.join(tmpdir(), "tavi-create-state-"));
+  const root = mkdtempSync(path.join(tmpdir(), "tavi-create-root-"));
   const project = mkdtempSync(path.join(root, "repo-"));
-  const outside = mkdtempSync(path.join(tmpdir(), "mocha-create-outside-"));
+  const outside = mkdtempSync(path.join(tmpdir(), "tavi-create-outside-"));
   const projects = new ProjectHistory(stateDir);
 
   const created: Array<{ agent?: string | undefined; cwd?: string | undefined }> = [];
@@ -526,7 +526,7 @@ test("creating an agent requires a real folder and confirmation outside the root
       created.push({ agent: request.agent, cwd: request.cwd });
     },
   });
-  const server = await createMochaServer({
+  const server = await createTaviServer({
     config: { ...config, roots: [root] },
     herdr,
     projects,
@@ -602,7 +602,7 @@ test("creating an agent requires a real folder and confirmation outside the root
 test("terminal websocket authenticates and bridges typed protocol messages", async () => {
   const terminal = new FakeTerminal();
   const herdr = terminalHerdr();
-  const server = await createMochaServer({
+  const server = await createTaviServer({
     config,
     herdr,
     spawnTerminal: () => terminal.pty,
@@ -727,7 +727,7 @@ test("terminal attach uses the backend attach command without pty flow control",
   let spawnedArgs: string[] = [];
   let spawnedOptions: Record<string, unknown> = {};
   const herdr = terminalHerdr();
-  const server = await createMochaServer({
+  const server = await createTaviServer({
     config,
     herdr,
     spawnTerminal: (file, args, options) => {
@@ -761,7 +761,7 @@ test("terminal attach uses the backend attach command without pty flow control",
 
 test("terminal websocket rejects missing credentials before spawning a pty", async () => {
   let spawnCount = 0;
-  const server = await createMochaServer({
+  const server = await createTaviServer({
     config,
     spawnTerminal: (..._args) => {
       spawnCount += 1;
@@ -786,7 +786,7 @@ test("terminal websocket rejects an unsupported protocol before pane lookup", as
   let lookupCount = 0;
   let spawnCount = 0;
   const herdr = terminalHerdr({ onLookup: () => { lookupCount += 1; } });
-  const server = await createMochaServer({
+  const server = await createTaviServer({
     config,
     herdr,
     spawnTerminal: (..._args) => {
@@ -814,7 +814,7 @@ test("terminal websocket rejects an unsupported protocol before pane lookup", as
 test("terminal websocket returns not found before spawning a pty", async () => {
   let spawnCount = 0;
   const herdr = terminalHerdr({ known: [] });
-  const server = await createMochaServer({
+  const server = await createTaviServer({
     config,
     herdr,
     spawnTerminal: (..._args) => {
@@ -898,7 +898,7 @@ function terminalHerdr(options: { known?: string[]; onLookup?: () => void } = {}
 }
 
 async function withServer(run: (origin: string) => Promise<void>): Promise<void> {
-  const server = await createMochaServer({ config });
+  const server = await createTaviServer({ config });
   await listen(server);
 
   try {
@@ -915,7 +915,7 @@ async function openTerminalSocket(terminal: FakeTerminal): Promise<{
   messages: AsyncGenerator<ServerTerminalMessage>;
 }> {
   const herdr = terminalHerdr();
-  const server = await createMochaServer({
+  const server = await createTaviServer({
     config,
     herdr,
     spawnTerminal: () => terminal.pty,

@@ -1,4 +1,4 @@
-# Mocha development principles
+# Tavi development principles
 
 **Status:** Non-negotiable engineering policy
 **Updated:** 2026-08-19
@@ -77,7 +77,7 @@ Use the appropriate alternative:
 
 If a proposed React feature appears to require an effect, stop and redesign the ownership boundary before implementation. Do not add an exception silently.
 
-Mocha does not currently ship a React client. This rule remains the acceptance policy if React is introduced for a future project surface.
+Tavi does not currently ship a React client. This rule remains the acceptance policy if React is introduced for a future project surface.
 
 ## 8. Security and privacy are designed in
 

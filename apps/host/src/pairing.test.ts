@@ -13,7 +13,7 @@ import {
 } from "./pairing.js";
 
 function scratch(): string {
-  return mkdtempSync(path.join(tmpdir(), "mocha-pairing-"));
+  return mkdtempSync(path.join(tmpdir(), "tavi-pairing-"));
 }
 
 test("a paired phone's credential authorizes it and nothing else does", () => {
@@ -120,7 +120,7 @@ test("the QR payload round-trips and rejects anything else", () => {
   };
   const encoded = encodePairingPayload(payload);
 
-  assert.ok(encoded.startsWith("mocha://pair?"));
+  assert.ok(encoded.startsWith("tavi://pair?"));
   // Never "+" for a space: the phone's parser does not decode it (owner-hit
   // bug: the fingerprint arrived as "99F5+7AF0+·+E678+C534").
   assert.ok(!encoded.includes("+"), encoded);
@@ -128,6 +128,6 @@ test("the QR payload round-trips and rejects anything else", () => {
   assert.deepEqual(decodePairingPayload(encoded), payload);
   assert.deepEqual(decodePairingPayload(`  ${encoded}\n`), payload);
   assert.equal(decodePairingPayload("https://example.com/pair?u=x&s=y&f=z"), undefined);
-  assert.equal(decodePairingPayload("mocha://pair?u=https://h&s=&f=z"), undefined);
+  assert.equal(decodePairingPayload("tavi://pair?u=https://h&s=&f=z"), undefined);
   assert.equal(decodePairingPayload("not a url"), undefined);
 });

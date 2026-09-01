@@ -19,7 +19,7 @@
       "name": "split-control-sequences",
       "chunks": [
         "\u001b[",
-        "2J\u001b]0;Mocha fixture",
+        "2J\u001b]0;Tavi fixture",
         "\u0007",
         "split ANSI boundaries rendered safely\r",
         "\n"

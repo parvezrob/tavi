@@ -1,22 +1,22 @@
-# Mocha build roadmap
+# Tavi build roadmap
 
 **Status:** Active build plan — this is the execution order
 **Updated:** 2026-08-25
-**Owner decision:** Mocha builds its intelligent layer on Herdr (verified: herdr 0.7.5, socket API protocol 17). The tmux lane was removed on 2026-08-31 (#53) — herdr is the only backend. This roadmap supersedes the phase ordering in [`IMPLEMENTATION_PLAN.md`](./IMPLEMENTATION_PLAN.md); the PRD, screen map, and development principles remain the product and quality authority.
+**Owner decision:** Tavi builds its intelligent layer on Herdr (verified: herdr 0.7.5, socket API protocol 17). The tmux lane was removed on 2026-08-31 (#53) — herdr is the only backend. This roadmap supersedes the phase ordering in [`IMPLEMENTATION_PLAN.md`](./IMPLEMENTATION_PLAN.md); the PRD, screen map, and development principles remain the product and quality authority.
 
 Each phase has an exit gate. Do not start the next phase's feature work before the gate passes, except for trivial fixes. Every item becomes a GitHub issue when work starts.
 
 ## Already shipped (not part of the plan)
 
-Real-time terminal rendering (embedder-driven draws), off-main-thread output pump, keyboard/resize grid self-healing, touch scrollback scrolling (MVP feel), default iOS keyboard, dedicated low-latency tmux socket (`-L mocha`, escape-time 10, mouse on, no chrome), Ctrl-S flow-control fix, tight backpressure buffers, `SessionBackend` seam, read-only Herdr provider (`GET /api/agents` with status + provenance), live simulator UI-test harness (typing echo, keyboard-toggle streaming, scroll health).
+Real-time terminal rendering (embedder-driven draws), off-main-thread output pump, keyboard/resize grid self-healing, touch scrollback scrolling (MVP feel), default iOS keyboard, dedicated low-latency tmux socket (`-L tavi`, escape-time 10, mouse on, no chrome), Ctrl-S flow-control fix, tight backpressure buffers, `SessionBackend` seam, read-only Herdr provider (`GET /api/agents` with status + provenance), live simulator UI-test harness (typing echo, keyboard-toggle streaming, scroll health).
 
 ## Phase A — Always-on and reconnect (reliability is the product) ✅ COMPLETE 2026-08-25
 
-All four items shipped (issues #12, #13, #14, #4/#5): installed launchd host service with auto-restart; network-path-aware sub-second reconnect with honest states; `mocha.v2` transport with persistent attachments, binary frames, and exact-offset resume (verified: 0 lost / 0 duplicated bytes across a mid-stream hard drop). Exit gate passed on the physical iPhone 12 Pro: fast Wi-Fi ↔ cellular reconnect to live output; lock/unlock, app switching, and repeated surface create/destroy all crash-free.
+All four items shipped (issues #12, #13, #14, #4/#5): installed launchd host service with auto-restart; network-path-aware sub-second reconnect with honest states; `tavi.v2` transport with persistent attachments, binary frames, and exact-offset resume (verified: 0 lost / 0 duplicated bytes across a mid-stream hard drop). Exit gate passed on the physical iPhone 12 Pro: fast Wi-Fi ↔ cellular reconnect to live output; lock/unlock, app switching, and repeated surface create/destroy all crash-free.
 
 1. Host runs as the installed launchd service with auto-restart; dev watch mode becomes optional. *(the dev host silently dying has already cost us debugging time)*
 2. Fast reconnect: network-path-change detection on the phone, sub-second retry, honest connection states; reconnect restores the exact session.
-3. Transport v2 on `mocha.v2` protocol: binary output frames, sequence numbers with resume, so reconnects continue mid-stream instead of replaying or gapping.
+3. Transport v2 on `tavi.v2` protocol: binary output frames, sequence numbers with resume, so reconnects continue mid-stream instead of replaying or gapping.
 4. Release-blocking device gates: Ghostty surface teardown stress (issue #5) and the physical-device checklist (issue #4) — create/destroy, lock/unlock, background/foreground, session switching.
 
 **Exit gate:** Wi-Fi ↔ cellular flip reconnects to live output in under 1 second; repeated lifecycle stress passes on the physical iPhone with no crash and no lost/duplicated input.
@@ -55,7 +55,7 @@ Post-MVP backlog adopted the same day: Inbox (#27), snooze/settle triage (#28), 
 
 ## Phase D — Pairing and trust (replace the dev connection flow)
 
-1. `mocha pair` on the host: QR with endpoint + fingerprint + single-use secret; scan-first flow per [`assets/agent-deck-v1-pairing-flow.png`](./assets/agent-deck-v1-pairing-flow.png).
+1. `tavi pair` on the host: QR with endpoint + fingerprint + single-use secret; scan-first flow per [`assets/agent-deck-v1-pairing-flow.png`](./assets/agent-deck-v1-pairing-flow.png).
 2. Per-device revocable credentials in Keychain; paired-device list and revoke on the host.
 3. Multi-host home with connection health, path, and latency (#50: one phone, several computers, grouped by computer; #26's project grouping nests under it).
 

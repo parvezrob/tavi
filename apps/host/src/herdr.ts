@@ -298,7 +298,7 @@ export class HerdrService implements HerdrAgentSource {
   }
 
   // Answers a waiting permission dialog from the phone (issue #23). This is
-  // the one place Mocha fires a key that could take an action, so it re-reads
+  // the one place Tavi fires a key that could take an action, so it re-reads
   // the pane immediately before sending and refuses unless a dialog is still
   // rendered: a card that went stale between the tap and the send must never
   // answer whatever prompt is there now. approve = Enter (confirms the
@@ -446,7 +446,7 @@ export class HerdrService implements HerdrAgentSource {
         try {
           await this.request("pane.report_agent", {
             pane_id: paneId,
-            source: "mocha",
+            source: "tavi",
             agent: SHELL_KIND,
             state: "idle",
           });
@@ -489,7 +489,7 @@ export class HerdrService implements HerdrAgentSource {
   }
 
   private request(method: string, params: Record<string, unknown>): Promise<unknown> {
-    const id = `mocha:${(this.requestCounter += 1)}`;
+    const id = `tavi:${(this.requestCounter += 1)}`;
     const timeoutMilliseconds =
       this.options.requestTimeoutMilliseconds ?? REQUEST_TIMEOUT_MILLISECONDS;
 

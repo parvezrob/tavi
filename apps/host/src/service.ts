@@ -8,8 +8,9 @@ import { promisify } from "node:util";
 import type { HostConfig } from "./config.js";
 
 const execFileAsync = promisify(execFile);
-const LABEL = "com.parvezrob.mocha.host";
-const LEGACY_LABEL = "dev.agent-deck.host";
+const LABEL = "com.farfield.tavi.host";
+// The pre-rename label (#62): booted out and its plist removed on install.
+const LEGACY_LABEL = "com.parvezrob.mocha.host";
 
 type Execute = (command: string, args: string[]) => Promise<void>;
 
@@ -75,7 +76,7 @@ export async function installService(config: HostConfig, options: ServiceOptions
       } catch (rollbackError) {
         throw new AggregateError(
           [installationError, rollbackError],
-          "Mocha service installation failed and the legacy service could not be restored.",
+          "Tavi service installation failed and the legacy service could not be restored.",
         );
       }
     }
@@ -196,16 +197,16 @@ function launchAgentXml(input: {
   entrypoint: string;
   logFile: string;
 }): string {
-  // MOCHA_TOKEN is intentionally absent: the service reads the persisted token
+  // TAVI_TOKEN is intentionally absent: the service reads the persisted token
   // from the state directory, so rotation never requires a reinstall.
   const environment: Record<string, string> = {
-    MOCHA_HOST: input.config.bindHost,
-    MOCHA_PORT: String(input.config.port),
-    MOCHA_STATE_DIR: input.config.stateDir,
-    MOCHA_MACHINE_NAME: input.config.machineName,
-    MOCHA_SHELL: input.config.shell,
-    MOCHA_HERDR_SOCKET: input.config.herdrSocket,
-    MOCHA_ROOTS: input.config.roots.join(","),
+    TAVI_HOST: input.config.bindHost,
+    TAVI_PORT: String(input.config.port),
+    TAVI_STATE_DIR: input.config.stateDir,
+    TAVI_MACHINE_NAME: input.config.machineName,
+    TAVI_SHELL: input.config.shell,
+    TAVI_HERDR_SOCKET: input.config.herdrSocket,
+    TAVI_ROOTS: input.config.roots.join(","),
     PATH: process.env.PATH || "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
     // launchd provides no locale; agents and the pty bridge need UTF-8 so
     // terminal output and herdr's NDJSON are never mangled.

@@ -1,4 +1,4 @@
-// Forwards a Claude Code hook payload from stdin to the local Mocha host.
+// Forwards a Claude Code hook payload from stdin to the local Tavi host.
 // This exists so the pairing token never appears on a command line (issue
 // #32): the relay reads it from the owner-only config file itself. It must
 // stay silent on stdout (UserPromptSubmit stdout becomes model context) and
@@ -11,13 +11,18 @@ import path from "node:path";
 const port = Number(process.argv[2]);
 
 function readToken(): string | undefined {
-  try {
-    const file = path.join(homedir(), ".mocha", "config.json");
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as { token?: unknown };
-    return typeof parsed.token === "string" && parsed.token ? parsed.token : undefined;
-  } catch {
-    return undefined;
+  // ~/.mocha is the pre-rename state directory; the host moves it on its
+  // first start, but a hook can fire before that.
+  for (const directory of [".tavi", ".mocha"]) {
+    try {
+      const file = path.join(homedir(), directory, "config.json");
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as { token?: unknown };
+      if (typeof parsed.token === "string" && parsed.token) return parsed.token;
+    } catch {
+      // Try the next location.
+    }
   }
+  return undefined;
 }
 
 const token = readToken();

@@ -1,11 +1,11 @@
-# Mocha feature landscape
+# Tavi feature landscape
 
 **Research date:** 2026-08-19
 **Purpose:** evidence-backed feature inventory and prioritization for product planning
 
 ## 1. How to read this document
 
-This is not a checklist to copy wholesale. Competitor features are evidence that a problem is real, not proof that Mocha should implement the same solution. Recommendations are filtered through the product thesis: direct-first, host-owned, attention-first, provider-neutral, and terminal-compatible without becoming an agent harness.
+This is not a checklist to copy wholesale. Competitor features are evidence that a problem is real, not proof that Tavi should implement the same solution. Recommendations are filtered through the product thesis: direct-first, host-owned, attention-first, provider-neutral, and terminal-compatible without becoming an agent harness.
 
 Priority labels:
 
@@ -34,7 +34,7 @@ Priority labels:
 
 ### A. Connectivity and durability
 
-| Feature | Evidence | Mocha decision | Priority |
+| Feature | Evidence | Tavi decision | Priority |
 | --- | --- | --- | --- |
 | Direct private network path | Tailscale documents direct connections as lowest-latency/highest-throughput; user observed a major difference. | Tailscale Serve recommended; LAN/private HTTPS supported; no mandatory relay. | Now |
 | Connection-path visibility | Tailscale can report direct, DERP relay, or peer relay. | Show path and latency when detectable; never imply direct when unknown. | Now |
@@ -45,7 +45,7 @@ Priority labels:
 
 ### B. Session organization and attention
 
-| Feature | Evidence | Mocha decision | Priority |
+| Feature | Evidence | Tavi decision | Priority |
 | --- | --- | --- | --- |
 | Unified multi-host session list | Orca and T3 aggregate hosts; user explicitly wants several laptops/computers. | Single home across hosts. | Now |
 | Needs-attention queue | Herdr rolls blocked/working/done upward; Moshi has agent inbox; vendor apps surface approvals. | Primary home section and product differentiator. | Now |
@@ -58,7 +58,7 @@ Priority labels:
 
 ### C. Mobile terminal ergonomics
 
-| Feature | Evidence | Mocha decision | Priority |
+| Feature | Evidence | Tavi decision | Priority |
 | --- | --- | --- | --- |
 | Native high-performance renderer | Moshi and Remux use Ghostty on iPhone; Moshi documents Metal GPU rendering and replaced xterm.js with Ghostty. | GhosttyKit/Metal locked for v1; pin and own the integration, qualify every upgrade on physical devices. | Now |
 | Multiline composer | Mobile chat products reduce direct terminal typing. | Primary prompt entry; explicit send/Enter behavior. | Now |
@@ -73,7 +73,7 @@ Priority labels:
 
 ### D. Notifications and ambient surfaces
 
-| Feature | Evidence | Mocha decision | Priority |
+| Feature | Evidence | Tavi decision | Priority |
 | --- | --- | --- | --- |
 | Push on completion/decision | Claude Remote, Orca, Happy, Moshi. | Explicit event sources only; no fragile output scraping. | Next |
 | Live Activities / Dynamic Island | Moshi and Agentmux. | Show active/waiting state after event model is reliable. | Next |
@@ -82,7 +82,7 @@ Priority labels:
 
 ### E. Context, review, and files
 
-| Feature | Evidence | Mocha decision | Priority |
+| Feature | Evidence | Tavi decision | Priority |
 | --- | --- | --- | --- |
 | Diff viewer | Codex Remote, Orca, Moshi, T3-style clients. | Read-only review first; explicit handoff to terminal for commands. | Next |
 | Changed-file/source-control actions | Orca supports stage/unstage/commit. | Add review before write actions; confirmation and repository state checks. | Later |
@@ -94,7 +94,7 @@ Priority labels:
 
 ### F. Chat and provider intelligence
 
-| Feature | Evidence | Mocha decision | Priority |
+| Feature | Evidence | Tavi decision | Priority |
 | --- | --- | --- | --- |
 | Native chat projection | Codex/Claude native, Orca, Moshi, T3, Happy. | One session with `Terminal | Chat`; capability-based and authority-labeled. Codex uses official app-server; Claude follows the separate auth/compliance path. | Next |
 | Structured approvals | Vendor apps and Codex app-server expose them; Herdr can detect/report blockers. | Herdr/event-based first; Codex official adapter later. | Next/Later |
@@ -104,16 +104,16 @@ Priority labels:
 
 ### G. Security and trust
 
-| Feature | Evidence | Mocha decision | Priority |
+| Feature | Evidence | Tavi decision | Priority |
 | --- | --- | --- | --- |
 | Keychain credentials | Moshi, Agentmux, Remux, ShadowTerm. | Required. | Now |
 | Per-device pairing and revoke | Companion systems use QR pairing; shell access has high blast radius. | Single-use QR bootstrap → per-device credential → host revoke. | Now |
 | Biometrics | Moshi and vendor trusted-device flows use device authentication. | Optional Face ID app/action gate. | Now |
 | Host-key/certificate verification | Direct SSH products expose host verification. | TLS endpoint/fingerprint verification and matching host identity. | Now |
-| No account/no relay mode | Remux emphasizes direct SSH; Mocha's core promise. | Default architecture and messaging. | Now |
+| No account/no relay mode | Remux emphasizes direct SSH; Tavi's core promise. | Default architecture and messaging. | Now |
 | End-to-end encrypted hosted sync | Happy/Happier differentiate here. | Required only if an optional relay/sync service is built. | Later |
 | Provider OAuth token extraction | Increases compromise and terms risk. | Never. | Avoid |
-| Claude.ai login or subscription routing in Mocha | Anthropic explicitly directs product developers to API-key/cloud-provider authentication and prohibits third-party Claude.ai login/subscription routing. | Never; terminal-control mode leaves the official Claude Code CLI authenticated locally. | Avoid |
+| Claude.ai login or subscription routing in Tavi | Anthropic explicitly directs product developers to API-key/cloud-provider authentication and prohibits third-party Claude.ai login/subscription routing. | Never; terminal-control mode leaves the official Claude Code CLI authenticated locally. | Avoid |
 
 ## 4. Recommended feature stack by release
 

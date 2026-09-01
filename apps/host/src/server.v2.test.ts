@@ -14,7 +14,7 @@ import type { HerdrAgentSource } from "./herdr.js";
 import { OUTPUT_FRAME_HEADER_BYTES, OUTPUT_FRAME_TYPE, TERMINAL_PROTOCOL_V2 } from "./protocol.js";
 import { AgentKindDetector } from "./agent-kinds.js";
 import { ProjectHistory } from "./projects.js";
-import { createMochaServer, type MochaServerOptions } from "./server.js";
+import { createTaviServer, type TaviServerOptions } from "./server.js";
 import type { ServerTerminalMessage } from "./types.js";
 
 const config: HostConfig = {
@@ -22,7 +22,7 @@ const config: HostConfig = {
   port: 0,
   token: "test-token-that-is-long-enough",
   shell: "/bin/zsh",
-  herdrSocket: path.join(tmpdir(), "mocha-v2-test-herdr.sock"),
+  herdrSocket: path.join(tmpdir(), "tavi-v2-test-herdr.sock"),
   roots: [tmpdir()],
   stateDir: tmpdir(),
   machineName: "Test",
@@ -264,7 +264,7 @@ test("herdr agents are attachable terminal targets with honest failure modes", a
 
     // A real directory inside the configured roots: the host now refuses to
     // launch an agent anywhere it cannot verify (#24).
-    const project = await mkdtemp(path.join(tmpdir(), "mocha-v2-project-"));
+    const project = await mkdtemp(path.join(tmpdir(), "tavi-v2-project-"));
     const tab = await fetch(`http://127.0.0.1:${address.port}/api/herdr/tabs`, {
       method: "POST",
       headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" },
@@ -275,7 +275,7 @@ test("herdr agents are attachable terminal targets with honest failure modes", a
     assert.deepEqual(tabRequests.at(-1), {
       agent: "claude",
       cwd: project,
-      label: "mocha claude",
+      label: "tavi claude",
     });
 
     const badTab = await fetch(`http://127.0.0.1:${address.port}/api/herdr/tabs`, {
@@ -320,7 +320,7 @@ test("events endpoint pushes agent snapshots and degrades honestly when unconfig
 
   try {
     const address = server.address() as AddressInfo;
-    const websocket = new WebSocket(`ws://127.0.0.1:${address.port}/api/events`, ["mocha.events.v1"], {
+    const websocket = new WebSocket(`ws://127.0.0.1:${address.port}/api/events`, ["tavi.events.v1"], {
       headers: { Authorization: `Bearer ${config.token}` },
     });
     const messages: Array<Record<string, unknown>> = [];
@@ -425,8 +425,8 @@ function fixtureHerdr(): HerdrAgentSource {
 
 class TerminalHarness {
   readonly terminals: FakeTerminal[] = [];
-  agentEvents: MochaServerOptions["agentEvents"];
-  herdr: MochaServerOptions["herdr"];
+  agentEvents: TaviServerOptions["agentEvents"];
+  herdr: TaviServerOptions["herdr"];
   recordSpawn: ((bin: string, args: string[]) => void) | undefined;
 
   get spawnCount(): number {
@@ -434,11 +434,11 @@ class TerminalHarness {
   }
 
   async startServer(): Promise<Server> {
-    const server = await createMochaServer({
+    const server = await createTaviServer({
       config,
       // Never the developer's real state directory: creating an agent
       // records the folder, and that must not leak between test runs.
-      projects: new ProjectHistory(mkdtempSync(path.join(tmpdir(), "mocha-v2-state-"))),
+      projects: new ProjectHistory(mkdtempSync(path.join(tmpdir(), "tavi-v2-state-"))),
       agentKinds: new AgentKindDetector({ shell: "/bin/sh", runShell: async () => "claude\n" }),
       herdr: this.herdr ?? fixtureHerdr(),
       ...(this.agentEvents ? { agentEvents: this.agentEvents } : {}),

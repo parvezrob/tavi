@@ -85,7 +85,7 @@ test("composes the workspace → tab → agent tree", async (context) => {
       { workspace_id: "wC", number: 2, label: "side", focused: false },
     ],
     tabs: [
-      { tab_id: "wB:t1", workspace_id: "wB", label: "mocha", focused: true },
+      { tab_id: "wB:t1", workspace_id: "wB", label: "tavi", focused: true },
       { tab_id: "wB:t2", workspace_id: "wB", label: "shell", focused: false },
       { tab_id: "wC:t1", workspace_id: "wC", label: "notes", focused: false },
     ],
@@ -104,7 +104,7 @@ test("composes the workspace → tab → agent tree", async (context) => {
   assert.deepEqual(
     first?.tabs.map((tab) => ({ tabId: tab.tabId, label: tab.label, agents: tab.agents.length })),
     [
-      { tabId: "wB:t1", label: "mocha", agents: 1 },
+      { tabId: "wB:t1", label: "tavi", agents: 1 },
       { tabId: "wB:t2", label: "shell", agents: 0 },
     ],
   );
@@ -392,7 +392,7 @@ test("joins tab labels onto agents and renames tabs", async (context) => {
 });
 
 function temporarySocketPath(context: TestContext): string {
-  const directory = mkdtempSync(path.join(tmpdir(), "mocha-herdr-test-"));
+  const directory = mkdtempSync(path.join(tmpdir(), "tavi-herdr-test-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
   return path.join(directory, "herdr.sock");
 }
