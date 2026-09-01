@@ -75,18 +75,28 @@ extension AgentSummary {
 
     // The user's own name for the pane's tab (#55): herdr's tab label,
     // kept only when a person plausibly chose it. Herdr's defaults — bare
-    // numbers, "tavi <kind>" from phone-created tabs (and "mocha <kind>"
-    // from tabs created before the rename, #62) — and echoes of the agent's
-    // name are noise, not identity.
+    // numbers, anything phone-created ("tavi <kind>", "mocha terminal"
+    // from before the rename, #62), the command line the pane runs
+    // ("claude --resume …"), and echoes of the agent's name — are noise,
+    // not identity (#50 live pass: five waiting cards all titled
+    // "claude --res…" told the owner nothing).
     var userTabName: String? {
         guard let raw = tabLabel?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
         if Int(raw) != nil { return nil }
         let lowered = raw.lowercased()
         if lowered == agent.lowercased() || lowered == displayName.lowercased() { return nil }
+        // "tavi claude" / "mocha terminal" are the phone's own default
+        // labels; "tavi redesign" is still a name someone chose.
         for prefix in ["tavi ", "mocha "] {
-            if lowered == prefix + agent.lowercased() || lowered == prefix + displayName.lowercased() {
+            let rest = lowered.dropFirst(prefix.count)
+            if lowered.hasPrefix(prefix),
+               [agent.lowercased(), displayName.lowercased(), "terminal", "shell"].contains(String(rest)) {
                 return nil
             }
+        }
+        // A command line: starts with the agent's binary, or carries flags.
+        if lowered.hasPrefix(agent.lowercased() + " ") || lowered.contains(" --") || lowered.hasPrefix("-") {
+            return nil
         }
         return raw
     }

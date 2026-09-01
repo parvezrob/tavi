@@ -64,6 +64,13 @@ final class HostFleet {
         directories[host.id] = makeDirectory(for: host)
     }
 
+    // Your own name for a computer; nil or blank goes back to the
+    // reported name. The directory is untouched — same host, new label.
+    func rename(hostId: String, alias: String?) {
+        guard let host = host(for: hostId) else { return }
+        hosts = PairedHostRegistry.upsert(host.renamed(alias), in: defaults)
+    }
+
     // Forgets one computer: credential out of the Keychain, record out of
     // the list, mirror stopped. The others keep running.
     func remove(hostId: String) {

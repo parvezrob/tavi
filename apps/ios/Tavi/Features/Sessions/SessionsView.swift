@@ -29,6 +29,12 @@ struct SessionsView: View {
     // The computer the open terminal is attached to (#50): its directory
     // backs the terminal's identity header, rename, and prompt delivery.
     @State private var terminalHostId: String?
+    // The chip that is selected: nil is "All". A filter, never a
+    // hierarchy — sessions stay one list by state (owner call 2026-09-02
+    // after the first two-computer screen buried the second computer).
+    @State private var selectedHostId: String?
+    // The computer whose sheet was opened from its chip.
+    @State private var chipSheet: HostFleet.Entry?
     // Held for the needs-you banner's scroll-to-cards tap.
     @State private var homeScrollProxy: ScrollViewProxy?
 
@@ -73,11 +79,17 @@ struct SessionsView: View {
                             // Which computers are paired, one tap from the
                             // home, with their health (#50).
                             Section("Paired computers") {
-                                ForEach(fleet.entries) { entry in
-                                    Label(
-                                        "\(entry.host.displayName) — \(entry.directory.health.label(latencyMilliseconds: entry.directory.latencyMilliseconds))",
-                                        systemImage: "desktopcomputer"
-                                    )
+                                ForEach(homeLayout.computers) { computer in
+                                    Button {
+                                        chipSheet = fleet.entries.first { $0.id == computer.id }
+                                    } label: {
+                                        Label {
+                                            Text(computer.name)
+                                            Text(computer.summary)
+                                        } icon: {
+                                            Image(systemName: "desktopcomputer")
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -133,6 +145,19 @@ struct SessionsView: View {
             .sheet(isPresented: $showingHostForm) {
                 hostForm
                     .presentationDetents([.medium])
+            }
+            .sheet(item: $chipSheet) { entry in
+                ManageAccessView(
+                    host: entry.host,
+                    directory: entry.directory,
+                    onForget: { fleet.remove(hostId: entry.id) },
+                    onRename: { fleet.rename(hostId: entry.id, alias: $0) }
+                )
+            }
+            // A removed computer cannot stay selected or on a sheet.
+            .onChange(of: fleet.hosts.map(\.id)) { _, ids in
+                if let selectedHostId, !ids.contains(selectedHostId) { self.selectedHostId = nil }
+                if let chipSheet, !ids.contains(chipSheet.id) { self.chipSheet = nil }
             }
             .sheet(item: $decisionAgent) { target in
                 // The decision goes to the computer the agent lives on; the
@@ -238,8 +263,19 @@ struct SessionsView: View {
             .containerRelativeFrame(.vertical) { length, _ in length * 0.7 }
         } else {
             let layout = homeLayout
+            let shown = layout.computers.filter { selectedHostId == nil || $0.id == selectedHostId }
+            let severalShown = shown.count > 1
+            let needsYou = layout.needsYou.filter { agent in shown.contains { $0.id == agent.hostId } }
 
-            if !layout.needsYou.isEmpty {
+            computerStrip(layout.computers)
+
+            // A computer in trouble says so once, right under the strip,
+            // whatever else is on screen; its last known cards stay below.
+            ForEach(shown.filter { $0.hasLoaded && ($0.health == .stale || $0.health == .offline) }) { computer in
+                lastKnownBanner(computer)
+            }
+
+            if !needsYou.isEmpty {
                 // With a single waiting agent the striped card below says
                 // everything the banner would; the banner earns its row only
                 // as a tally of several (#54).
@@ -247,8 +283,8 @@ struct SessionsView: View {
                 // when several wait; the eyebrow is when one does. The
                 // banner never picks an agent for you (owner call): its tap
                 // brings the waiting cards into view and you choose.
-                if layout.needsYou.count > 1 {
-                    NeedsYouBanner(count: layout.needsYou.count) {
+                if needsYou.count > 1 {
+                    NeedsYouBanner(count: needsYou.count) {
                         withAnimation(.easeInOut(duration: 0.25)) {
                             homeScrollProxy?.scrollTo("home.needsYou", anchor: .top)
                         }
@@ -263,37 +299,75 @@ struct SessionsView: View {
                 // rebuilds the card instead of reusing a cached one. A
                 // needs-you card opens the decision sheet (approve/deny
                 // without the terminal); everything else opens the terminal.
-                ForEach(layout.needsYou, id: \.cardIdentity) { agent in
-                    agentCard(agent, showsLocation: true, action: {
+                ForEach(needsYou, id: \.cardIdentity) { agent in
+                    agentCard(agent, showsLocation: true, computerName: severalShown ? computerName(for: agent.hostId) : nil) {
                         guard fleet.directory(for: agent.hostId) != nil else { return }
                         decisionAgent = DecisionTarget(agent: agent)
-                    })
+                    }
                 }
             }
 
-            // Computer → project → agents (#26, #50). Every paired computer
-            // renders under its own header, whatever state it is in: the
-            // header carries the health, the body is either its projects
-            // or one plain line about why there are none. Running work
-            // sits as full cards under its folder; finished and idle work
-            // shares one compact card below them. A blocked agent is only
-            // in the flat list above — its project header counts it, never
-            // repeats it.
-            ForEach(layout.computers) { computer in
-                ComputerHeader(computer: computer, prominent: layout.computers.count > 1)
-                if computer.hasLoaded, computer.health == .stale || computer.health == .offline {
-                    // The cards below are the last known state and say so
-                    // in a full line, not only in the header's word (PRD
-                    // §7.8): a waiting agent stays visible through a drop.
-                    lastKnownBanner(computer)
+            // Project → agents (#26), one list across every computer shown
+            // (#50): the project header names its computer when more than
+            // one is on screen. Running work sits as full cards under its
+            // folder; finished and idle work shares one compact card below
+            // them. A blocked agent is only in the flat list above — its
+            // project header counts it, never repeats it.
+            ForEach(shown) { computer in
+                ForEach(computer.projects) { project in
+                    ProjectHeader(project: project, computerName: severalShown ? computer.name : nil)
+                    ForEach(project.active, id: \.cardIdentity) { agent in
+                        agentCard(agent, showsLocation: false, computerName: nil) { openAgent(agent) }
+                    }
+                    if !project.recent.isEmpty {
+                        recentCard(project.recent)
+                    }
                 }
-                computerBody(computer)
+            }
+
+            // Whatever is not projects: a computer that is still connecting,
+            // cannot be reached, has no usable feed, or was unpaired — one
+            // card each. When every shown computer is simply idle, one line.
+            ForEach(shown.filter { $0.projects.isEmpty && !$0.isQuietlyIdle }) { computer in
+                computerStateCard(computer)
+            }
+            if !shown.isEmpty, shown.allSatisfy({ $0.projects.isEmpty && $0.isQuietlyIdle }) {
+                idleCard(shown)
             }
         }
     }
 
+    // The host tier: a row of chips — All, then every computer, in pairing
+    // order (#50). With one computer, one status pill. Tap filters; a long
+    // press opens the computer's sheet (address, round trip, rename, unpair).
+    private func computerStrip(_ computers: [HomeComputer]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                if computers.count > 1 {
+                    AllComputersChip(isSelected: selectedHostId == nil) { selectedHostId = nil }
+                }
+                ForEach(computers) { computer in
+                    ComputerChip(computer: computer, isSelected: computers.count > 1 && selectedHostId == computer.id) {
+                        if computers.count > 1 {
+                            selectedHostId = selectedHostId == computer.id ? nil : computer.id
+                        } else {
+                            chipSheet = fleet.entries.first { $0.id == computer.id }
+                        }
+                    }
+                    .contextMenu {
+                        Button("About \(computer.name)", systemImage: "info.circle") {
+                            chipSheet = fleet.entries.first { $0.id == computer.id }
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .accessibilityIdentifier("sessions.computers")
+    }
+
     @ViewBuilder
-    private func computerBody(_ computer: HomeComputer) -> some View {
+    private func computerStateCard(_ computer: HomeComputer) -> some View {
         if computer.health == .revoked {
             revokedCard(computer)
         } else if !computer.hasLoaded {
@@ -304,19 +378,11 @@ struct SessionsView: View {
             }
         } else if !computer.available {
             unavailableCard(computer)
-        } else if computer.projects.isEmpty {
-            idleCard(computer)
-        } else {
-            ForEach(computer.projects) { project in
-                ProjectHeader(project: project)
-                ForEach(project.active, id: \.cardIdentity) { agent in
-                    agentCard(agent, showsLocation: false, action: { openAgent(agent) })
-                }
-                if !project.recent.isEmpty {
-                    recentCard(project.recent)
-                }
-            }
         }
+    }
+
+    private func computerName(for hostId: String) -> String? {
+        fleet.host(for: hostId)?.displayName
     }
 
     private var homeLayout: HomeLayout {
@@ -338,23 +404,23 @@ struct SessionsView: View {
         fleet.entries.map { JumpSource(hostId: $0.host.id, name: $0.host.displayName, directory: $0.directory) }
     }
 
-    private func agentCard(_ agent: AgentSummary, showsLocation: Bool, action: @escaping () -> Void) -> some View {
+    private func agentCard(_ agent: AgentSummary, showsLocation: Bool, computerName: String?, action: @escaping () -> Void) -> some View {
         let directory = fleet.directory(for: agent.hostId)
         return AgentCard(
             agent: agent,
             preview: directory?.previews[agent.id],
             observedAt: directory?.statusObservedAt[agent.id],
             showsLocation: showsLocation,
-            computerName: showsLocation ? computerLabel(for: agent.hostId) : nil,
+            computerName: computerName,
             action: action
         )
     }
 
     // The computer's name, only when there is more than one to tell apart
-    // (#50); with a single computer the name is noise on every card.
+    // (#50); with a single computer the name is noise on every screen.
     private func computerLabel(for hostId: String) -> String? {
         guard fleet.hosts.count > 1 else { return nil }
-        return fleet.host(for: hostId)?.displayName
+        return computerName(for: hostId)
     }
 
     // One agent to decide on, keyed by host + pane so two computers'
@@ -528,8 +594,12 @@ struct SessionsView: View {
         .accessibilityIdentifier("sessions.revoked")
     }
 
-    private func idleCard(_ computer: HomeComputer) -> some View {
-        Text("No agents are running on \(computer.name) right now.")
+    private func idleCard(_ computers: [HomeComputer]) -> some View {
+        Text(
+            computers.count == 1
+                ? "No agents are running on \(computers[0].name) right now."
+                : "No agents are running on your computers right now."
+        )
             .font(.callout)
             .foregroundStyle(TaviTheme.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)

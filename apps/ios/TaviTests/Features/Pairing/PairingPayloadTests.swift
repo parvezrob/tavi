@@ -94,6 +94,42 @@ struct PairingPayloadTests {
         #expect(PairedHostRegistry.load(from: defaults).isEmpty)
     }
 
+    // "Parvezs-MacBook-Air" is how macOS names a machine; the possessive
+    // is noise on a phone screen. Names without that shape are untouched.
+    @Test
+    func shortNamesDropThePossessiveLabelOnly() {
+        #expect(PairedHost.shortName("Parvezs-MacBook-Air") == "MacBook Air")
+        #expect(PairedHost.shortName("Johns-Mac-mini") == "Mac mini")
+        #expect(PairedHost.shortName("robin-PC") == "robin-PC")
+        #expect(PairedHost.shortName("ubuntu") == "ubuntu")
+        #expect(PairedHost.shortName("studio-mac") == "studio-mac")
+        #expect(PairedHost.shortName("dev-box-2") == "dev-box-2")
+    }
+
+    @Test
+    func anAliasWinsAndAnEmptyAliasClears() {
+        let host = PairedHost(
+            id: "f", hostName: "Parvezs-MacBook-Air", address: "https://parvezs-macbook-air.tail.ts.net",
+            fingerprint: "f", deviceId: nil, deviceName: nil, pairedAt: Date(timeIntervalSince1970: 0)
+        )
+        #expect(host.displayName == "MacBook Air")
+        #expect(host.reportedName == "Parvezs-MacBook-Air")
+        #expect(host.renamed("Studio").displayName == "Studio")
+        #expect(host.renamed("Studio").renamed("   ").displayName == "MacBook Air")
+        #expect(host.renamed("Studio").renamed(nil).alias == nil)
+    }
+
+    // Records written before the alias existed still decode.
+    @Test
+    func recordsWithoutAnAliasStillDecode() throws {
+        let json = """
+        [{"id":"f","hostName":"studio-mac","address":"https://studio-mac.tail.ts.net","fingerprint":"f","deviceId":null,"deviceName":null,"pairedAt":0}]
+        """
+        let hosts = try JSONDecoder().decode([PairedHost].self, from: Data(json.utf8))
+        #expect(hosts.first?.alias == nil)
+        #expect(hosts.first?.displayName == "studio-mac")
+    }
+
     @Test
     func typedHostsAreKeyedByAddressAndNamedByItsFirstLabel() {
         let host = PairedHost.typed(address: "https://Studio-Mac.tail.ts.net")

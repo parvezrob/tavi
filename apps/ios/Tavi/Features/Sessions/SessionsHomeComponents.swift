@@ -34,7 +34,9 @@ struct NeedsYouBanner: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(TaviTheme.textPrimary)
                 Spacer(minLength: 8)
-                Text("^[\(count) waiting](inflect: true)")
+                // Plain text: "^[…](inflect:)" turned "waiting" into
+                // "waited" on the phone (#50 live pass).
+                Text("\(count) waiting")
                     .font(.subheadline)
                     .foregroundStyle(TaviTheme.statusBlocked)
                 Image(systemName: "chevron.right")
@@ -205,40 +207,73 @@ struct RecentAgentRow: View {
     }
 }
 
-// The computer a group of agents runs on (#26, #50): its name and, at the
-// far end, how the phone is doing against it — live with the round trip,
-// reconnecting, offline, or unpaired. Health lives here and nowhere else
-// so a second computer's trouble never reads as the first one's.
-struct ComputerHeader: View {
+// One computer per chip (#50), in the strip at the top of the home:
+// the dot is its health, the word after the name is the health when it
+// is anything but live, and a tap filters the home to that computer.
+// This is the whole host tier — sessions below are flat by state, the
+// way Orca, T3 Code, and the v1 mockup all do it. With one computer the
+// strip is a single status pill.
+struct ComputerChip: View {
     let computer: HomeComputer
-    // With one computer the header is a landmark, not a headline (#54):
-    // the smallest, dimmest label on the screen — project names carry the
-    // hierarchy below it. With several, the computer is the boundary that
-    // matters most, so it steps up above the project headers.
-    var prominent = false
+    let isSelected: Bool
+    let action: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "desktopcomputer")
-                .font(prominent ? .footnote : .caption2)
-            Text(computer.name)
-                .font(prominent ? .subheadline.weight(.semibold) : .caption2.weight(.medium))
-                .kerning(prominent ? 0 : 0.8)
-                .textCase(prominent ? nil : .uppercase)
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            HostHealthLabel(health: computer.health, latencyMilliseconds: computer.latencyMilliseconds)
-        }
-        .foregroundStyle(prominent ? TaviTheme.textPrimary : TaviTheme.textSecondary.opacity(0.75))
-        .padding(.top, prominent ? 18 : 14)
-        .overlay(alignment: .bottom) {
-            if prominent {
-                Rectangle().fill(TaviTheme.hairline).frame(height: 1).offset(y: 6)
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if computer.health == .stale || computer.health == .connecting {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Circle()
+                        .fill(HostHealthLabel.color(for: computer.health))
+                        .frame(width: 6, height: 6)
+                }
+                Text(computer.name)
+                    .font(.footnote.weight(isSelected ? .semibold : .medium))
+                    .lineLimit(1)
+                if computer.health != .live {
+                    Text("· \(computer.health.label(latencyMilliseconds: nil))")
+                        .font(.footnote)
+                        .foregroundStyle(HostHealthLabel.color(for: computer.health))
+                        .lineLimit(1)
+                }
             }
+            .foregroundStyle(isSelected ? TaviTheme.textPrimary : TaviTheme.textSecondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(isSelected ? TaviTheme.card : TaviTheme.canvas, in: Capsule())
+            .overlay(Capsule().strokeBorder(isSelected ? TaviTheme.textSecondary.opacity(0.5) : TaviTheme.hairline, lineWidth: 1))
+            .contentShape(Capsule())
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(computer.name)
+        .accessibilityValue(computer.health.label(latencyMilliseconds: computer.latencyMilliseconds))
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityIdentifier("sessions.computer.\(computer.id)")
+    }
+}
+
+// "All" — every computer at once; the default, and the only chip that is
+// not a computer.
+struct AllComputersChip: View {
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text("All")
+                .font(.footnote.weight(isSelected ? .semibold : .medium))
+                .foregroundStyle(isSelected ? TaviTheme.textPrimary : TaviTheme.textSecondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(isSelected ? TaviTheme.card : TaviTheme.canvas, in: Capsule())
+                .overlay(Capsule().strokeBorder(isSelected ? TaviTheme.textSecondary.opacity(0.5) : TaviTheme.hairline, lineWidth: 1))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier("sessions.computer.all")
     }
 }
 
@@ -291,6 +326,10 @@ struct HostHealthLabel: View {
 // quiet second line, and the count says how much is going on there.
 struct ProjectHeader: View {
     let project: HomeProject
+    // Named when the home shows several computers at once (#50): two
+    // machines can hold the same folder, and there is no computer tier
+    // above this header any more.
+    var computerName: String? = nil
 
     // Plain text on purpose: "^[…](inflect:)" only inflects when the Text
     // is built from a literal key; a String var takes the verbatim overload
@@ -310,11 +349,21 @@ struct ProjectHeader: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(TaviTheme.textPrimary)
                     .lineLimit(1)
-                Text(project.abbreviatedPath)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(TaviTheme.textSecondary.opacity(0.8))
-                    .lineLimit(1)
-                    .truncationMode(.head)
+                HStack(spacing: 4) {
+                    if let computerName {
+                        Text(computerName)
+                            .font(.system(size: 11))
+                            .foregroundStyle(TaviTheme.textSecondary)
+                        Text("·")
+                            .font(.system(size: 11))
+                            .foregroundStyle(TaviTheme.textSecondary.opacity(0.6))
+                    }
+                    Text(project.abbreviatedPath)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(TaviTheme.textSecondary.opacity(0.8))
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
             }
             Spacer(minLength: 8)
             Text(summary)
@@ -325,6 +374,7 @@ struct ProjectHeader: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
         .accessibilityIdentifier("sessions.project.\(project.path)")
+        .accessibilityValue(computerName ?? "")
     }
 }
 

@@ -37,6 +37,15 @@ struct AgentPresentationTests {
         #expect(summary(agent: "shell", tabLabel: "tavi terminal").userTabName == nil)
         // Tabs created before the rename (#62) carry the old prefix.
         #expect(summary(tabLabel: "mocha claude").userTabName == nil)
+        // Phone-created defaults of any kind, and the pane's own command
+        // line, are not names (#50 live pass).
+        #expect(summary(tabLabel: "mocha terminal").userTabName == nil)
+        #expect(summary(tabLabel: "tavi terminal").userTabName == nil)
+        #expect(summary(tabLabel: "claude --resume abc").userTabName == nil)
+        #expect(summary(tabLabel: "claude").userTabName == nil)
+        #expect(summary(tabLabel: "npm run dev -- --port 3000").userTabName == nil)
+        #expect(summary(tabLabel: "--dangerously-skip").userTabName == nil)
+        #expect(summary(tabLabel: "claude-review").userTabName == "claude-review")
         #expect(summary(agent: "shell", tabLabel: "mocha terminal").userTabName == nil)
         // "tavi" leading a real name is still the user's name.
         #expect(summary(tabLabel: "tavi redesign").userTabName == "tavi redesign")

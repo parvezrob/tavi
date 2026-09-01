@@ -17,6 +17,9 @@ struct PairedHost: Codable, Equatable, Hashable, Identifiable {
     let deviceId: String?
     let deviceName: String?
     let pairedAt: Date
+    // Your own name for this computer (Orca lets you rename a host; two
+    // "ubuntu" boxes need it). nil until set; absent from older records.
+    var alias: String? = nil
 
     static func paired(endpoint: HostEndpoint, grant: HostPairing.Grant, at date: Date = Date()) -> PairedHost {
         PairedHost(
@@ -48,10 +51,35 @@ struct PairedHost: Codable, Equatable, Hashable, Identifiable {
         URL(string: address).flatMap { try? HostEndpoint(baseURL: $0) }
     }
 
-    // What the home calls this computer: the name it gave when pairing,
-    // else its address label. Never empty — the header is a landmark.
+    // What the phone calls this computer: your alias if you set one, else
+    // the short form of the name it gave when pairing, else its address
+    // label. Never empty — it is a landmark on every screen.
     var displayName: String {
+        if let alias = alias?.trimmingCharacters(in: .whitespaces), !alias.isEmpty { return alias }
+        return Self.shortName(HomeGrouping.computerName(pairedName: hostName, hostText: address))
+    }
+
+    // The name the computer reported, as it reported it.
+    var reportedName: String {
         HomeGrouping.computerName(pairedName: hostName, hostText: address)
+    }
+
+    // "Parvezs-MacBook-Air" → "MacBook Air": a leading possessive label
+    // ("<Name>s-") followed by at least two more labels is dropped and the
+    // rest is spaced. "robin-PC", "ubuntu", "studio-mac" stay as they are.
+    static func shortName(_ name: String) -> String {
+        let parts = name.split(separator: "-").map(String.init)
+        guard parts.count >= 3, let first = parts.first,
+              first.count >= 3, first.lowercased().hasSuffix("s"),
+              first.allSatisfy(\.isLetter) else { return name }
+        return parts.dropFirst().joined(separator: " ")
+    }
+
+    func renamed(_ alias: String?) -> PairedHost {
+        var host = self
+        let trimmed = alias?.trimmingCharacters(in: .whitespaces) ?? ""
+        host.alias = trimmed.isEmpty ? nil : trimmed
+        return host
     }
 }
 

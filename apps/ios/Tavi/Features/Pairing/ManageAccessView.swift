@@ -11,11 +11,15 @@ struct ManageAccessView: View {
     let host: PairedHost
     let directory: AgentDirectory
     let onForget: () -> Void
+    // Your own name for the computer; nil clears it.
+    let onRename: (String?) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var unpairing = false
     @State private var failure: String?
     @State private var confirmingForget = false
+    @State private var renaming = false
+    @State private var renameDraft = ""
 
     var body: some View {
         NavigationStack {
@@ -24,18 +28,30 @@ struct ManageAccessView: View {
                 // #54): a host typed by address has no fingerprint or
                 // device name, and those rows simply don't render.
                 Section("Paired computer") {
-                    row("Name", host.displayName)
+                    Button {
+                        renameDraft = host.alias ?? ""
+                        renaming = true
+                    } label: {
+                        HStack {
+                            Text("Name")
+                                .foregroundStyle(TaviTheme.textSecondary)
+                            Spacer()
+                            Text(host.displayName)
+                                .foregroundStyle(TaviTheme.textPrimary)
+                            Image(systemName: "pencil")
+                                .font(.footnote)
+                                .foregroundStyle(TaviTheme.textSecondary)
+                        }
+                    }
+                    .accessibilityIdentifier("manageAccess.rename")
+                    if host.reportedName != host.displayName {
+                        row("Reports itself as", host.reportedName)
+                    }
                     row("Address", host.address.replacingOccurrences(of: "https://", with: ""))
                     if let fingerprint = host.fingerprint {
                         row("Fingerprint", fingerprint, monospaced: true)
                     }
-                    HStack {
-                        Text("Connection")
-                            .foregroundStyle(TaviTheme.textSecondary)
-                        Spacer()
-                        HostHealthLabel(health: directory.health, latencyMilliseconds: directory.latencyMilliseconds)
-                    }
-                    .accessibilityElement(children: .combine)
+                    row("Right now", summary)
                 }
                 .listRowBackground(TaviTheme.card)
 
@@ -83,6 +99,13 @@ struct ManageAccessView: View {
                         .accessibilityIdentifier("manageAccess.done")
                 }
             }
+            .alert("Name this computer", isPresented: $renaming) {
+                TextField(host.reportedName, text: $renameDraft)
+                Button("Save") { onRename(renameDraft) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Shown on the home and in every list. Leave it empty to use the name the computer reports.")
+            }
             .confirmationDialog(
                 "\(host.displayName) will still list this iPhone until you revoke it there.",
                 isPresented: $confirmingForget,
@@ -95,6 +118,18 @@ struct ManageAccessView: View {
                 Button("Cancel", role: .cancel) {}
             }
         }
+    }
+
+    // "Live · 40 ms · 8 agents · 5 waiting" — the line the owner liked.
+    private var summary: String {
+        var parts = [directory.health.label(latencyMilliseconds: directory.latencyMilliseconds)]
+        if directory.hasLoaded, directory.health == .live || directory.health == .stale {
+            let agents = directory.agents.count
+            parts.append(agents == 1 ? "1 agent" : "\(agents) agents")
+            let waiting = directory.agents.filter { $0.homeSection == .needsYou }.count
+            if waiting > 0 { parts.append("\(waiting) waiting") }
+        }
+        return parts.joined(separator: " · ")
     }
 
     private func row(_ label: String, _ value: String, monospaced: Bool = false) -> some View {

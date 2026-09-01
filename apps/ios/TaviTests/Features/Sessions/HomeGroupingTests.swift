@@ -158,6 +158,26 @@ struct HomeGroupingTests {
     }
 
     @Test
+    func computerSummaryIsOneLine() {
+        let layout = HomeGrouping.layout(hosts: [
+            host("mac", name: "MacBook Air", agents: [
+                agent("1", status: "blocked", cwd: "/p/a"),
+                agent("2", status: "working", cwd: "/p/a"),
+                agent("3", status: "done", cwd: "/p/b"),
+            ], health: .live),
+            host("pc", name: "robin-PC", agents: [agent("1", status: "idle", cwd: "/p/a")]),
+            host("off", name: "Studio", agents: [], health: .offline),
+        ])
+        let summaries = layout.computers.map(\.summary)
+        #expect(summaries[0] == "Live · 3 agents · 1 waiting")
+        #expect(summaries[1] == "Live · 1 agent")
+        #expect(summaries[2] == "Offline")
+        let live = HomeComputer(id: "x", name: "x", health: .live, latencyMilliseconds: 40, hasLoaded: true, available: true, reason: nil, projects: layout.computers[0].projects)
+        #expect(live.summary == "Live · 40 ms · 3 agents · 1 waiting")
+        #expect(live.isQuietlyIdle)
+    }
+
+    @Test
     func healthLabelSpeaksLatencyOnlyWhileLive() {
         #expect(HostHealth.live.label(latencyMilliseconds: 42) == "Live · 42 ms")
         #expect(HostHealth.live.label(latencyMilliseconds: nil) == "Live")

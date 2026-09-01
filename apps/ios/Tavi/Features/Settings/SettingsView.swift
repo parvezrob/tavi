@@ -52,7 +52,8 @@ struct SettingsView: View {
                 ManageAccessView(
                     host: entry.host,
                     directory: entry.directory,
-                    onForget: { onForget(entry.id) }
+                    onForget: { onForget(entry.id) },
+                    onRename: { fleet.rename(hostId: entry.id, alias: $0) }
                 )
             }
         }

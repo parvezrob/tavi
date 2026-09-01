@@ -128,7 +128,7 @@ flowchart TD
 
 Settings are not a bottom tab in V1. Host management is one tap from the persistent health control; global preferences remain one additional tap away.
 
-**As built (#50, 2026-09-01):** there is no separate host switcher. Health lives on each computer's header on `S0` (`H0`'s job), and Settings → *Paired computers* lists every computer with its health; a row opens *This iPhone* for that computer alone (`H1`/`H3` collapsed into one sheet: name, address, fingerprint, connection, what the computer knows this phone as, unpair). *Pair another computer* adds; it never replaces. `New` asks which computer first when more than one is paired; `Jump to` lists every computer.
+**As built (#50, 2026-09-02):** `H0` is the chip strip at the top of `S0` — `All` plus one chip per computer with its health; a chip filters the home to that computer, a long-press (or the single pill, the Computers menu, or Settings → *Paired computers*) opens the computer's sheet (`H1`/`H3` collapsed into one: name with rename, reported name, address, fingerprint, `Live · 40 ms · n agents · n waiting`, what the computer knows this phone as, unpair). Sessions stay one list by state across the computers shown; project headers and needs-you cards name the computer when more than one is on screen. *Pair a computer* adds; it never replaces. `New` asks which computer first when more than one is paired; `Jump to` lists every computer.
 
 ## 7. Home behavior contract
 

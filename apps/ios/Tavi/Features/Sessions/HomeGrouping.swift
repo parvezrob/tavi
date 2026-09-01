@@ -45,6 +45,22 @@ struct HomeComputer: Identifiable, Equatable {
     let projects: [HomeProject]
 
     var agentCount: Int { projects.reduce(0) { $0 + $1.agentCount } }
+    // Reachable, feed usable, still paired — nothing to explain.
+    var isQuietlyIdle: Bool { hasLoaded && available && health != .revoked }
+    var waitingCount: Int { projects.reduce(0) { $0 + $1.needsYou.count } }
+
+    // "Live · 40 ms · 8 agents · 5 waiting" — the computer in one line,
+    // for its chip's spoken value, the Computers menu, and its sheet.
+    var summary: String {
+        var parts = [health.label(latencyMilliseconds: latencyMilliseconds)]
+        // Counts only for what is being reported now; an offline or
+        // unpaired computer's numbers are history, not a summary.
+        if hasLoaded, health == .live || health == .stale {
+            parts.append(agentCount == 1 ? "1 agent" : "\(agentCount) agents")
+            if waitingCount > 0 { parts.append("\(waitingCount) waiting") }
+        }
+        return parts.joined(separator: " · ")
+    }
 }
 
 // What one host contributes to the layout: its identity and its
