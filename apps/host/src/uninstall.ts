@@ -14,6 +14,8 @@ export interface UninstallDeps {
   /** Tailscale Serve handlers as [host, proxy target]; empty when Tailscale is absent. */
   serveHandlers: () => Promise<Array<[string, string]>>;
   resetServe: () => Promise<void>;
+  /** Removes the `tavi` shim `pair` wrote (#64); returns where it was, or undefined when there was none. */
+  removeCommandLink: () => string | undefined;
 }
 
 export async function uninstall(config: HostConfig, deps: UninstallDeps): Promise<boolean> {
@@ -28,6 +30,7 @@ export async function uninstall(config: HostConfig, deps: UninstallDeps): Promis
 
   await step(deps, "Background host stopped and removed", deps.uninstallService);
   await step(deps, "herdr service started by Tavi removed", deps.uninstallHerdrService);
+  await step(deps, "`tavi` command removed", async () => deps.removeCommandLink() ?? "none was installed");
   await step(deps, "Claude Code hooks removed", async () => {
     if (!deps.removeClaudeHooks()) return "none were installed";
     return undefined;

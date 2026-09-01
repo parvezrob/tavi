@@ -32,6 +32,9 @@ interface World {
   /** Version the running host reports; defaults to this package's. */
   runningVersion?: string;
   serveFails?: string | undefined;
+  /** The `tavi` command (#64): needed only for npx installs; ok when on PATH. */
+  commandNeeded?: boolean;
+  commandOk?: boolean;
 }
 
 function createDeps(world: World) {
@@ -109,6 +112,16 @@ function createDeps(world: World) {
     startHerdr: async (herdrPath) => {
       commands.push(`start-herdr ${herdrPath}`);
       world.herdrRunning = true;
+    },
+    commandStatus: async () => ({
+      needed: world.commandNeeded === true,
+      ok: world.commandNeeded !== true || world.commandOk === true,
+      detail: world.commandOk ? "`tavi` is /usr/local/bin/tavi" : "The `tavi` command is not set up.",
+    }),
+    linkCommand: async () => {
+      commands.push("link-command");
+      world.commandOk = true;
+      return "(/usr/local/bin/tavi)";
     },
     operatingSystem: world.os ?? "darwin",
     userId: 501,
@@ -394,3 +407,23 @@ function temporaryDirectory(context: TestContext): string {
   context.after(() => rmSync(directory, { recursive: true, force: true }));
   return directory;
 }
+
+test("an npx install without the `tavi` command gets one added in the plan; a checkout never hears about it (#64)", async () => {
+  const world: World = { ...READY, serveProxies: [...READY.serveProxies], commandNeeded: true, commandOk: false, answers: [true] };
+  const { deps, commands, reports } = createDeps(world);
+  await bootstrap(config, deps);
+  const plan = reports.join("\n");
+  assert.match(plan, /• The `tavi` command, for `tavi update` and `tavi doctor`  — will add/);
+  assert.ok(commands.includes("link-command"));
+  assert.match(plan, /✓ `tavi` command ready   \(\/usr\/local\/bin\/tavi\)/);
+
+  const checkout = createDeps({ ...READY, serveProxies: [...READY.serveProxies] });
+  await bootstrap(config, checkout.deps);
+  assert.doesNotMatch(checkout.reports.join("\n"), /tavi` command/);
+  const checks = await diagnose(config, checkout.deps);
+  assert.ok(!checks.some((check) => check.name.includes("command")));
+
+  const doctor = await diagnose(config, createDeps({ ...world, commandOk: false }).deps);
+  const command = doctor.find((check) => check.name === "`tavi` command");
+  assert.equal(command?.ok, false);
+});

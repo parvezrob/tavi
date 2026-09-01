@@ -22,6 +22,7 @@ function deps(overrides: Partial<UninstallDeps> & { answer: boolean; handlers?: 
     removeClaudeHooks: () => { calls.push("hooks"); return true; },
     serveHandlers: async () => overrides.handlers ?? [["mac.ts.net:443", "http://127.0.0.1:8787"]],
     resetServe: async () => { calls.push("serve-reset"); },
+    removeCommandLink: () => { calls.push("command-link"); return "/usr/local/bin/tavi"; },
     ...overrides,
   };
   return { d, calls, reports };
@@ -36,7 +37,7 @@ test("uninstall removes the host, Tavi's herdr service, hooks, the Serve entry, 
 
   assert.equal(await uninstall(config(stateDir), d), true);
 
-  assert.deepEqual(calls, ["service", "herdr", "hooks", "serve-reset"]);
+  assert.deepEqual(calls, ["service", "herdr", "command-link", "hooks", "serve-reset"]);
   assert.equal(existsSync(stateDir), false);
   assert.ok(reports.some((line) => /Tavi is gone from this computer/.test(line)));
   assert.ok(reports.some((line) => /Still installed.*Tailscale.*herdr.*Node/.test(line)));

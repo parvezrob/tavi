@@ -20,7 +20,9 @@
 
 **Publishing rule (owner + agent, 2026-09-01):** the agent bumps `apps/host/package.json` + `VERSION` only when it says a release is worth publishing; the owner runs `cd apps/host && npm publish` in Terminal.app (2FA; the auth URL is masked under Claude Code). Versions are immutable, propagate in 1–2 min, and every publish restarts every paired host. Nothing in #50 touched the host; no publish needed.
 
-**Open owner decisions:** #64 — `npx tavi-host pair` leaves no `tavi` on PATH, and `npx tavi` is a stranger's package (the owner ran it on robin-PC by accident; check that directory): link a `tavi` launcher at pair time, or spell every command `npx tavi-host …`; whether phones should stop accepting the shared host token; a hosted relay opt-in for people who bounce off Tailscale (docs/PRODUCT.md principle 2 says direct only; decide after testers); GitHub Actions publish job.
+**Publish pending (2026-09-02, dawn):** `tavi-host` 0.1.12 — #64 `tavi` command shim written by `pair` (owner chose the launcher), reported by `doctor`, removed by `uninstall`. After publishing: on robin-PC run `npx tavi-host pair` once more (the checklist adds the command in one step) — from then on `tavi update` is real there.
+
+**Open owner decisions:** whether phones should stop accepting the shared host token; a hosted relay opt-in for people who bounce off Tailscale (docs/PRODUCT.md principle 2 says direct only; decide after testers); GitHub Actions publish job.
 
 ## Live state
 

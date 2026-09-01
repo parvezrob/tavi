@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { AttentionOverlay, AttentionReconciler, AttentiveAgentEvents } from "./attention.js";
+import { homedir } from "node:os";
+import { removeCommandLink } from "./command-link.js";
 import { bootstrap, BootstrapError, defaultDeps, diagnose, durablePackageRoot, formatChecks, serviceEntrypoint } from "./bootstrap.js";
 import { installClaudeHooks, removeClaudeHooks } from "./claude-hooks.js";
 import { uninstallHerdrService } from "./herdr-service.js";
@@ -92,6 +94,7 @@ if (command === "uninstall") {
       await uninstallHerdrService();
     },
     removeClaudeHooks,
+    removeCommandLink: () => removeCommandLink(homedir()),
     serveHandlers: async () => {
       if (!tailscale) return [];
       try {

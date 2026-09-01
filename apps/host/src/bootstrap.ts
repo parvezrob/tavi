@@ -1,11 +1,12 @@
 import { execFile, spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
-import { userInfo } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { createInterface } from "node:readline/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { type HostConfig, VERSION } from "./config.js";
+import { COMMAND_NAME, chooseBinDir, commandLinkStatus, pathHint, writeCommandLink, type CommandLinkStatus } from "./command-link.js";
 import { installService, SERVICE_LABEL } from "./service.js";
 import { LINUX_UNIT } from "./service-linux.js";
 import { installHerdrService } from "./herdr-service.js";
@@ -55,6 +56,10 @@ export interface BootstrapDeps {
   startHerdr: (herdrPath: string) => Promise<void>;
   /** Runs the host detached from this terminal, for this login session only. */
   startForSession: () => Promise<void>;
+  /** Whether this install needs a `tavi` command on PATH and whether it has one (#64). */
+  commandStatus: () => Promise<CommandLinkStatus>;
+  /** Writes the `tavi` shim; returns the ✓ detail (where, and a PATH hint when needed). */
+  linkCommand: () => Promise<string | undefined>;
   operatingSystem: NodeJS.Platform;
   userId: number;
   report: (message: string) => void;
@@ -125,6 +130,25 @@ export function defaultDeps(config: HostConfig, options: { assumeYes?: boolean }
       });
       child.unref();
     },
+    commandStatus: async () => {
+      const packageRoot = currentPackageRoot();
+      const needed = isEphemeral(packageRoot, process.env) || isManagedRuntime(packageRoot, config.stateDir);
+      let resolved: string | undefined;
+      try {
+        resolved = (await execFileAsync("which", [COMMAND_NAME])).stdout.trim() || undefined;
+      } catch {
+        resolved = undefined;
+      }
+      return commandLinkStatus({ needed, env: process.env, homeDir: homedir(), resolved });
+    },
+    linkCommand: async () => {
+      // The shim points at the managed runtime, so the durable copy must
+      // exist first; durablePackageRoot is idempotent.
+      await durablePackageRoot(config);
+      const plan = chooseBinDir(process.env, homedir());
+      writeCommandLink(plan, runtimeLayout(config.stateDir));
+      return plan.onPath ? `(${plan.path})` : `(${plan.path} — ${pathHint(plan.binDir)})`;
+    },
     operatingSystem: process.platform,
     userId: userInfo().uid,
     report: (message) => console.log(message),
@@ -142,7 +166,16 @@ export async function diagnose(config: HostConfig, deps: BootstrapDeps): Promise
     await checkServe(config, deps, tailscale.cli),
     await checkService(config, deps),
     await checkHerdr(deps),
+    ...(await checkCommand(deps)),
   ];
+}
+
+// The `tavi` command (#64): only an install through npx needs one written;
+// a checkout or global install has its own and the check stays out of the way.
+async function checkCommand(deps: BootstrapDeps): Promise<Check[]> {
+  const status = await deps.commandStatus();
+  if (!status.needed) return [];
+  return [{ name: "`tavi` command", ok: status.ok, detail: status.detail, ...(status.fix ? { fix: status.fix } : {}) }];
 }
 
 interface Step {
@@ -200,6 +233,13 @@ export async function bootstrap(config: HostConfig, deps: BootstrapDeps): Promis
     lines.push("  • Run Tavi in the background  — will set up");
     pending.push(service);
     steps.push({ label: "Run Tavi in the background", done: "Tavi runs in the background", run: () => stepService(config, deps) });
+  }
+  const command = await deps.commandStatus();
+  if (command.needed && command.ok) {
+    lines.push("  ✓ `tavi` command ready");
+  } else if (command.needed) {
+    lines.push("  • The `tavi` command, for `tavi update` and `tavi doctor`  — will add");
+    steps.push({ label: "Add the `tavi` command", done: "`tavi` command ready", run: () => deps.linkCommand() });
   }
   const herdrRunning = herdr ? await deps.herdrRunning() : false;
   if (herdr && herdrRunning) {
