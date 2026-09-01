@@ -1,18 +1,67 @@
 import Foundation
 import Security
 
-// Owns the pairing token (#31). The token is shell access to the paired Mac,
-// so it lives in the Keychain — this device only, available when unlocked —
-// never in UserDefaults. The host address is not a secret and stays in
-// AppStorage. Per-device credentials and revoke remain Phase D; this is only
-// honest storage for the one shared token.
+// Owns the pairing credentials (#31, #50). A credential is shell access to
+// the paired computer, so it lives in the Keychain — this device only,
+// available when unlocked — never in UserDefaults. One item per paired
+// host, keyed by the host's id, so unpairing one computer removes exactly
+// its credential and leaves the others alone.
 enum HostCredentialStore {
     private static let service = "com.farfield.tavi.host-token"
-    private static let account = "default"
+    // Pre-#50: the single credential of the one paired host.
+    private static let legacyAccount = "default"
+    // Pre-#31: the token sat in UserDefaults.
     private static let legacyDefaultsKey = "tavi.dev.token"
 
-    static func load() -> String {
-        var query = baseQuery
+    static func load(hostId: String) -> String {
+        load(account: hostId)
+    }
+
+    static func save(_ credential: String, hostId: String) {
+        guard !credential.isEmpty else {
+            delete(hostId: hostId)
+            return
+        }
+        let payload: [String: Any] = [
+            kSecValueData as String: Data(credential.utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+        ]
+        let query = baseQuery(account: hostId)
+        let status = SecItemUpdate(query as CFDictionary, payload as CFDictionary)
+        if status == errSecItemNotFound {
+            SecItemAdd(query.merging(payload) { _, new in new } as CFDictionary, nil)
+        }
+    }
+
+    static func delete(hostId: String) {
+        SecItemDelete(baseQuery(account: hostId) as CFDictionary)
+    }
+
+    // Every credential Tavi holds, for a full reset.
+    static func deleteAll() {
+        SecItemDelete([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+        ] as CFDictionary)
+    }
+
+    // One-time move of the single pre-#50 credential (and, before it, the
+    // pre-#31 UserDefaults token) under the migrated host's id. The old
+    // copies are removed unconditionally: leaving them would fix nothing.
+    static func migrateLegacyCredential(toHostId hostId: String, defaults: UserDefaults = .standard) {
+        var legacy = load(account: legacyAccount)
+        if legacy.isEmpty, let fromDefaults = defaults.string(forKey: legacyDefaultsKey) {
+            legacy = fromDefaults
+        }
+        if !legacy.isEmpty, load(hostId: hostId).isEmpty {
+            save(legacy, hostId: hostId)
+        }
+        SecItemDelete(baseQuery(account: legacyAccount) as CFDictionary)
+        defaults.removeObject(forKey: legacyDefaultsKey)
+    }
+
+    private static func load(account: String) -> String {
+        var query = baseQuery(account: account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: AnyObject?
@@ -24,37 +73,7 @@ enum HostCredentialStore {
         return token
     }
 
-    static func save(_ token: String) {
-        guard !token.isEmpty else {
-            delete()
-            return
-        }
-        let payload: [String: Any] = [
-            kSecValueData as String: Data(token.utf8),
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-        ]
-        let status = SecItemUpdate(baseQuery as CFDictionary, payload as CFDictionary)
-        if status == errSecItemNotFound {
-            SecItemAdd(baseQuery.merging(payload) { _, new in new } as CFDictionary, nil)
-        }
-    }
-
-    static func delete() {
-        SecItemDelete(baseQuery as CFDictionary)
-    }
-
-    // One-time move of a pre-#31 UserDefaults token into the Keychain. The
-    // UserDefaults copy is removed unconditionally: leaving both would fix
-    // nothing.
-    static func migrateFromDefaults(_ defaults: UserDefaults = .standard) {
-        if let legacy = defaults.string(forKey: legacyDefaultsKey), !legacy.isEmpty,
-           load().isEmpty {
-            save(legacy)
-        }
-        defaults.removeObject(forKey: legacyDefaultsKey)
-    }
-
-    private static var baseQuery: [String: Any] {
+    private static func baseQuery(account: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

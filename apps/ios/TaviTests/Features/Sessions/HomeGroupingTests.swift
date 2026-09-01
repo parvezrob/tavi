@@ -21,19 +21,20 @@ struct HomeGroupingTests {
         )
     }
 
-    private let computer = (id: "https://mac.example", name: "MacBook")
+    private func host(_ id: String, name: String, agents: [AgentSummary], health: HostHealth = .live) -> HomeHostInput {
+        HomeHostInput(id: id, name: name, agents: agents.map { var a = $0; a.hostId = id; return a }, health: health)
+    }
 
     @Test
     func groupsAgentsByFolderAndKeepsNeedsYouAboveEverything() {
-        let layout = HomeGrouping.layout(
-            agents: [
+        let layout = HomeGrouping.layout(hosts: [
+            host("mac", name: "MacBook", agents: [
                 agent("a", status: "working", cwd: "/Users/dev/Projects/api"),
                 agent("b", status: "blocked", cwd: "/Users/dev/Projects/web"),
                 agent("c", status: "done", cwd: "/Users/dev/Projects/api"),
                 agent("d", status: "idle", cwd: "/Users/dev/Projects/web"),
-            ],
-            computer: computer
-        )
+            ]),
+        ])
 
         #expect(layout.needsYou.map(\.id) == ["b"])
         #expect(layout.computers.map(\.name) == ["MacBook"])
@@ -108,17 +109,62 @@ struct HomeGroupingTests {
 
     @Test
     func onlyNeedsYouIsNotAnEmptyHome() {
-        let layout = HomeGrouping.layout(
-            agents: [agent("b", status: "blocked", cwd: "/p/web")],
-            computer: computer
-        )
+        let layout = HomeGrouping.layout(hosts: [
+            host("mac", name: "MacBook", agents: [agent("b", status: "blocked", cwd: "/p/web")]),
+        ])
 
         // The folder keeps its header (it counts the waiting agent); the
         // agent itself is rendered only in the flat needs-you list.
         #expect(layout.computers.count == 1)
         #expect(layout.computers[0].projects.map(\.needsYou.count) == [1])
         #expect(!layout.isEmpty)
-        #expect(HomeGrouping.layout(agents: [], computer: computer).isEmpty)
+        // An idle computer still has its header row; the home is "empty"
+        // only in the sense that there is no agent anywhere.
+        let idle = HomeGrouping.layout(hosts: [host("mac", name: "MacBook", agents: [])])
+        #expect(idle.isEmpty)
+        #expect(idle.computers.map(\.name) == ["MacBook"])
+    }
+
+    // #50: several computers, each its own group in pairing order; waiting
+    // work from every computer leads, in the same order, so an agent on the
+    // second machine never hides under the first one's group.
+    @Test
+    func severalComputersKeepPairingOrderAndPoolNeedsYou() {
+        let layout = HomeGrouping.layout(hosts: [
+            host("mac", name: "MacBook", agents: [
+                agent("1", status: "working", cwd: "/Users/dev/api"),
+                agent("2", status: "done", cwd: "/Users/dev/api"),
+            ]),
+            host("ubuntu", name: "ubuntu", agents: [
+                agent("1", status: "blocked", cwd: "/home/dev/api"),
+                agent("9", status: "idle", cwd: "/home/dev/web"),
+            ], health: .stale),
+            host("asleep", name: "Studio", agents: [], health: .offline),
+        ])
+
+        #expect(layout.computers.map(\.name) == ["MacBook", "ubuntu", "Studio"])
+        #expect(layout.computers.map(\.health) == [.live, .stale, .offline])
+        // Same pane id on two computers: distinct targets, distinct cards.
+        #expect(layout.needsYou.map(\.target) == [AgentTarget(hostId: "ubuntu", paneId: "1")])
+        #expect(layout.computers[0].projects.flatMap(\.active).map(\.target) == [AgentTarget(hostId: "mac", paneId: "1")])
+        let projects = layout.computers.flatMap(\.projects)
+        let everyAgent = projects.flatMap { $0.needsYou + $0.active + $0.recent }
+        let identities = Set(everyAgent.map(\.cardIdentity))
+        #expect(identities.count == 4)
+        #expect(layout.computers[1].projects.map(\.name) == ["api", "web"])
+        #expect(layout.computers[2].projects.isEmpty)
+        #expect(layout.computers[2].agentCount == 0)
+        #expect(!layout.isEmpty)
+    }
+
+    @Test
+    func healthLabelSpeaksLatencyOnlyWhileLive() {
+        #expect(HostHealth.live.label(latencyMilliseconds: 42) == "Live · 42 ms")
+        #expect(HostHealth.live.label(latencyMilliseconds: nil) == "Live")
+        #expect(HostHealth.stale.label(latencyMilliseconds: 42) == "Reconnecting")
+        #expect(HostHealth.offline.label(latencyMilliseconds: 42) == "Offline")
+        #expect(HostHealth.revoked.label(latencyMilliseconds: nil) == "Unpaired")
+        #expect(HostHealth.connecting.label(latencyMilliseconds: nil) == "Connecting…")
     }
 
     @Test

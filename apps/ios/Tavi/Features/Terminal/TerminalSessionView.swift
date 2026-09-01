@@ -32,22 +32,34 @@ struct TerminalSessionView: View {
     @FocusState private var composerFocused: Bool
 
     let controller: TerminalSessionController
-    // The events mirror behind the identity header and the Jump-to sheet;
-    // nil only in previews, which keep the generic chrome.
+    // The events mirror of the computer this terminal is attached to,
+    // behind the identity header, rename, and prompt delivery; nil only in
+    // previews, which keep the generic chrome.
     private let agentDirectory: AgentDirectory?
+    // Every paired computer, for the Jump-to sheet (#50).
+    private let jumpSources: [JumpSource]
     private let onSelectAgent: ((AgentSummary) -> Void)?
     private let developmentBootstrap: TerminalDevelopmentBootstrap
 
     init(
         controller: TerminalSessionController,
         agentDirectory: AgentDirectory? = nil,
+        jumpSources: [JumpSource]? = nil,
         onSelectAgent: ((AgentSummary) -> Void)? = nil,
         developmentBootstrap: TerminalDevelopmentBootstrap = .launchEnvironment()
     ) {
         self.developmentBootstrap = developmentBootstrap
         self.controller = controller
         self.agentDirectory = agentDirectory
+        self.jumpSources = jumpSources
+            ?? agentDirectory.map { [JumpSource(hostId: $0.hostId, name: "", directory: $0)] }
+            ?? []
         self.onSelectAgent = onSelectAgent
+    }
+
+    // Host + pane of the attached agent (#50).
+    private var currentTarget: AgentTarget? {
+        controller.currentPaneID.map { AgentTarget(hostId: agentDirectory?.hostId ?? "", paneId: $0) }
     }
 
     // The connected pane's live identity from the events mirror; nil while
@@ -66,7 +78,7 @@ struct TerminalSessionView: View {
     }
 
     private var canJump: Bool {
-        agentDirectory != nil && onSelectAgent != nil
+        !jumpSources.isEmpty && onSelectAgent != nil
     }
 
     var body: some View {
@@ -190,10 +202,10 @@ struct TerminalSessionView: View {
             Text(renameError ?? "")
         }
         .sheet(isPresented: $showingJump) {
-            if let agentDirectory, let onSelectAgent {
+            if !jumpSources.isEmpty, let onSelectAgent {
                 JumpToSheet(
-                    agentDirectory: agentDirectory,
-                    currentPaneID: controller.currentPaneID,
+                    sources: jumpSources,
+                    currentTarget: currentTarget,
                     onSelect: onSelectAgent
                 )
                 .presentationDetents([.medium, .large])

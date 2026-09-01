@@ -1,10 +1,10 @@
 import Foundation
 
-// The home reads computer → project → agents (#26). A project is the folder
-// an agent lives in — its cwd, nothing to name or maintain — and a computer
-// is the host that reported it. Today one phone pairs with one computer, so
-// the top level is a single quiet line; the model still carries it so that
-// a second host (#50) nests under the same shape without a rewrite.
+// The home reads computer → project → agents (#26, #50). A project is the
+// folder an agent lives in — its cwd, nothing to name or maintain — and a
+// computer is the paired host that reported it. Every paired computer gets
+// its own group with its own connection health, in pairing order, so a
+// host that is asleep is a quiet "Offline" header and never a blank home.
 //
 // What needs the user is deliberately *not* rendered inside the groups: a
 // waiting agent must never sit under a project the eye has skipped, so
@@ -27,31 +27,88 @@ struct HomeProject: Identifiable, Equatable {
     var agentCount: Int { needsYou.count + active.count + recent.count }
 }
 
+// One paired computer as the home renders it: identity, how the phone is
+// doing against it right now, and its projects. A computer with no
+// projects still renders — its header is where the health lives.
 struct HomeComputer: Identifiable, Equatable {
     let id: String
     let name: String
+    let health: HostHealth
+    let latencyMilliseconds: Int?
+    // False until the first snapshot: the group shows "Connecting…"
+    // instead of "no agents".
+    let hasLoaded: Bool
+    // The host reached us but its agent feed is not usable (herdr down);
+    // `reason` is the host's own explanation.
+    let available: Bool
+    let reason: String?
     let projects: [HomeProject]
+
+    var agentCount: Int { projects.reduce(0) { $0 + $1.agentCount } }
+}
+
+// What one host contributes to the layout: its identity and its
+// directory's current state, flattened so grouping is a pure function.
+struct HomeHostInput: Equatable {
+    let id: String
+    let name: String
+    let agents: [AgentSummary]
+    let health: HostHealth
+    let latencyMilliseconds: Int?
+    let hasLoaded: Bool
+    let available: Bool
+    let reason: String?
+
+    init(
+        id: String,
+        name: String,
+        agents: [AgentSummary],
+        health: HostHealth = .live,
+        latencyMilliseconds: Int? = nil,
+        hasLoaded: Bool = true,
+        available: Bool = true,
+        reason: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.agents = agents
+        self.health = health
+        self.latencyMilliseconds = latencyMilliseconds
+        self.hasLoaded = hasLoaded
+        self.available = available
+        self.reason = reason
+    }
 }
 
 struct HomeLayout: Equatable {
     let needsYou: [AgentSummary]
     let computers: [HomeComputer]
 
+    // No agent anywhere — the computers still render their headers.
     var isEmpty: Bool {
         needsYou.isEmpty && computers.allSatisfy { $0.projects.isEmpty }
     }
 }
 
 enum HomeGrouping {
-    // Single-host layout. `computer` is whatever this phone knows the host
-    // by (the paired name, else the address); agents never carry it, since
-    // one directory serves one host.
-    static func layout(agents: [AgentSummary], computer: (id: String, name: String)) -> HomeLayout {
-        let needsYou = agents.filter { $0.homeSection == .needsYou }
-        let projects = group(agents)
-        let computers = projects.isEmpty
-            ? []
-            : [HomeComputer(id: computer.id, name: computer.name, projects: projects)]
+    // Needs-you is flat and first across every computer, in host order
+    // then the host's own order: a waiting agent on the Linux box must not
+    // hide under a collapsed Mac group. Computers keep their pairing order
+    // so a group never moves as its health or agents change.
+    static func layout(hosts: [HomeHostInput]) -> HomeLayout {
+        let needsYou = hosts.flatMap { host in host.agents.filter { $0.homeSection == .needsYou } }
+        let computers = hosts.map { host in
+            HomeComputer(
+                id: host.id,
+                name: host.name,
+                health: host.health,
+                latencyMilliseconds: host.latencyMilliseconds,
+                hasLoaded: host.hasLoaded,
+                available: host.available,
+                reason: host.reason,
+                projects: group(host.agents)
+            )
+        }
         return HomeLayout(needsYou: needsYou, computers: computers)
     }
 

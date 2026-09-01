@@ -57,20 +57,104 @@ struct PairingPayloadTests {
     }
 
     @Test
-    func pairedHostRecordRoundTripsThroughDefaults() {
+    func pairedHostsRoundTripAndUpsertByIdentity() {
         let defaults = UserDefaults(suiteName: "tavi.tests.\(UUID().uuidString)")!
-        let record = PairedHostRecord(
+        let mac = PairedHost(
+            id: "8F2A 19C4 · 7B10 D6E9",
             hostName: "studio-mac",
+            address: "https://studio-mac.tail.ts.net",
             fingerprint: "8F2A 19C4 · 7B10 D6E9",
             deviceId: "abc123",
             deviceName: "Parvez's iPhone",
             pairedAt: Date(timeIntervalSince1970: 1_700_000_000)
         )
+        let linux = PairedHost.typed(address: "https://ubuntu.tail.ts.net")
 
-        #expect(PairedHostRecord.load(from: defaults) == nil)
-        record.save(to: defaults)
-        #expect(PairedHostRecord.load(from: defaults) == record)
-        PairedHostRecord.clear(from: defaults)
-        #expect(PairedHostRecord.load(from: defaults) == nil)
+        #expect(PairedHostRegistry.load(from: defaults).isEmpty)
+        PairedHostRegistry.upsert(mac, in: defaults)
+        PairedHostRegistry.upsert(linux, in: defaults)
+        #expect(PairedHostRegistry.load(from: defaults) == [mac, linux])
+
+        // Pairing the same computer again replaces it in place.
+        let repaired = PairedHost(
+            id: mac.id,
+            hostName: "studio-mac",
+            address: mac.address,
+            fingerprint: mac.fingerprint,
+            deviceId: "def456",
+            deviceName: "Parvez's iPhone",
+            pairedAt: Date(timeIntervalSince1970: 1_700_009_000)
+        )
+        PairedHostRegistry.upsert(repaired, in: defaults)
+        #expect(PairedHostRegistry.load(from: defaults) == [repaired, linux])
+
+        PairedHostRegistry.remove(id: mac.id, from: defaults)
+        #expect(PairedHostRegistry.load(from: defaults) == [linux])
+        PairedHostRegistry.clear(from: defaults)
+        #expect(PairedHostRegistry.load(from: defaults).isEmpty)
+    }
+
+    @Test
+    func typedHostsAreKeyedByAddressAndNamedByItsFirstLabel() {
+        let host = PairedHost.typed(address: "https://Studio-Mac.tail.ts.net")
+        #expect(host.id == "address:https://studio-mac.tail.ts.net")
+        #expect(host.displayName == "Studio-Mac")
+        #expect(host.fingerprint == nil)
+        #expect(host.endpoint?.baseURL.host() == "Studio-Mac.tail.ts.net")
+    }
+
+    // A phone updated from the one-host app: its record, address and
+    // credential become the first entry of the list, once.
+    @Test
+    func legacySingleHostMigratesIntoTheList() throws {
+        let defaults = UserDefaults(suiteName: "tavi.tests.\(UUID().uuidString)")!
+        let legacy: [String: Any] = [
+            "hostName": "studio-mac",
+            "fingerprint": "8F2A 19C4",
+            "deviceId": "abc123",
+            "deviceName": "Parvez's iPhone",
+            "pairedAt": 1_700_000_000.0,
+        ]
+        defaults.set(try JSONSerialization.data(withJSONObject: legacy), forKey: PairedHostRegistry.legacyRecordKey)
+        defaults.set("https://studio-mac.tail.ts.net", forKey: PairedHostRegistry.legacyAddressKey)
+
+        var moved: [String] = []
+        PairedHostRegistry.migrateLegacy(in: defaults) { moved.append($0) }
+
+        let hosts = PairedHostRegistry.load(from: defaults)
+        #expect(hosts.count == 1)
+        #expect(hosts.first?.id == "8F2A 19C4")
+        #expect(hosts.first?.hostName == "studio-mac")
+        #expect(hosts.first?.address == "https://studio-mac.tail.ts.net")
+        #expect(hosts.first?.deviceName == "Parvez's iPhone")
+        #expect(moved == ["8F2A 19C4"])
+        #expect(defaults.object(forKey: PairedHostRegistry.legacyRecordKey) == nil)
+        #expect(defaults.object(forKey: PairedHostRegistry.legacyAddressKey) == nil)
+
+        // Running again is a no-op: the list is authoritative now.
+        defaults.set("https://other.tail.ts.net", forKey: PairedHostRegistry.legacyAddressKey)
+        PairedHostRegistry.migrateLegacy(in: defaults) { moved.append($0) }
+        #expect(PairedHostRegistry.load(from: defaults) == hosts)
+        #expect(moved == ["8F2A 19C4"])
+    }
+
+    @Test
+    func legacyAddressWithoutARecordMigratesAsATypedHost() {
+        let defaults = UserDefaults(suiteName: "tavi.tests.\(UUID().uuidString)")!
+        defaults.set("https://dev-box.tail.ts.net", forKey: PairedHostRegistry.legacyAddressKey)
+        var moved: [String] = []
+        PairedHostRegistry.migrateLegacy(in: defaults) { moved.append($0) }
+        let hosts = PairedHostRegistry.load(from: defaults)
+        #expect(hosts.map(\.id) == ["address:https://dev-box.tail.ts.net"])
+        #expect(moved == hosts.map(\.id))
+    }
+
+    @Test
+    func nothingToMigrateLeavesNoList() {
+        let defaults = UserDefaults(suiteName: "tavi.tests.\(UUID().uuidString)")!
+        var moved: [String] = []
+        PairedHostRegistry.migrateLegacy(in: defaults) { moved.append($0) }
+        #expect(defaults.object(forKey: PairedHostRegistry.storageKey) == nil)
+        #expect(moved.isEmpty)
     }
 }

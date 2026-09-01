@@ -84,8 +84,8 @@ struct PairingFlowView: View {
                     .foregroundStyle(TaviTheme.textSecondary)
                 Text(
                     showingManualEntry || !PairingScannerView.isAvailable
-                        ? "On your Mac, run **tavi pair** in the host folder (`npm run pair`) and paste the code it prints."
-                        : "On your Mac, run **tavi pair** in the host folder (`npm run pair`) and point the camera at the code."
+                        ? "On your Mac or Linux computer, run **npx tavi-host pair** and paste the code it prints."
+                        : "On your Mac or Linux computer, run **npx tavi-host pair** and point the camera at the code."
                 )
                 .font(.footnote)
                 .foregroundStyle(TaviTheme.textSecondary)
@@ -117,7 +117,7 @@ struct PairingFlowView: View {
 
     private var manualEntry: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Paste the code printed under the QR on your Mac.")
+            Text("Paste the code printed under the QR on your computer.")
                 .font(.footnote)
                 .foregroundStyle(TaviTheme.textSecondary)
             TextField("tavi://pair?…", text: $manualCode, axis: .vertical)
@@ -180,7 +180,7 @@ struct PairingFlowView: View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "shield")
                     .foregroundStyle(TaviTheme.statusBlocked)
-                Text("This phone will be able to run commands on that Mac as your logged-in user. Pair only a Mac you own.")
+                Text("This phone will be able to run commands on that computer as your logged-in user. Pair only a computer you own.")
                     .font(.footnote)
                     .foregroundStyle(TaviTheme.textPrimary)
             }
@@ -201,13 +201,13 @@ struct PairingFlowView: View {
             .buttonStyle(.taviProminent)
             .accessibilityIdentifier("pairing.confirm")
 
-            Button("Not this Mac") { step = .scan }
+            Button("Not this computer") { step = .scan }
                 .font(.footnote)
                 .foregroundStyle(TaviTheme.textSecondary)
                 .accessibilityIdentifier("pairing.reject")
         }
         .padding(20)
-        .navigationTitle("Verify this Mac")
+        .navigationTitle("Verify this computer")
     }
 
     // MARK: - Pairing

@@ -22,7 +22,7 @@ enum HostPairing {
             switch self {
             case let .codeRejected(message): message
             case let .fingerprintMismatch(shown, actual):
-                "The Mac that answered is not the one on the code (it reported \(actual), the code said \(shown)). Nothing was saved."
+                "The computer that answered is not the one on the code (it reported \(actual), the code said \(shown)). Nothing was saved."
             case let .unreachable(message): message
             }
         }

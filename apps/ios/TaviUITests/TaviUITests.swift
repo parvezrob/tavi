@@ -353,7 +353,7 @@ final class TaviUITests: XCTestCase {
             app.staticTexts["sessions.loading"].waitForExistence(timeout: 5)
                 || app.otherElements["sessions.agentsUnavailable"].waitForExistence(timeout: 5)
                 || app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sessions.agent.'")).firstMatch.waitForExistence(timeout: 15)
-                || app.staticTexts["No agents are running in Herdr right now."].waitForExistence(timeout: 5),
+                || app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'No agents are running on'")).firstMatch.waitForExistence(timeout: 5),
             "The home never connected after pairing."
         )
         XCTAssertFalse(app.buttons["sessions.scanPairingCode"].exists, "The home still asks to pair.")
@@ -362,8 +362,8 @@ final class TaviUITests: XCTestCase {
         app.buttons["sessions.hostMenu"].tap()
         XCTAssertTrue(app.buttons["sessions.settings"].waitForExistence(timeout: 5))
         app.buttons["sessions.settings"].tap()
-        XCTAssertTrue(app.buttons["settings.thisIPhone"].waitForExistence(timeout: 10))
-        app.buttons["settings.thisIPhone"].tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'settings.host.'")).firstMatch.waitForExistence(timeout: 10))
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'settings.host.'")).firstMatch.tap()
         XCTAssertTrue(app.staticTexts[fingerprint].waitForExistence(timeout: 10), "Manage access never showed the fingerprint.")
         keepScreenshot(named: "manage-access")
         // Two sheets are up (Settings under This iPhone); close both so the
@@ -561,8 +561,8 @@ final class TaviUITests: XCTestCase {
         app.buttons["sessions.hostMenu"].tap()
         XCTAssertTrue(app.buttons["sessions.settings"].waitForExistence(timeout: 5))
         app.buttons["sessions.settings"].tap()
-        XCTAssertTrue(app.buttons["settings.thisIPhone"].waitForExistence(timeout: 10))
-        app.buttons["settings.thisIPhone"].tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'settings.host.'")).firstMatch.waitForExistence(timeout: 10))
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'settings.host.'")).firstMatch.tap()
         XCTAssertTrue(app.buttons["manageAccess.unpair"].waitForExistence(timeout: 10))
         app.buttons["manageAccess.unpair"].tap()
 

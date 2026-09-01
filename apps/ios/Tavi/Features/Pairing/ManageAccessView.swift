@@ -1,16 +1,16 @@
 import SwiftUI
 
-// "This iPhone" (#46): what the host knows this phone as, and the way out.
-// Unpairing asks the host to revoke this phone's own credential, then
-// forgets it locally. If the host cannot be reached the phone can still
-// forget — but it says plainly that the Mac still lists it until revoked
-// there, because pretending otherwise would be a lie about access.
+// "This iPhone" for one paired computer (#46, #50): what that host knows
+// this phone as, and the way out. Unpairing asks the host to revoke this
+// phone's own credential, then forgets it locally; the other paired
+// computers are untouched. If the host cannot be reached the phone can
+// still forget — but it says plainly that the computer still lists it
+// until revoked there, because pretending otherwise would be a lie about
+// access.
 struct ManageAccessView: View {
-    let record: PairedHostRecord?
-    let hostAddress: String
+    let host: PairedHost
     let directory: AgentDirectory
     let onForget: () -> Void
-    let onPairAnother: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var unpairing = false
@@ -21,25 +21,30 @@ struct ManageAccessView: View {
         NavigationStack {
             List {
                 // Placeholders never ship ("Name: Unknown" reads broken,
-                // #54): with no pairing record the address stands in as the
-                // name and the empty rows simply don't render.
-                Section("Paired Mac") {
-                    row("Name", HomeGrouping.computerName(pairedName: record?.hostName, hostText: hostAddress))
-                    row("Address", hostAddress.replacingOccurrences(of: "https://", with: ""))
-                    if let fingerprint = record?.fingerprint {
+                // #54): a host typed by address has no fingerprint or
+                // device name, and those rows simply don't render.
+                Section("Paired computer") {
+                    row("Name", host.displayName)
+                    row("Address", host.address.replacingOccurrences(of: "https://", with: ""))
+                    if let fingerprint = host.fingerprint {
                         row("Fingerprint", fingerprint, monospaced: true)
                     }
+                    HStack {
+                        Text("Connection")
+                            .foregroundStyle(TaviTheme.textSecondary)
+                        Spacer()
+                        HostHealthLabel(health: directory.health, latencyMilliseconds: directory.latencyMilliseconds)
+                    }
+                    .accessibilityElement(children: .combine)
                 }
                 .listRowBackground(TaviTheme.card)
 
-                if record != nil {
+                if host.deviceName != nil {
                     Section("This iPhone") {
-                        if let deviceName = record?.deviceName {
-                            row("Known to the Mac as", deviceName)
+                        if let deviceName = host.deviceName {
+                            row("Known to \(host.displayName) as", deviceName)
                         }
-                        if let pairedAt = record?.pairedAt {
-                            row("Paired", pairedAt.formatted(date: .abbreviated, time: .shortened))
-                        }
+                        row("Paired", host.pairedAt.formatted(date: .abbreviated, time: .shortened))
                     }
                     .listRowBackground(TaviTheme.card)
                 }
@@ -65,17 +70,8 @@ struct ManageAccessView: View {
                                 .accessibilityIdentifier("manageAccess.forgetOnly")
                         }
                     } else {
-                        Text("Revokes this phone's access on the Mac and forgets the Mac here. Your agents keep running. You can also revoke from the Mac with `tavi devices revoke`.")
+                        Text("Revokes this phone's access on \(host.displayName) and forgets it here. Your agents keep running and your other paired computers are not affected. You can also revoke from that computer with `tavi devices revoke`.")
                     }
-                }
-                .listRowBackground(TaviTheme.card)
-
-                Section {
-                    Button("Pair a different Mac") {
-                        dismiss()
-                        onPairAnother()
-                    }
-                    .accessibilityIdentifier("manageAccess.pairAnother")
                 }
                 .listRowBackground(TaviTheme.card)
             }
@@ -90,7 +86,7 @@ struct ManageAccessView: View {
                 }
             }
             .confirmationDialog(
-                "The Mac will still list this iPhone until you revoke it there.",
+                "\(host.displayName) will still list this iPhone until you revoke it there.",
                 isPresented: $confirmingForget,
                 titleVisibility: .visible
             ) {

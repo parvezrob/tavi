@@ -181,8 +181,12 @@ final class AgentStatusSmoother {
 
 extension AgentSummary {
     // View identity for home cards: a status change must rebuild the card,
-    // never let a container reuse one cached under the bare pane id.
-    var cardIdentity: String { "\(id)|\(status)" }
+    // never let a container reuse one cached under the bare pane id — and
+    // two computers can each have a pane with the same id (#50).
+    var cardIdentity: String { "\(hostId)|\(id)|\(status)" }
+
+    // The unique address of an agent across every paired computer.
+    var target: AgentTarget { AgentTarget(hostId: hostId, paneId: id) }
 
     var abbreviatedPath: String { cwd.abbreviatingHomeDirectory }
 
@@ -196,9 +200,17 @@ extension AgentSummary {
             workspaceId: workspaceId,
             tabId: tabId,
             tabLabel: tabLabel,
-            focused: focused
+            focused: focused,
+            hostId: hostId
         )
     }
+}
+
+// Host + pane: the only thing that names one agent once a phone holds
+// several computers (#50).
+struct AgentTarget: Equatable, Hashable, Sendable {
+    let hostId: String
+    let paneId: String
 }
 
 // Herdr previews arrive as raw terminal text. Stripping escape sequences

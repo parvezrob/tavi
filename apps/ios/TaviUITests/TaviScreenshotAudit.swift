@@ -75,8 +75,8 @@ final class TaviScreenshotAudit: XCTestCase {
         XCTAssertTrue(app.sliders["settings.fontSize"].waitForExistence(timeout: 10))
         sleep(2)
         keep("audit-06-settings")
-        if app.buttons["settings.thisIPhone"].exists {
-            app.buttons["settings.thisIPhone"].tap()
+        if app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'settings.host.'")).firstMatch.exists {
+            app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'settings.host.'")).firstMatch.tap()
             sleep(2)
             keep("audit-07-this-iphone")
         }

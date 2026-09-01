@@ -15,6 +15,32 @@ struct AgentSummary: Identifiable, Equatable, Sendable, Decodable {
     // labels are user-meaningful.
     var tabLabel: String? = nil
     let focused: Bool
+    // The paired computer this agent runs on (#50). Not part of the wire
+    // shape — a host does not know how the phone names it — so the
+    // directory stamps it on every agent it presents. A pane id alone is
+    // no longer unique across the home: every target is host + pane.
+    var hostId: String = ""
+
+    private enum CodingKeys: String, CodingKey {
+        case id, agent, status, cwd, title, workspaceId, tabId, tabLabel, focused
+    }
+}
+
+// How the phone is doing against one paired computer right now (#50).
+// Reported per host so one computer being asleep never hides another.
+enum HostHealth: Equatable {
+    // No snapshot yet since the stream started.
+    case connecting
+    // The events stream is up; what is shown is what the host says.
+    case live
+    // The stream dropped but the host answers: reconnecting, showing the
+    // last known state.
+    case stale
+    // The host itself does not answer (asleep, off the tailnet, or this
+    // phone is offline). Last known state stays on screen.
+    case offline
+    // The host rejected this phone's credential; only pairing again helps.
+    case revoked
 }
 
 // A folder the New Agent picker can start an agent in (#24). `recent` is the
@@ -189,6 +215,15 @@ final class AgentDirectory {
     // the Mac, or the host was reset. Retrying cannot fix it; only pairing
     // again can, so the stream stops and the home says so.
     private(set) var isRevoked = false
+    // The host did not answer the last reachability probe (#50). Set only
+    // after a stream drop whose follow-up probe timed out or failed at the
+    // connection level; cleared by the next live snapshot.
+    private(set) var isOffline = false
+    // Round trip to an authenticated endpoint, refreshed while the stream
+    // is up and on every drop probe. nil until measured.
+    private(set) var latencyMilliseconds: Int?
+    // Which paired computer this directory mirrors (#50).
+    private(set) var hostId = ""
     // Safe, sanitized terminal excerpts keyed by pane id, refreshed after
     // every snapshot for the agents the home actually previews.
     private(set) var previews: [String: String] = [:]
@@ -206,9 +241,19 @@ final class AgentDirectory {
     // status de-escalation matures without a new snapshot arriving.
     private var lastRawAgents: [AgentSummary] = []
     private var reviewTask: Task<Void, Never>?
+    private var latencyTask: Task<Void, Never>?
+    private static let latencyInterval: Duration = .seconds(30)
 
-    func configure(hostText: String, credential: String) {
+    var health: HostHealth {
+        if isRevoked { return .revoked }
+        if isOffline { return .offline }
+        if !hasLoaded { return .connecting }
+        return isStale ? .stale : .live
+    }
+
+    func configure(hostId: String, hostText: String, credential: String) {
         stop()
+        self.hostId = hostId
         // A different host is a different world: never show one host's
         // agents as another's "last known state".
         agents = []
@@ -219,6 +264,8 @@ final class AgentDirectory {
         hasLoaded = false
         isStale = false
         isRevoked = false
+        isOffline = false
+        latencyMilliseconds = nil
         lastRawAgents = []
         smoother.reset()
         guard let url = URL(string: hostText),
@@ -245,6 +292,15 @@ final class AgentDirectory {
                 try? await Task.sleep(for: Self.retryDelay)
             }
         }
+        latencyTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.latencyInterval)
+                guard !Task.isCancelled, let self, self.hasLoaded, !self.isStale else { continue }
+                if case let .reachable(latency) = await self.probeHost() {
+                    self.latencyMilliseconds = latency
+                }
+            }
+        }
     }
 
     func stop() {
@@ -254,6 +310,8 @@ final class AgentDirectory {
         previewTask = nil
         reviewTask?.cancel()
         reviewTask = nil
+        latencyTask?.cancel()
+        latencyTask = nil
         isRunning = false
         // Whatever we show next launch/foreground is last-known until the
         // stream confirms otherwise.
@@ -525,7 +583,16 @@ final class AgentDirectory {
                 return .failure(message ?? "The host could not list the workspaces (HTTP \(status)).")
             }
             let payload = try JSONDecoder().decode(TreeResponse.self, from: data)
-            return .tree(payload.workspaces)
+            return .tree(payload.workspaces.map { workspace in
+                HerdrTreeWorkspace(
+                    workspaceId: workspace.workspaceId,
+                    label: workspace.label,
+                    focused: workspace.focused,
+                    tabs: workspace.tabs.map { tab in
+                        HerdrTreeTab(tabId: tab.tabId, label: tab.label, focused: tab.focused, agents: stamped(tab.agents))
+                    }
+                )
+            })
         } catch {
             return .failure(error.localizedDescription)
         }
@@ -535,11 +602,20 @@ final class AgentDirectory {
         let workspaces: [HerdrTreeWorkspace]
     }
 
+    private func stamped(_ agents: [AgentSummary]) -> [AgentSummary] {
+        agents.map { agent in
+            var agent = agent
+            agent.hostId = hostId
+            return agent
+        }
+    }
+
     private func apply(_ snapshot: AgentsSnapshotMessage) {
         available = snapshot.available
         reason = snapshot.reason
         hasLoaded = true
         isStale = false
+        isOffline = false
         lastRawAgents = snapshot.agents
         present(lastRawAgents)
     }
@@ -556,7 +632,7 @@ final class AgentDirectory {
                 : now
         }
         statusObservedAt = observed
-        agents = smoothed
+        agents = stamped(smoothed)
         previews = previews.filter { key, _ in observed[key] != nil }
         schedulePreviewRefresh()
 
@@ -625,12 +701,22 @@ final class AgentDirectory {
         defer { socket.cancel(with: .normalClosure, reason: nil) }
 
         do {
+            var measured = false
             while !Task.isCancelled {
                 let frame = try await socket.receive()
                 guard case let .string(text) = frame else { continue }
                 let snapshot = try JSONDecoder().decode(AgentsSnapshotMessage.self, from: Data(text.utf8))
                 guard snapshot.type == "agents" else { continue }
                 apply(snapshot)
+                if !measured {
+                    // The first snapshot proves the stream; the round trip
+                    // the header shows is measured right behind it.
+                    measured = true
+                    Task { [weak self] in
+                        guard let self, case let .reachable(latency) = await self.probeHost() else { return }
+                        self.latencyMilliseconds = latency
+                    }
+                }
             }
         } catch {
             guard !Task.isCancelled else { return }
@@ -641,34 +727,56 @@ final class AgentDirectory {
             isStale = true
             // Unless the host is telling us this credential is dead: a
             // WebSocket drop and an HTTP 401 look alike here, so ask the
-            // host directly before deciding.
-            if await credentialIsRejected() {
+            // host directly before deciding. The same probe says whether
+            // the computer answers at all (#50): "reconnecting" and
+            // "offline" are different headers on the home.
+            switch await probeHost() {
+            case .rejected:
                 isRevoked = true
+                isOffline = false
                 available = false
-                reason = "This iPhone is no longer paired with this Mac. Pair it again to reconnect."
+                reason = "This iPhone is no longer paired with this computer. Pair it again to reconnect."
                 hasLoaded = true
                 isStale = false
                 agents = []
                 stop()
+            case let .reachable(latency):
+                isOffline = false
+                latencyMilliseconds = latency
+            case .unreachable:
+                guard !Task.isCancelled else { return }
+                isOffline = true
             }
         }
     }
 
-    // True only on a definite 401 from the host; anything else (offline,
-    // host down) is a transient failure and must keep retrying. Bounded
-    // tightly: this runs on every stream drop, including the ordinary
-    // background→foreground cycle, and with the default 60 s timeout a
-    // half-dead connection after resume held the whole reconnect for a
-    // minute (owner-reported).
-    private func credentialIsRejected() async -> Bool {
+    enum HostProbe: Equatable {
+        // A definite 401: the credential is dead.
+        case rejected
+        // The host answered (any other status), in this many milliseconds.
+        case reachable(latencyMilliseconds: Int)
+        // No answer at the connection level: asleep, gone, or we are offline.
+        case unreachable
+    }
+
+    // Bounded tightly: this runs on every stream drop, including the
+    // ordinary background→foreground cycle, and with the default 60 s
+    // timeout a half-dead connection after resume held the whole reconnect
+    // for a minute (owner-reported). Anything but a definite 401 keeps the
+    // stream retrying; only a connection-level failure marks the host
+    // offline.
+    private func probeHost() async -> HostProbe {
         guard let host, !credential.isEmpty,
-              var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else { return false }
+              var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else { return .unreachable }
         components.path = "/api/host"
-        guard let url = components.url else { return false }
+        guard let url = components.url else { return .unreachable }
         var request = URLRequest(url: url)
         request.timeoutInterval = 3
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
-        guard let (_, response) = try? await Self.session.data(for: request) else { return false }
-        return (response as? HTTPURLResponse)?.statusCode == 401
+        let started = Date()
+        guard let (_, response) = try? await Self.session.data(for: request),
+              let status = (response as? HTTPURLResponse)?.statusCode else { return .unreachable }
+        if status == 401 { return .rejected }
+        return .reachable(latencyMilliseconds: Int(Date().timeIntervalSince(started) * 1000))
     }
 }

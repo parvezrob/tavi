@@ -3,23 +3,20 @@ import SwiftUI
 // Sessions home (ROADMAP Phase C): what needs the user leads, running work
 // follows, finished work drops to a quiet recent list. The mockups in
 // docs/assets are reference; the binding contract is PRD §7.1 and the
-// navigation map. The home reads computer → project → agents (#26), and
-// every terminal is one herdr agent pane (#53).
+// navigation map. The home reads computer → project → agents (#26), one
+// group per paired computer with its own connection health (#50), and
+// every terminal is one herdr agent pane on one host (#53).
 struct SessionsView: View {
     @Environment(\.scenePhase) private var scenePhase
-    // Development connection storage; Phase D replaces this with QR pairing
-    // and per-device Keychain credentials.
-    @AppStorage("tavi.dev.host") private var storedHost = ""
-    // The token lives in the Keychain (#31); this mirrors it for the view.
-    // Write through persistToken so state and Keychain never disagree.
-    @State private var storedToken = ""
-    @State private var agentDirectory = AgentDirectory()
+    // Every paired computer and its live mirror (#50). The fleet is the
+    // only writer of the host list and the Keychain credentials.
+    @State private var fleet = HostFleet()
     @State private var draftHost = ""
     @State private var draftToken = ""
     @State private var showingHostForm = false
     @State private var showingPairing = false
     @State private var showingSettings = false
-    // "Pair a different Mac" from inside Settings must wait for the
+    // "Pair another computer" from inside Settings must wait for the
     // Settings sheet to finish dismissing before the pairing sheet can
     // present; flipping both flags in one turn silently drops the second.
     @State private var pairingAfterSettings = false
@@ -27,10 +24,9 @@ struct SessionsView: View {
     @State private var decisionAgent: AgentSummary?
     @State private var terminalController = TerminalSessionController()
     @State private var terminalIsPresented = false
-    // What the home calls the paired computer (#26). Held in state rather
-    // than read from defaults on every body pass: the home re-renders on
-    // every status event and every freshness tick.
-    @State private var computerName = ""
+    // The computer the open terminal is attached to (#50): its directory
+    // backs the terminal's identity header, rename, and prompt delivery.
+    @State private var terminalHostId: String?
     // Held for the needs-you banner's scroll-to-cards tap.
     @State private var homeScrollProxy: ScrollViewProxy?
 
@@ -58,22 +54,23 @@ struct SessionsView: View {
                     Button("New agent", systemImage: "plus") {
                         showingNewAgent = true
                     }
-                    .disabled(!agentDirectory.isConfigured)
+                    .disabled(!fleet.isConfigured)
                     .accessibilityIdentifier("sessions.newAgentTab")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     // Pairing is the way in (#45). The typed host/token form
                     // survives only in DEBUG for simulator and UI-test runs.
                     Menu {
-                        // "This iPhone" lives under Settings → Security (#51).
+                        // Paired computers live under Settings → Security (#51).
                         Button("Settings", systemImage: "gearshape") { showingSettings = true }
                             .accessibilityIdentifier("sessions.settings")
-                        Button("Pair a Mac", systemImage: "qrcode.viewfinder") { showingPairing = true }
+                        // Adds a computer; the ones already paired stay (#50).
+                        Button("Pair a computer", systemImage: "qrcode.viewfinder") { showingPairing = true }
                             .accessibilityIdentifier("sessions.pair")
                         #if DEBUG
                         Button("Enter host and token (dev)", systemImage: "keyboard") {
-                            draftHost = storedHost
-                            draftToken = storedToken
+                            draftHost = ""
+                            draftToken = ""
                             showingHostForm = true
                         }
                         .accessibilityIdentifier("sessions.hostSettings")
@@ -87,26 +84,20 @@ struct SessionsView: View {
             .navigationDestination(isPresented: $terminalIsPresented) {
                 TerminalSessionView(
                     controller: terminalController,
-                    agentDirectory: agentDirectory,
+                    agentDirectory: terminalHostId.flatMap { fleet.directory(for: $0) },
+                    jumpSources: jumpSources,
                     onSelectAgent: { agent in openAgent(agent) }
                 )
             }
             .sheet(isPresented: $showingNewAgent) {
-                NewAgentSheet(directory: agentDirectory)
+                NewAgentSheet(computers: fleet.entries)
             }
             .sheet(isPresented: $showingPairing) {
                 PairingFlowView { endpoint, grant in
-                    storedHost = endpoint.baseURL.absoluteString
-                    persistToken(grant.credential)
-                    PairedHostRecord(
-                        hostName: grant.hostName,
-                        fingerprint: grant.fingerprint,
-                        deviceId: grant.deviceId,
-                        deviceName: grant.deviceName,
-                        pairedAt: Date()
-                    ).save()
-                    refreshComputerName()
-                    agentDirectory.configure(hostText: storedHost, credential: storedToken)
+                    // Pairing a computer already on the list (same
+                    // fingerprint) replaces its entry; anything else is
+                    // added beside the others.
+                    fleet.add(.paired(endpoint: endpoint, grant: grant), credential: grant.credential)
                 }
             }
             .sheet(isPresented: $showingSettings, onDismiss: {
@@ -116,9 +107,8 @@ struct SessionsView: View {
                 }
             }) {
                 SettingsView(
-                    hostAddress: storedHost,
-                    directory: agentDirectory,
-                    onForget: { forgetHost() },
+                    fleet: fleet,
+                    onForget: { hostId in fleet.remove(hostId: hostId) },
                     onPairAnother: {
                         pairingAfterSettings = true
                         showingSettings = false
@@ -130,23 +120,23 @@ struct SessionsView: View {
                     .presentationDetents([.medium])
             }
             .sheet(item: $decisionAgent) { agent in
-                PermissionDecisionSheet(
-                    agent: agent,
-                    directory: agentDirectory,
-                    onOpenTerminal: { openAgent(agent) }
-                )
-                .presentationDetents([.medium, .large])
+                // The decision goes to the computer the agent lives on.
+                if let directory = fleet.directory(for: agent.hostId) {
+                    PermissionDecisionSheet(
+                        agent: agent,
+                        directory: directory,
+                        onOpenTerminal: { openAgent(agent) }
+                    )
+                    .presentationDetents([.medium, .large])
+                }
             }
             .task {
-                HostCredentialStore.migrateFromDefaults()
-                storedToken = HostCredentialStore.load()
+                fleet.load()
                 #if DEBUG
                 // UI tests must not inherit a connection persisted by an
                 // earlier run on the same simulator.
                 if ProcessInfo.processInfo.environment["TAVI_DEV_RESET"] == "1" {
-                    storedHost = ""
-                    persistToken("")
-                    PairedHostRecord.clear()
+                    fleet.removeAll()
                     TerminalFontPreference.reset()
                     TerminalViewportRecord.clear()
                     UserDefaults.standard.removeObject(forKey: AppLock.storageKey)
@@ -162,16 +152,15 @@ struct SessionsView: View {
                     TerminalFontPreference.save(size)
                 }
                 #endif
-                refreshComputerName()
-                agentDirectory.configure(hostText: storedHost, credential: storedToken)
                 #if DEBUG
                 // Scripted development runs and the terminal UI tests jump
                 // straight into one agent's terminal without a tap. The
-                // pane is attached by id because the agent list may not
-                // have loaded yet; a pane that does not exist fails
-                // honestly on the terminal itself.
-                if let paneID = TerminalDevelopmentBootstrap.launchEnvironment().agentPaneID {
-                    openAgent(paneID: paneID)
+                // pane is attached by id on the first paired computer
+                // because the agent list may not have loaded yet; a pane
+                // that does not exist fails honestly on the terminal itself.
+                if let paneID = TerminalDevelopmentBootstrap.launchEnvironment().agentPaneID,
+                   let hostId = fleet.hosts.first?.id {
+                    openAgent(hostId: hostId, paneID: paneID)
                 }
                 #endif
             }
@@ -179,15 +168,15 @@ struct SessionsView: View {
                 switch phase {
                 case .active:
                     terminalController.sceneDidBecomeActive()
-                    agentDirectory.start()
+                    fleet.start()
                 case .background:
                     terminalController.sceneWillResignActive()
-                    agentDirectory.stop()
+                    fleet.stop()
                 case .inactive:
                     break
                 @unknown default:
                     terminalController.sceneWillResignActive()
-                    agentDirectory.stop()
+                    fleet.stop()
                 }
             }
         }
@@ -197,7 +186,7 @@ struct SessionsView: View {
 
     @ViewBuilder
     private var homeContent: some View {
-        if !agentDirectory.isConfigured {
+        if !fleet.isConfigured {
             // The first impression owns the middle of the screen, not the
             // top edge of an otherwise empty page (#54).
             VStack(spacing: 0) {
@@ -206,14 +195,7 @@ struct SessionsView: View {
                 Spacer(minLength: 0)
             }
             .containerRelativeFrame(.vertical) { length, _ in length * 0.7 }
-        } else if !agentDirectory.hasLoaded {
-            loadingCard
-        } else if !agentDirectory.available {
-            degradedCard
         } else {
-            if agentDirectory.isStale {
-                staleBanner
-            }
             let layout = homeLayout
 
             if !layout.needsYou.isEmpty {
@@ -245,42 +227,75 @@ struct SessionsView: View {
                 }
             }
 
-            // Computer → project → agents (#26). Running work sits as full
-            // cards under its folder; finished and idle work shares one
-            // compact card below them. A blocked agent is only in the flat
-            // list above — its project header counts it, never repeats it.
+            // Computer → project → agents (#26, #50). Every paired computer
+            // renders under its own header, whatever state it is in: the
+            // header carries the health, the body is either its projects
+            // or one plain line about why there are none. Running work
+            // sits as full cards under its folder; finished and idle work
+            // shares one compact card below them. A blocked agent is only
+            // in the flat list above — its project header counts it, never
+            // repeats it.
             ForEach(layout.computers) { computer in
                 ComputerHeader(computer: computer)
-                ForEach(computer.projects) { project in
-                    ProjectHeader(project: project)
-                    ForEach(project.active, id: \.cardIdentity) { agent in
-                        agentCard(agent, showsLocation: false, action: { openAgent(agent) })
-                    }
-                    if !project.recent.isEmpty {
-                        recentCard(project.recent)
-                    }
-                }
+                    // Several computers: the folder name says which one.
+                    .accessibilityValue(layout.computers.count > 1 ? "\(computer.agentCount) agents" : "")
+                computerBody(computer)
             }
+        }
+    }
 
-            if layout.isEmpty {
-                idleStateCard
+    @ViewBuilder
+    private func computerBody(_ computer: HomeComputer) -> some View {
+        if computer.health == .revoked {
+            revokedCard(computer)
+        } else if !computer.hasLoaded {
+            if computer.health == .offline {
+                offlineCard(computer)
+            } else {
+                loadingCard(computer)
+            }
+        } else if !computer.available {
+            unavailableCard(computer)
+        } else if computer.projects.isEmpty {
+            idleCard(computer)
+        } else {
+            ForEach(computer.projects) { project in
+                ProjectHeader(project: project)
+                ForEach(project.active, id: \.cardIdentity) { agent in
+                    agentCard(agent, showsLocation: false, action: { openAgent(agent) })
+                }
+                if !project.recent.isEmpty {
+                    recentCard(project.recent)
+                }
             }
         }
     }
 
     private var homeLayout: HomeLayout {
-        HomeGrouping.layout(agents: agentDirectory.agents, computer: (id: storedHost, name: computerName))
+        HomeGrouping.layout(hosts: fleet.entries.map { entry in
+            HomeHostInput(
+                id: entry.host.id,
+                name: entry.host.displayName,
+                agents: entry.directory.agents,
+                health: entry.directory.health,
+                latencyMilliseconds: entry.directory.latencyMilliseconds,
+                hasLoaded: entry.directory.hasLoaded,
+                available: entry.directory.available,
+                reason: entry.directory.reason
+            )
+        })
     }
 
-    private func refreshComputerName() {
-        computerName = HomeGrouping.computerName(pairedName: PairedHostRecord.load()?.hostName, hostText: storedHost)
+    private var jumpSources: [JumpSource] {
+        fleet.entries.map { JumpSource(hostId: $0.host.id, name: $0.host.displayName, directory: $0.directory) }
     }
 
     private func agentCard(_ agent: AgentSummary, showsLocation: Bool, action: @escaping () -> Void) -> some View {
-        AgentCard(
+        let directory = fleet.directory(for: agent.hostId)
+        return AgentCard(
             agent: agent,
-            preview: agentDirectory.previews[agent.id],
-            observedAt: agentDirectory.statusObservedAt[agent.id],
+            preview: directory?.previews[agent.id],
+            observedAt: directory?.statusObservedAt[agent.id],
             showsLocation: showsLocation,
             action: action
         )
@@ -291,7 +306,7 @@ struct SessionsView: View {
             ForEach(agents, id: \.cardIdentity) { agent in
                 RecentAgentRow(
                     agent: agent,
-                    observedAt: agentDirectory.statusObservedAt[agent.id]
+                    observedAt: fleet.directory(for: agent.hostId)?.statusObservedAt[agent.id]
                 ) {
                     openAgent(agent)
                 }
@@ -310,11 +325,11 @@ struct SessionsView: View {
     // the pairing sheet's footer.
     private var noHostCard: some View {
         VStack(spacing: 10) {
-            Text("Your Mac's agents, in your pocket")
+            Text("Your agents, in your pocket")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(TaviTheme.textPrimary)
                 .multilineTextAlignment(.center)
-            Text("Your agents and logins stay on your Mac. Pair it once by scanning the code it shows.")
+            Text("Your agents and logins stay on your own computer. Pair it once by scanning the code it shows.")
                 .font(.footnote)
                 .foregroundStyle(TaviTheme.textSecondary)
                 .multilineTextAlignment(.center)
@@ -337,10 +352,10 @@ struct SessionsView: View {
         .taviCard()
     }
 
-    private var loadingCard: some View {
+    private func loadingCard(_ computer: HomeComputer) -> some View {
         HStack(spacing: 10) {
             ProgressView()
-            Text("Connecting to the host…")
+            Text("Connecting to \(computer.name)…")
                 .font(.callout)
                 .foregroundStyle(TaviTheme.textSecondary)
         }
@@ -350,60 +365,89 @@ struct SessionsView: View {
         .accessibilityIdentifier("sessions.loading")
     }
 
-    // The stream is down: everything below is the last known state and says
-    // so, instead of vanishing (PRD §7.8). A waiting agent stays visible.
-    private var staleBanner: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.mini)
-            Text("Reconnecting — showing the last known state")
-                .font(.caption)
-                .foregroundStyle(TaviTheme.textSecondary)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .taviCard()
-        .accessibilityIdentifier("sessions.stale")
-    }
-
-    private var degradedCard: some View {
+    // The computer does not answer at all and nothing was ever shown for
+    // it. Once something has loaded, the last known state stays on screen
+    // under the "Offline" header instead (PRD §7.8).
+    private func offlineCard(_ computer: HomeComputer) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: agentDirectory.isRevoked ? "person.crop.circle.badge.xmark" : "exclamationmark.triangle")
-                .foregroundStyle(TaviTheme.statusBlocked)
+            Image(systemName: "moon.zzz")
+                .foregroundStyle(TaviTheme.textSecondary)
             VStack(alignment: .leading, spacing: 6) {
-                Text(agentDirectory.reason ?? "Waiting for the host.")
+                Text("\(computer.name) isn't answering. It may be asleep or off your tailnet.")
                     .font(.callout)
                     .foregroundStyle(TaviTheme.textPrimary)
-                if agentDirectory.isRevoked {
-                    // The credential is dead on the host side (#46); nothing
-                    // on this phone can revive it, so the only offer is pairing.
+                Text("Tavi keeps trying on its own.")
+                    .font(.caption)
+                    .foregroundStyle(TaviTheme.textSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .taviCard()
+        .accessibilityIdentifier("sessions.offline")
+    }
+
+    private func unavailableCard(_ computer: HomeComputer) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(TaviTheme.statusBlocked)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(computer.reason ?? "Waiting for \(computer.name).")
+                    .font(.callout)
+                    .foregroundStyle(TaviTheme.textPrimary)
+                Text("Tavi keeps retrying on its own.")
+                    .font(.caption)
+                    .foregroundStyle(TaviTheme.textSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .taviCard(stripe: TaviTheme.statusBlocked)
+        .accessibilityIdentifier("sessions.agentsUnavailable")
+    }
+
+    // The credential is dead on the host side (#46); nothing on this phone
+    // can revive it, so the offers are pairing again or letting it go. The
+    // other computers are untouched either way (#50).
+    private func revokedCard(_ computer: HomeComputer) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "person.crop.circle.badge.xmark")
+                .foregroundStyle(TaviTheme.statusBlocked)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(computer.reason ?? "This iPhone is no longer paired with \(computer.name).")
+                    .font(.callout)
+                    .foregroundStyle(TaviTheme.textPrimary)
+                HStack(spacing: 10) {
                     Button("Pair again") {
-                        persistToken("")
-                        PairedHostRecord.clear()
+                        fleet.remove(hostId: computer.id)
                         showingPairing = true
                     }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("sessions.pairAgain")
-                } else {
-                    Text("Tavi keeps retrying on its own.")
-                        .font(.caption)
-                        .foregroundStyle(TaviTheme.textSecondary)
+                    Button("Remove") {
+                        fleet.remove(hostId: computer.id)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.subheadline)
+                    .foregroundStyle(TaviTheme.textSecondary)
+                    .accessibilityIdentifier("sessions.removeHost")
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .taviCard(stripe: TaviTheme.statusBlocked)
-        .accessibilityIdentifier(agentDirectory.isRevoked ? "sessions.revoked" : "sessions.agentsUnavailable")
+        .accessibilityIdentifier("sessions.revoked")
     }
 
-    private var idleStateCard: some View {
-        Text("No agents are running in Herdr right now.")
+    private func idleCard(_ computer: HomeComputer) -> some View {
+        Text("No agents are running on \(computer.name) right now.")
             .font(.callout)
             .foregroundStyle(TaviTheme.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
             .taviCard()
+            .accessibilityIdentifier("sessions.idle")
     }
 
     // MARK: - Actions
@@ -423,7 +467,7 @@ struct SessionsView: View {
                 } header: {
                     Text("Access token")
                 } footer: {
-                    Text("Stored in this iPhone's Keychain, on this device only. Tavi never uploads it. Anyone with this token can run commands on your Mac.")
+                    Text("Stored in this iPhone's Keychain, on this device only. Tavi never uploads it. Anyone with this token can run commands on that computer.")
                 }
             }
             .navigationTitle("Connect Host")
@@ -434,10 +478,11 @@ struct SessionsView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        storedHost = draftHost.trimmingCharacters(in: .whitespacesAndNewlines)
-                        persistToken(draftToken.trimmingCharacters(in: .whitespacesAndNewlines))
-                        refreshComputerName()
-                        agentDirectory.configure(hostText: storedHost, credential: storedToken)
+                        let address = draftHost.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let token = draftToken.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !address.isEmpty, !token.isEmpty {
+                            fleet.add(.typed(address: address), credential: token)
+                        }
                         showingHostForm = false
                     }
                 }
@@ -446,12 +491,16 @@ struct SessionsView: View {
     }
 
     private func openAgent(_ agent: AgentSummary) {
-        openAgent(paneID: agent.id)
+        openAgent(hostId: agent.hostId, paneID: agent.id)
     }
 
-    private func openAgent(paneID: String) {
+    // Every terminal target is host + pane (#50): the pane id alone says
+    // nothing about which computer to dial.
+    private func openAgent(hostId: String, paneID: String) {
+        guard let host = fleet.host(for: hostId) else { return }
         terminalController.stop()
-        terminalController.connect(hostText: storedHost, paneID: paneID, credential: storedToken)
+        terminalHostId = hostId
+        terminalController.connect(hostText: host.address, paneID: paneID, credential: fleet.credential(for: hostId))
         terminalIsPresented = true
     }
 
@@ -459,28 +508,10 @@ struct SessionsView: View {
         // Release builds must never persist an injected credential (#33).
         #if DEBUG
         let environment = ProcessInfo.processInfo.environment
-        if storedHost.isEmpty, let host = environment["TAVI_DEV_HOST"] {
-            storedHost = host
-        }
-        if storedToken.isEmpty, let token = environment["TAVI_DEV_TOKEN"] {
-            persistToken(token)
+        if !fleet.isConfigured, let host = environment["TAVI_DEV_HOST"], !host.isEmpty {
+            fleet.add(.typed(address: host), credential: environment["TAVI_DEV_TOKEN"] ?? "")
         }
         #endif
-    }
-
-    // Back to "No Paired Computers": credential gone from the Keychain,
-    // address and pairing record gone from defaults, directory reset.
-    private func forgetHost() {
-        persistToken("")
-        storedHost = ""
-        PairedHostRecord.clear()
-        refreshComputerName()
-        agentDirectory.configure(hostText: "", credential: "")
-    }
-
-    private func persistToken(_ token: String) {
-        storedToken = token
-        HostCredentialStore.save(token)
     }
 }
 

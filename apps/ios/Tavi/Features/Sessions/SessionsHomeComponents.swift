@@ -197,9 +197,10 @@ struct RecentAgentRow: View {
     }
 }
 
-// The computer an agent runs on (#26). One paired host today, so this is a
-// single quiet line; when a second host arrives (#50) the same header
-// separates them.
+// The computer a group of agents runs on (#26, #50): its name and, at the
+// far end, how the phone is doing against it — live with the round trip,
+// reconnecting, offline, or unpaired. Health lives here and nowhere else
+// so a second computer's trouble never reads as the first one's.
 struct ComputerHeader: View {
     let computer: HomeComputer
 
@@ -214,13 +215,59 @@ struct ComputerHeader: View {
                 .kerning(0.8)
                 .textCase(.uppercase)
                 .lineLimit(1)
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+            HostHealthLabel(health: computer.health, latencyMilliseconds: computer.latencyMilliseconds)
         }
         .foregroundStyle(TaviTheme.textSecondary.opacity(0.75))
         .padding(.top, 14)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
         .accessibilityIdentifier("sessions.computer.\(computer.id)")
+    }
+}
+
+// Health as a dot and a word; the round trip joins it only while live,
+// because a number next to "Offline" would be a lie about the present.
+struct HostHealthLabel: View {
+    let health: HostHealth
+    let latencyMilliseconds: Int?
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if health == .stale || health == .connecting {
+                ProgressView()
+                    .controlSize(.mini)
+            } else {
+                Circle()
+                    .fill(Self.color(for: health))
+                    .frame(width: 6, height: 6)
+            }
+            Text(health.label(latencyMilliseconds: latencyMilliseconds))
+                .font(.caption2)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .foregroundStyle(health == .live ? TaviTheme.textSecondary.opacity(0.75) : Self.color(for: health))
+        .accessibilityIdentifier("sessions.health.\(Self.identifier(for: health))")
+    }
+
+    static func color(for health: HostHealth) -> Color {
+        switch health {
+        case .live: TaviTheme.statusDone
+        case .connecting, .stale: TaviTheme.textSecondary
+        case .offline: TaviTheme.statusIdle
+        case .revoked: TaviTheme.statusBlocked
+        }
+    }
+
+    private static func identifier(for health: HostHealth) -> String {
+        switch health {
+        case .connecting: "connecting"
+        case .live: "live"
+        case .stale: "stale"
+        case .offline: "offline"
+        case .revoked: "revoked"
+        }
     }
 }
 
@@ -307,5 +354,18 @@ private struct TaviCardModifier: ViewModifier {
 extension View {
     func taviCard(stripe: Color? = nil) -> some View {
         modifier(TaviCardModifier(stripe: stripe))
+    }
+}
+
+extension HostHealth {
+    // The word on the header; the round trip joins it only while live.
+    func label(latencyMilliseconds: Int?) -> String {
+        switch self {
+        case .connecting: "Connecting…"
+        case .live: latencyMilliseconds.map { "Live · \($0) ms" } ?? "Live"
+        case .stale: "Reconnecting"
+        case .offline: "Offline"
+        case .revoked: "Unpaired"
+        }
     }
 }

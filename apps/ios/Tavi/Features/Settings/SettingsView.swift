@@ -7,9 +7,9 @@ import SwiftUI
 // Deliberately absent: themes, font families, keyboard layouts (terminal-
 // emulator territory; the terminal is Tavi's fallback).
 struct SettingsView: View {
-    let hostAddress: String
-    let directory: AgentDirectory
-    let onForget: () -> Void
+    let fleet: HostFleet
+    // Forgets one computer by id; the others stay paired (#50).
+    let onForget: (String) -> Void
     let onPairAnother: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -28,7 +28,8 @@ struct SettingsView: View {
     // never succeed (no passcode set): an uncheckable lock is a bricked
     // app, not security.
     @State private var lockAvailable = LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
-    @State private var showingManageAccess = false
+    // The computer whose "This iPhone" sheet is open.
+    @State private var managing: HostFleet.Entry?
 
     var body: some View {
         NavigationStack {
@@ -47,13 +48,11 @@ struct SettingsView: View {
                         .accessibilityIdentifier("settings.done")
                 }
             }
-            .sheet(isPresented: $showingManageAccess) {
+            .sheet(item: $managing) { entry in
                 ManageAccessView(
-                    record: PairedHostRecord.load(),
-                    hostAddress: hostAddress,
-                    directory: directory,
-                    onForget: onForget,
-                    onPairAnother: onPairAnother
+                    host: entry.host,
+                    directory: entry.directory,
+                    onForget: { onForget(entry.id) }
                 )
             }
         }
@@ -162,6 +161,7 @@ struct SettingsView: View {
 
     // MARK: - Security
 
+    @ViewBuilder
     private var securitySection: some View {
         Section {
             Toggle("Require Face ID to open", isOn: $faceIDLock)
@@ -170,32 +170,57 @@ struct SettingsView: View {
                 .accessibilityIdentifier("settings.faceIDLock")
                 .listRowBackground(TaviTheme.card)
 
-            if directory.isConfigured {
-                Button {
-                    showingManageAccess = true
-                } label: {
-                    HStack {
-                        Text("This iPhone")
-                            .foregroundStyle(TaviTheme.textPrimary)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(TaviTheme.textSecondary)
-                    }
-                }
-                .accessibilityIdentifier("settings.thisIPhone")
-                .listRowBackground(TaviTheme.card)
-            }
         } header: {
             Text("Security")
         } footer: {
             Text(securityFooter)
         }
+
+        // One row per paired computer (#50): what it is called and how it
+        // is doing; the row opens "This iPhone" for that computer alone.
+        Section {
+            ForEach(fleet.entries) { entry in
+                Button {
+                    managing = entry
+                } label: {
+                    HStack(spacing: 10) {
+                        Text(entry.host.displayName)
+                            .foregroundStyle(TaviTheme.textPrimary)
+                            .lineLimit(1)
+                        Spacer()
+                        HostHealthLabel(
+                            health: entry.directory.health,
+                            latencyMilliseconds: entry.directory.latencyMilliseconds
+                        )
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(TaviTheme.textSecondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("settings.host.\(entry.id)")
+                .listRowBackground(TaviTheme.card)
+            }
+            Button {
+                onPairAnother()
+            } label: {
+                Label(fleet.isConfigured ? "Pair another computer" : "Pair a computer", systemImage: "qrcode.viewfinder")
+                    .foregroundStyle(TaviTheme.textPrimary)
+            }
+            .accessibilityIdentifier("settings.pairAnother")
+            .listRowBackground(TaviTheme.card)
+        } header: {
+            Text("Paired computers")
+        } footer: {
+            if fleet.isConfigured {
+                Text("Each computer is paired on its own. Unpairing one leaves the others as they are.")
+            }
+        }
     }
 
-    // Two sentences at most (#54); the This iPhone row explains itself.
+    // Two sentences at most (#54); the paired-computer rows explain themselves.
     private var securityFooter: String {
-        var sentences = ["Face ID protects the app, not the Mac: anyone who unlocks Tavi can type into your agents."]
+        var sentences = ["Face ID protects the app, not your computers: anyone who unlocks Tavi can type into your agents."]
         if !lockAvailable {
             sentences.append("Face ID or a passcode must be set up on this iPhone before the lock can be turned on.")
         }
@@ -206,7 +231,7 @@ struct SettingsView: View {
 
     private var privacySection: some View {
         Section {
-            Text("Tavi has no analytics and no servers of its own. Your terminals, prompts, and credentials travel only between this iPhone and your paired Mac over your tailnet. Previews shown on the home are stripped of terminal control sequences before display.")
+            Text("Tavi has no analytics and no servers of its own. Your terminals, prompts, and credentials travel only between this iPhone and your paired computers over your tailnet. Previews shown on the home are stripped of terminal control sequences before display.")
                 .font(.footnote)
                 .foregroundStyle(TaviTheme.textSecondary)
                 .listRowBackground(TaviTheme.card)
@@ -219,9 +244,8 @@ struct SettingsView: View {
 
 #Preview {
     SettingsView(
-        hostAddress: "https://mac.tailnet.ts.net",
-        directory: AgentDirectory(),
-        onForget: {},
+        fleet: HostFleet(),
+        onForget: { _ in },
         onPairAnother: {}
     )
     .preferredColorScheme(.dark)
