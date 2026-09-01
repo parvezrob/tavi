@@ -224,6 +224,8 @@ struct ProjectCard: View {
     let onOpen: (AgentSummary) -> Void
     // Long-press: what this agent changed (#25), without opening its terminal.
     var onShowFiles: ((AgentSummary) -> Void)? = nil
+    // Long-press: the dev server running in this folder, on the phone (#58).
+    var onShowPreview: ((AgentSummary) -> Void)? = nil
 
     private var agents: [AgentSummary] { project.active + project.recent }
 
@@ -238,6 +240,9 @@ struct ProjectCard: View {
                 .contextMenu {
                     if let onShowFiles {
                         Button("What it changed", systemImage: "doc.text.magnifyingglass") { onShowFiles(agent) }
+                    }
+                    if let onShowPreview {
+                        Button("Preview dev server", systemImage: "globe") { onShowPreview(agent) }
                     }
                 }
                 if agent.cardIdentity != agents.last?.cardIdentity {

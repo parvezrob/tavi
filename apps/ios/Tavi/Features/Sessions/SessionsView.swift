@@ -39,6 +39,7 @@ struct SessionsView: View {
     @State private var expandedWaitingStacks: Set<String> = []
     // Files for one agent from the home (#25): a long-press on its row.
     @State private var filesAgent: AgentSummary?
+    @State private var previewAgent: AgentSummary?
 
     var body: some View {
         NavigationStack {
@@ -165,6 +166,14 @@ struct SessionsView: View {
                     computerName: computerLabel(for: agent.hostId),
                     transcript: nil,
                     initialTab: .changed
+                )
+            }
+            .sheet(item: $previewAgent) { agent in
+                PreviewSheet(
+                    agent: agent,
+                    client: fleet.directory(for: agent.hostId)?.previewClient,
+                    computerName: computerLabel(for: agent.hostId),
+                    transcript: nil
                 )
             }
             .sheet(item: $decisionAgent) { target in
@@ -352,7 +361,8 @@ struct SessionsView: View {
                             preview: { fleet.directory(for: $0.hostId)?.previews[$0.id] },
                             observedAt: { fleet.directory(for: $0.hostId)?.statusObservedAt[$0.id] },
                             onOpen: { openAgent($0) },
-                            onShowFiles: { filesAgent = $0 }
+                            onShowFiles: { filesAgent = $0 },
+                            onShowPreview: { previewAgent = $0 }
                         )
                     }
                 }

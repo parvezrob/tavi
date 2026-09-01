@@ -188,6 +188,66 @@ final class TaviScreenshotAudit: XCTestCase {
         keep("audit-12-files-diff")
     }
 
+    // Dev-server preview (#58) against a real dev server running in
+    // TEST_RUNNER_TAVI_AUDIT_PREVIEW_CWD (default: ~/Projects/preview-demo, a
+    // Vite app on localhost:5173). The host must find exactly one server
+    // there, so the sheet goes straight to consent. Skips like the audit.
+    @MainActor
+    func testCapturePreviewDevServer() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["TAVI_AUDIT"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_AUDIT=1 to capture the design-audit screens.")
+        }
+        guard let host = environment["TAVI_DEV_HOST"],
+              let token = environment["TAVI_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_DEV_HOST/TOKEN to run the audit against a live host.")
+        }
+        let cwd = environment["TAVI_AUDIT_PREVIEW_CWD"] ?? "\(NSHomeDirectory())/Projects/preview-demo"
+        let shell = try await createAgentTab(host: host, token: token, cwd: cwd, agent: "shell")
+        let app = XCUIApplication()
+        app.launchEnvironment["TAVI_DEV_RESET"] = "1"
+        app.launchEnvironment["TAVI_DEV_HOST"] = host
+        app.launchEnvironment["TAVI_DEV_TOKEN"] = token
+        app.launchEnvironment["TAVI_DEV_AGENT"] = shell.paneId
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["terminal.surface"].waitForExistence(timeout: 20))
+        sleep(2)
+        let preview = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'terminal.preview'")).firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 10))
+        preview.tap()
+        let consent = app.descendants(matching: .any)["preview.consent"]
+        XCTAssertTrue(consent.waitForExistence(timeout: 20), "No single dev server found in \(cwd); the chooser opened instead.")
+        sleep(1)
+        keep("audit-13-preview-consent")
+        app.buttons["preview.consent.open"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["preview.web"].waitForExistence(timeout: 20))
+        sleep(4)
+        keep("audit-14-preview-page")
+        XCTAssertFalse(app.descendants(matching: .any)["preview.banner"].exists, "The page opened but the sheet shows a problem banner.")
+
+        // Hot reload through the door: edit the page's source on the computer
+        // and the change must reach the phone without a tap (Vite pushes it
+        // over its WebSocket, which the door pipes raw).
+        let mainFile = URL(fileURLWithPath: "\(cwd)/src/main.js")
+        if let original = try? String(contentsOf: mainFile, encoding: .utf8), original.contains("Get started") {
+            let marker = "Reloaded \(Int(Date().timeIntervalSince1970) % 100_000)"
+            addTeardownBlock { try? original.write(to: mainFile, atomically: true, encoding: .utf8) }
+            try original.replacingOccurrences(of: "Get started", with: marker).write(to: mainFile, atomically: true, encoding: .utf8)
+            let reloaded = app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", marker)).firstMatch
+            XCTAssertTrue(reloaded.waitForExistence(timeout: 15), "The edit did not reach the phone: hot reload is not flowing through the door.")
+            sleep(1)
+            keep("audit-14b-preview-hot-reloaded")
+        }
+        app.buttons["preview.menu"].tap()
+        sleep(1)
+        keep("audit-15-preview-menu")
+        app.buttons["Another port"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["preview.chooser"].waitForExistence(timeout: 10))
+        sleep(1)
+        keep("audit-16-preview-chooser")
+        app.buttons["preview.done"].tap()
+    }
+
     // MARK: - Helpers (self-contained; the main suite's are private)
 
     @MainActor
@@ -215,7 +275,8 @@ final class TaviScreenshotAudit: XCTestCase {
         ])
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 201 else {
-            throw XCTSkip("The host could not create a disposable agent tab for the audit.")
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw XCTSkip("The host could not create a disposable agent tab for the audit (HTTP \(status): \(String(decoding: data.prefix(300), as: UTF8.self))).")
         }
         let payload = try JSONDecoder().decode([String: String].self, from: data)
         let paneId = try XCTUnwrap(payload["paneId"])

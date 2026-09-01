@@ -14,6 +14,11 @@ struct TerminalSessionView: View {
     @State private var showingJump = false
     // Files (#25 #57 #61): what this agent changed, mentioned, or has.
     @State private var showingFiles = false
+    // Preview (#58): the dev server this agent started, on the phone. The
+    // button lights up when the transcript names a localhost port — pure
+    // text, so it costs the computer nothing until the tap.
+    @State private var showingPreview = false
+    @State private var mentionedPorts: [Int] = []
     @State private var showingRename = false
     @State private var renameDraft = ""
     @State private var renameError: String?
@@ -163,6 +168,13 @@ struct TerminalSessionView: View {
             }
             if activeAgent != nil, agentDirectory != nil {
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button("Preview", systemImage: "globe") {
+                        showingPreview = true
+                    }
+                    .tint(mentionedPorts.isEmpty ? nil : TaviTheme.accent)
+                    .accessibilityIdentifier(mentionedPorts.isEmpty ? "terminal.preview" : "terminal.preview.available")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("Files", systemImage: "doc.text.magnifyingglass") {
                         showingFiles = true
                     }
@@ -176,6 +188,19 @@ struct TerminalSessionView: View {
                     }
                     .accessibilityIdentifier("terminal.jump")
                 }
+            }
+        }
+        .onChange(of: controller.latestTranscript, initial: true) { _, transcript in
+            mentionedPorts = LocalhostPortScanner.scan(transcript)
+        }
+        .sheet(isPresented: $showingPreview) {
+            if let agent = activeAgent {
+                PreviewSheet(
+                    agent: agent,
+                    client: agentDirectory?.previewClient,
+                    computerName: computerName,
+                    transcript: controller.latestTranscript
+                )
             }
         }
         .sheet(isPresented: $showingFiles) {

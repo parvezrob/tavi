@@ -360,6 +360,13 @@ final class AgentDirectory {
         return HostFilesClient(endpoint: host, credential: credential)
     }
 
+    // Dev-server preview routes for this computer (#58); same ownership
+    // rule. The web view never sees this credential, only a host ticket.
+    var previewClient: HostPreviewClient? {
+        guard let host, !credential.isEmpty else { return nil }
+        return HostPreviewClient(endpoint: host, credential: credential)
+    }
+
     // The folders the New Agent picker offers (#24). One call: recent
     // choices plus the browsable roots, both ordered by the host.
     func fetchProjects() async -> ProjectsFetch {
