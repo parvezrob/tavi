@@ -23,6 +23,9 @@ enum DictationUpdate: Equatable, Sendable {
     case volatile(String)
     /// A settled segment; appended to what was already committed.
     case finalized(String)
+    /// Microphone input level, 0…1, throttled; feedback that listening is
+    /// real, never used for anything else.
+    case level(Float)
 }
 
 enum DictationFailure: Error, Equatable, Sendable {
@@ -31,6 +34,9 @@ enum DictationFailure: Error, Equatable, Sendable {
     case modelUnavailable(String)
     case audio(String)
     case transcription(String)
+    /// Audio was taken away mid-dictation (a call, Siri, a route change).
+    /// The words already heard are kept; the person restarts if they want.
+    case interrupted(String)
 
     /// One plain sentence for the caption under the composer.
     var message: String {
@@ -45,6 +51,8 @@ enum DictationFailure: Error, Equatable, Sendable {
             return "The microphone could not start. \(reason)"
         case let .transcription(reason):
             return "Dictation stopped. \(reason)"
+        case let .interrupted(reason):
+            return "Dictation stopped: \(reason). Your words are kept."
         }
     }
 
@@ -85,6 +93,8 @@ final class DictationSession {
     /// The segment still being recognised; shown live, replaced on the next
     /// volatile result, folded into the draft when it finalizes.
     private(set) var volatileText = ""
+    /// Latest microphone level while listening (0…1).
+    private(set) var inputLevel: Float = 0
 
     private let makeEngine: @MainActor () -> any DictationEngine
     private var engine: (any DictationEngine)?
@@ -143,6 +153,7 @@ final class DictationSession {
         task = nil
         engine?.stop()
         engine = nil
+        inputLevel = 0
         if state.isActive {
             fold()
             state = .idle
@@ -167,6 +178,8 @@ final class DictationSession {
             committed = Self.join(committed, text)
             volatileText = ""
             apply?(draft)
+        case let .level(level):
+            inputLevel = level
         }
     }
 
@@ -174,6 +187,7 @@ final class DictationSession {
         fold()
         engine = nil
         task = nil
+        inputLevel = 0
         state = failure.map(DictationState.failed) ?? .idle
     }
 

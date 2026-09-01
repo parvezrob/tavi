@@ -127,6 +127,39 @@ struct DictationSessionTests {
     }
 
     @Test
+    func interruptionKeepsTheWordsAndSaysWhy() async {
+        let engine = ScriptedEngine()
+        let session = DictationSession(makeEngine: { engine })
+        var latest = ""
+
+        session.start(draft: "") { latest = $0 }
+        await engine.emit(.listening)
+        await engine.emit(.finalized("deploy the host"))
+        await engine.emit(.volatile("and then"))
+        await engine.fail(.interrupted("another app took the microphone"))
+        await session.settled()
+
+        #expect(latest == "deploy the host and then")
+        #expect(session.state == .failed(.interrupted("another app took the microphone")))
+        #expect(session.inputLevel == 0)
+    }
+
+    @Test
+    func levelUpdatesNeverTouchTheDraft() async {
+        let engine = ScriptedEngine()
+        let session = DictationSession(makeEngine: { engine })
+        var applied = 0
+
+        session.start(draft: "") { _ in applied += 1 }
+        await engine.emit(.listening)
+        await engine.emit(.level(0.6))
+        #expect(session.inputLevel == 0.6)
+        #expect(applied == 0)
+        session.cancel()
+        #expect(session.inputLevel == 0)
+    }
+
+    @Test
     func joinNeverDoublesOrInventsSpaces() {
         #expect(DictationSession.join("", "hello") == "hello")
         #expect(DictationSession.join("hello", "") == "hello")

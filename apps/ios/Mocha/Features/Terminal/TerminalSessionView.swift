@@ -419,6 +419,9 @@ struct TerminalSessionView: View {
                     .foregroundStyle(MochaTheme.statusBlocked)
             } else if let caption = dictationCaption {
                 HStack(spacing: 6) {
+                    if dictation.state == .listening {
+                        DictationLevelMeter(level: dictation.inputLevel)
+                    }
                     Text(caption.text)
                         .font(.caption)
                         .foregroundStyle(caption.isFailure ? MochaTheme.statusBlocked : MochaTheme.textSecondary)
@@ -432,6 +435,22 @@ struct TerminalSessionView: View {
             }
         }
         .onDisappear { dictation.cancel() }
+        // Hand the input surface over cleanly: the keyboard goes away while
+        // the mic listens (it is dead weight over the transcript), and comes
+        // back the moment dictation ends so the words are edit-ready. A
+        // light tap marks both edges so the ear and the thumb agree.
+        .onChange(of: dictation.state) { previous, current in
+            switch (previous, current) {
+            case (_, .listening):
+                composerFocused = false
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            case (.listening, .idle), (.listening, .failed):
+                composerFocused = true
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            default:
+                break
+            }
+        }
     }
 
     // One button, three honest looks: plain mic, a spinner while permission
@@ -478,7 +497,7 @@ struct TerminalSessionView: View {
         case .preparing(.downloadingModel):
             return ("Downloading the on-device speech model — first time only.", false, false)
         case .listening:
-            return ("Listening. Tap the mic to stop, then edit and send.", false, false)
+            return ("Listening — tap the mic to stop, then edit and send.", false, false)
         case let .failed(failure):
             return (failure.message, true, failure.isPermissionDenied)
         }
@@ -720,5 +739,25 @@ private struct TerminalKeyStyle: ButtonStyle {
 #Preview {
     NavigationStack {
         TerminalSessionView(controller: TerminalSessionController())
+    }
+}
+
+// Eight bars that breathe with the microphone: the only proof, while the
+// keyboard is down, that the phone is actually hearing something.
+private struct DictationLevelMeter: View {
+    let level: Float
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 2) {
+            ForEach(0..<8, id: \.self) { index in
+                let threshold = Float(index) / 8
+                Capsule()
+                    .fill(level > threshold ? Color.red : MochaTheme.textSecondary.opacity(0.35))
+                    .frame(width: 3, height: 4 + CGFloat(index) * 1.2)
+            }
+        }
+        .frame(height: 14)
+        .animation(.linear(duration: 0.08), value: level)
+        .accessibilityHidden(true)
     }
 }

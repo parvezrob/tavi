@@ -13,7 +13,11 @@ final class SpeechDictationEngine: DictationEngine, @unchecked Sendable {
         var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
         var analyzer: SpeechAnalyzer?
         var stopped = false
+        var interruption: String?
+        var lastLevelAt: TimeInterval = 0
     }
+
+    private static let levelInterval: TimeInterval = 1.0 / 12
 
     private let shared = OSAllocatedUnfairLock(initialState: Shared())
 
@@ -83,7 +87,34 @@ final class SpeechDictationEngine: DictationEngine, @unchecked Sendable {
             state.analyzer = analyzer
         }
 
+        // Audio can be taken away at any moment — a call, Siri, an alarm
+        // (`AVAudioSession.interruptionNotification`) — or the graph can be
+        // torn down under us when the route changes, e.g. AirPods connect
+        // mid-sentence (`AVAudioEngineConfigurationChange`: the engine stops
+        // and the input format may differ). Either way the honest move for
+        // dictation is to end it with the words so far and say why, not to
+        // sit in "Listening" with a dead tap or resume into a different mic.
+        let center = NotificationCenter.default
+        let interruptionObserver = center.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: audioSession,
+            queue: nil
+        ) { [weak self] notification in
+            guard let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  AVAudioSession.InterruptionType(rawValue: rawType) == .began else { return }
+            self?.interrupt(reason: "another app took the microphone")
+        }
+        let configurationObserver = center.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: audioEngine,
+            queue: nil
+        ) { [weak self] _ in
+            self?.interrupt(reason: "the audio route changed")
+        }
+
         defer {
+            center.removeObserver(interruptionObserver)
+            center.removeObserver(configurationObserver)
             audioEngine.stop()
             audioEngine.inputNode.removeTap(onBus: 0)
             try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
@@ -91,15 +122,26 @@ final class SpeechDictationEngine: DictationEngine, @unchecked Sendable {
         }
 
         do {
-            try audioSession.setCategory(.record, mode: .measurement, options: [.duckOthers])
+            // Speech, not measurement: `.spokenAudio` keeps the system's voice
+            // processing on (Apple's SpeechAnalyzer sample uses the same
+            // pair), `.duckOthers` lowers music instead of fighting it, and
+            // Bluetooth HFP lets AirPods be the microphone.
+            try audioSession.setCategory(
+                .playAndRecord,
+                mode: .spokenAudio,
+                options: [.duckOthers, .allowBluetoothHFP]
+            )
             try audioSession.setActive(true)
             let inputNode = audioEngine.inputNode
             let inputFormat = inputNode.outputFormat(forBus: 0)
-            guard inputFormat.sampleRate > 0 else {
+            guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
                 throw DictationFailure.audio("No microphone input.")
             }
             let converter = AVAudioConverter(from: inputFormat, to: analyzerFormat)
-            inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
+            converter?.primeMethod = .none
+            inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, when in
+                guard let self else { return }
+                self.reportLevel(of: buffer, at: when, to: continuation)
                 guard let converted = Self.convert(buffer, using: converter, to: analyzerFormat) else { return }
                 inputBuilder.yield(AnalyzerInput(buffer: converted))
             }
@@ -123,6 +165,45 @@ final class SpeechDictationEngine: DictationEngine, @unchecked Sendable {
             if isStopped { return }
             throw DictationFailure.transcription(error.localizedDescription)
         }
+        if let reason = shared.withLock({ $0.interruption }) {
+            throw DictationFailure.interrupted(reason)
+        }
+    }
+
+    private func interrupt(reason: String) {
+        let alreadyStopped = shared.withLock { state -> Bool in
+            let was = state.stopped
+            if !was { state.interruption = reason }
+            return was
+        }
+        guard !alreadyStopped else { return }
+        stop()
+    }
+
+    // RMS of the first channel, mapped onto a perceptual-ish 0…1 range and
+    // throttled to ~12 Hz so the UI shows a meter, not a firehose.
+    private func reportLevel(
+        of buffer: AVAudioPCMBuffer,
+        at when: AVAudioTime,
+        to continuation: AsyncThrowingStream<DictationUpdate, any Error>.Continuation
+    ) {
+        let now = Date.timeIntervalSinceReferenceDate
+        let due = shared.withLock { state -> Bool in
+            guard now - state.lastLevelAt >= Self.levelInterval else { return false }
+            state.lastLevelAt = now
+            return true
+        }
+        guard due, let channel = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
+        var sum: Float = 0
+        for index in 0..<Int(buffer.frameLength) {
+            let sample = channel[index]
+            sum += sample * sample
+        }
+        let rms = (sum / Float(buffer.frameLength)).squareRoot()
+        // -50 dBFS (room tone) → 0, -10 dBFS (loud speech) → 1.
+        let decibels = 20 * log10(max(rms, 1e-7))
+        let level = min(1, max(0, (decibels + 50) / 40))
+        continuation.yield(.level(level))
     }
 
     private var isStopped: Bool {
