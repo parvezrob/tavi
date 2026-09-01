@@ -1013,11 +1013,14 @@ final class TaviUITests: XCTestCase {
         app.launchEnvironment["TAVI_DEV_TOKEN"] = token
         app.launch()
 
-        // The banner only renders for 2+ waiting agents (#54); the striped
-        // card is the needs-you signal for a single one.
+        // A waiting row opens the decision sheet (home v2/v3, PRD §7.3);
+        // the terminal is its escape hatch.
         let agentRow = app.buttons["sessions.agent.\(paneId)"]
         XCTAssertTrue(agentRow.waitForExistence(timeout: 15), "Blocked agent never reached Needs you.")
         agentRow.tap()
+        let openTerminal = app.buttons["decision.openTerminal"]
+        XCTAssertTrue(openTerminal.waitForExistence(timeout: 10), "The waiting row did not open the decision sheet.")
+        openTerminal.tap()
         XCTAssertTrue(app.descendants(matching: .any)["terminal.surface"].waitForExistence(timeout: 10))
 
         // Look at the dialog, answer nothing.
