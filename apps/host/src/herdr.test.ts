@@ -349,16 +349,22 @@ test("fails closed on an unsupported herdr protocol", async (context) => {
   assert.match(result.reason ?? "", /too old for Tavi \(protocol 16/);
 });
 
-test("accepts the newest verified herdr protocol and refuses a newer one with an update hint", async (context) => {
-  const ok = temporarySocketPath(context);
-  await startFakeHerdr(context, ok, { protocol: 20, agents: [] });
-  assert.equal((await new HerdrService({ socketPath: ok }).listAgents()).available, true);
-
+test("a newer herdr that keeps the agent shape just works; one that breaks it asks for a Tavi update", async (context) => {
   const newer = temporarySocketPath(context);
-  await startFakeHerdr(context, newer, { protocol: 21, agents: [] });
-  const result = await new HerdrService({ socketPath: newer }).listAgents();
+  await startFakeHerdr(context, newer, {
+    protocol: 21,
+    agents: [{ agent: "claude", agent_status: "idle", cwd: "/", pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", revision: 1, brand_new_field: true }],
+  });
+  const fine = await new HerdrService({ socketPath: newer }).listAgents();
+  assert.equal(fine.available, true);
+  assert.equal(fine.protocol, 21);
+  assert.equal(fine.agents[0]?.id, "w1:p1");
+
+  const broken = temporarySocketPath(context);
+  await startFakeHerdr(context, broken, { protocol: 22, agents: [{ agent: "claude", status: "idle", pane: "w1:p1" }] });
+  const result = await new HerdrService({ socketPath: broken }).listAgents();
   assert.equal(result.available, false);
-  assert.match(result.reason ?? "", /newer than Tavi knows \(protocol 21.*npx tavi-host@latest pair/);
+  assert.match(result.reason ?? "", /does not understand.*npx tavi-host@latest pair/);
 });
 
 test("reports unavailable when herdr stops responding", async (context) => {

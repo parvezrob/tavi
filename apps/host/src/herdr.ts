@@ -7,13 +7,14 @@ import type { AgentStatus, AttachCommand, HerdrAgentInfo, HerdrAgentsResult } fr
 // Verified against herdr 0.7.5. The socket speaks newline-delimited JSON:
 // {id, method, params} -> {id, result}. Gate on the protocol number so an
 // incompatible herdr degrades to "unavailable" instead of mis-parsed state.
-// Verified live: protocol 17 (herdr 0.7.5, 2026-08-25) and protocol 20
-// (herdr 0.8.2, 2026-09-01) — same shapes for every method used here; herdr
-// adds fields but keeps them. Anything outside this range degrades to
-// "unavailable" rather than mis-parsing.
+// Verified live: protocol 17 (herdr 0.7.5, 2026-08-25) and 20 (herdr
+// 0.8.2, 2026-09-01) — same shapes for every method used here; herdr adds
+// fields and keeps the old ones, and its own guidance is to tolerate unknown
+// fields. So the gate is: at least the oldest verified protocol, and an
+// agent.list that still has the shape Tavi reads. A newer herdr that keeps
+// the shape just works; one that breaks it degrades to "unavailable" with an
+// update hint rather than mis-parsing.
 const MIN_PROTOCOL = 17;
-const MAX_PROTOCOL = 20;
-const SUPPORTED_PROTOCOL = MAX_PROTOCOL;
 const REQUEST_TIMEOUT_MILLISECONDS = 2_000;
 // Enough lines to always capture a dialog's option list plus its footer.
 const DIALOG_READ_LINES = 40;
@@ -122,11 +123,9 @@ export class HerdrService implements HerdrAgentSource {
     } catch (error) {
       return unavailable(describeConnectionFailure(error));
     }
-    if (protocol < MIN_PROTOCOL || protocol > MAX_PROTOCOL) {
+    if (protocol < MIN_PROTOCOL) {
       return unavailable(
-        protocol > MAX_PROTOCOL
-          ? `This herdr is newer than Tavi knows (protocol ${protocol}; Tavi supports up to ${MAX_PROTOCOL}). Update Tavi: npx tavi-host@latest pair`
-          : `This herdr is too old for Tavi (protocol ${protocol}; Tavi needs ${MIN_PROTOCOL} or newer). Update herdr: brew upgrade herdr`,
+        `This herdr is too old for Tavi (protocol ${protocol}; Tavi needs ${MIN_PROTOCOL} or newer). Update herdr: brew upgrade herdr`,
       );
     }
 
@@ -150,7 +149,17 @@ export class HerdrService implements HerdrAgentSource {
           })
           .catch(() => new Map<string, string>()),
       ]);
-      const agents = Array.isArray(result.agents) ? result.agents : [];
+      if (!Array.isArray(result.agents)) {
+        return unavailable(
+          `This herdr (protocol ${protocol}) answers in a way Tavi does not understand. Update Tavi: npx tavi-host@latest pair`,
+        );
+      }
+      const agents = result.agents;
+      if (agents.some((raw) => !asString(asRecord(raw).pane_id) || !asString(asRecord(raw).agent_status))) {
+        return unavailable(
+          `This herdr (protocol ${protocol}) describes agents in a way Tavi does not understand. Update Tavi: npx tavi-host@latest pair`,
+        );
+      }
       return {
         provider: "herdr",
         available: true,

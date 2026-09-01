@@ -7,7 +7,7 @@ Host-side implementation: `apps/host/src/herdr.ts` (request/response) and `apps/
 
 - Unix socket at `~/.config/herdr/herdr.sock` (override: `TAVI_HERDR_SOCKET`).
 - Newline-delimited JSON: `{id, method, params}` → `{id, result}` or `{id, error: {code, message}}`.
-- Gate every integration on `ping` → `result.protocol` within the verified range (`MIN_PROTOCOL`..`MAX_PROTOCOL` in `herdr.ts`, 17–20 today). Outside it, degrade to "unavailable" with an update hint (too old → `brew upgrade herdr`; too new → `npx tavi-host@latest pair`), never mis-parse. Raise `MAX_PROTOCOL` only after a live probe of every method the host uses.
+- Gate on `ping` → `result.protocol >= MIN_PROTOCOL` (17, the oldest verified) **and on the shape of `agent.list`** (an `agents` array whose entries carry `pane_id` and `agent_status`). A newer herdr that keeps the shape works without a Tavi release (owner decision 2026-09-01: no lockstep upgrades); one that breaks it degrades to "unavailable" with `npx tavi-host@latest pair`; too old says `brew upgrade herdr`. Never mis-parse. After each herdr release worth noting, re-run the live probe of every method the host uses and update the status line above.
 - Surface `error.message` to callers — it carries actionable detail (e.g. `agent_name_taken` explains which pane owns the name).
 
 ## Methods Tavi uses
