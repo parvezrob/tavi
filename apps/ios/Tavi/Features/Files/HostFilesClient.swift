@@ -91,7 +91,7 @@ struct HostFilesClient: Sendable {
         }
         // An older host has none of these routes: say so, not "404".
         if status == 404 {
-            return .failure("This computer's Tavi host is too old to show files. Update it with `tavi update`.")
+            return .failure("This computer's Tavi host is too old to show files. Update it with `npx tavi-host update`.")
         }
         return .failure("The host could not answer (HTTP \(status)).")
     }
