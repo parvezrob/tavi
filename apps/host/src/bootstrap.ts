@@ -43,6 +43,8 @@ export interface BootstrapDeps {
   which: (command: string) => Promise<string | undefined>;
   healthy: (port: number) => Promise<boolean>;
   installService: () => Promise<void>;
+  /** Runs the host detached from this terminal, for this login session only. */
+  startForSession: () => Promise<void>;
   operatingSystem: NodeJS.Platform;
   userId: number;
   report: (message: string) => void;
@@ -96,6 +98,15 @@ export function defaultDeps(config: HostConfig, options: { assumeYes?: boolean }
     },
     installService: async () => {
       await installService(config, { packageRoot: await durablePackageRoot(config) });
+    },
+    startForSession: async () => {
+      const root = await durablePackageRoot(config);
+      const child = spawn(process.execPath, [path.join(root, "dist", "index.js")], {
+        detached: true,
+        stdio: "ignore",
+        env: { ...process.env, TAVI_STATE_DIR: config.stateDir },
+      });
+      child.unref();
     },
     operatingSystem: process.platform,
     userId: userInfo().uid,
@@ -205,22 +216,34 @@ async function ensureOperator(deps: BootstrapDeps, cli: string, force = false): 
 async function ensureService(config: HostConfig, deps: BootstrapDeps): Promise<void> {
   const service = await checkService(config, deps);
   if (service.ok) return;
-  const where = deps.operatingSystem === "darwin" ? "at login (launchd)" : "at login (systemd)";
-  if (!(await deps.ask(`Tavi isn't running in the background yet. Run it ${where} so it is always there for your phone?`))) {
+  if (!(await deps.ask("Tavi isn't running in the background yet. Run it whenever you log in, so it is always there for your phone?"))) {
     throw new BootstrapError([service]);
   }
-  deps.report("Installing the Tavi host as a background service…");
-  await deps.installService();
+  deps.report("Setting Tavi up to run in the background…");
+  const log = path.join(config.stateDir, "host.log");
+  try {
+    await deps.installService();
+    await waitHealthy(config, deps, "The background service was set up but is not answering");
+    return;
+  } catch (error) {
+    // The person still gets to pair today. The service is Tavi's problem
+    // to fix, and the details are in the log, not on their screen.
+    deps.report(
+      `The background service didn't start on this computer, so I'll run Tavi for this session instead. ` +
+        `Details are in ${log}; please share that file with us.`,
+    );
+    deps.report(`(${firstLine(describe(error))})`);
+  }
+  await deps.startForSession();
+  await waitHealthy(config, deps, "Tavi could not start on this computer");
+  deps.report("Tavi is running until you log out. Run `npx tavi-host pair` again after the next update to make it permanent.");
+}
+
+async function waitHealthy(config: HostConfig, deps: BootstrapDeps, problem: string): Promise<void> {
   const deadline = deps.now() + HEALTH_WAIT_MS;
   while (!(await deps.healthy(config.port))) {
     if (deps.now() >= deadline) {
-      throw new BootstrapError([
-        {
-          ...service,
-          detail: `The service was installed but is not answering on port ${config.port} after ${HEALTH_WAIT_MS / 1000}s.`,
-          fix: `Check ${path.join(config.stateDir, "host.log")}${deps.operatingSystem === "darwin" ? ` and \`launchctl print gui/${deps.userId}/${SERVICE_LABEL}\`` : ` and \`systemctl --user status ${LINUX_UNIT}\``}.`,
-        },
-      ]);
+      throw new Error(`${problem} on port ${config.port} after ${HEALTH_WAIT_MS / 1000}s. See ${path.join(config.stateDir, "host.log")}.`);
     }
     await deps.sleep(250);
   }
@@ -443,7 +466,7 @@ export async function durablePackageRoot(
 
   const spec = env.TAVI_PACKAGE_SPEC ?? `${PACKAGE_NAME}@${version}`;
   const report = options.report ?? ((message: string) => console.log(message));
-  report(`Installing ${spec} into ${prefix} so the service has a permanent home…`);
+  report("Keeping a permanent copy of Tavi on this computer (one moment)…");
   const execute =
     options.execute ??
     (async (command: string, args: string[]) => (await execFileAsync(command, args, { timeout: 180_000 })).stdout);

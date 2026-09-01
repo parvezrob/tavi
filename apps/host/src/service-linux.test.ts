@@ -29,6 +29,7 @@ test("Linux installs a systemd user unit with the host environment and enables l
   assert.equal(unit, path.join(home, ".config/systemd/user/tavi-host.service"));
   const contents = readFileSync(unit, "utf8");
   assert.match(contents, /ExecStart=".*" "\/opt\/tavi\/dist\/index\.js"/);
+  assert.match(contents, /^WorkingDirectory=\/opt\/tavi$/m);
   assert.match(contents, /Environment="TAVI_STATE_DIR=.*\.tavi"/);
   assert.match(contents, /Environment="LANG=.*UTF-8"/i);
   assert.doesNotMatch(contents, /TAVI_TOKEN/);

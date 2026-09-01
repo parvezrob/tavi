@@ -9,6 +9,9 @@ import type { ServiceOptions } from "./service.js";
 // root, runs as the person who paired, and reads the same state directory.
 // `loginctl enable-linger` keeps it alive after logout and across reboots;
 // it is best-effort because some distros gate it behind polkit.
+// systemd quoting: ExecStart and Environment take quoted words; path
+// settings such as WorkingDirectory do not (a quoted one is "a bad unit
+// file setting" — the first ubuntu run, 2026-09-01).
 export const LINUX_UNIT = "tavi-host.service";
 
 type Execute = (command: string, args: string[]) => Promise<void>;
@@ -66,7 +69,7 @@ After=network-online.target
 [Service]
 Type=simple
 ExecStart=${quote(process.execPath)} ${quote(input.entrypoint)}
-WorkingDirectory=${quote(input.packageRoot)}
+WorkingDirectory=${input.packageRoot}
 Restart=always
 RestartSec=2
 StandardOutput=append:${input.logFile}

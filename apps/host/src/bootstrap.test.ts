@@ -23,6 +23,7 @@ interface World {
   /** Answers to questions, in order; missing answers are "no". */
   answers?: boolean[];
   os?: NodeJS.Platform;
+  serviceFails?: string;
   backendState: string;
   serveProxies: string[];
   serviceLoaded: boolean;
@@ -91,7 +92,12 @@ function createDeps(world: World) {
     healthy: async () => world.healthy,
     installService: async () => {
       commands.push("install-service");
+      if (world.serviceFails) throw new Error(world.serviceFails);
       world.serviceLoaded = true;
+      world.healthy = true;
+    },
+    startForSession: async () => {
+      commands.push("start-for-session");
       world.healthy = true;
     },
     operatingSystem: world.os ?? "darwin",
@@ -152,9 +158,9 @@ test("pair asks before each fix and does them: Serve, then the login service, th
 
   assert.ok(commands.includes("tailscale serve --bg 8787"), commands.join("\n"));
   assert.equal(questions.length, 1);
-  assert.match(questions[0] ?? "", /Run it at login \(launchd\)/);
+  assert.match(questions[0] ?? "", /Run it whenever you log in/);
   assert.ok(commands.includes("install-service"));
-  assert.ok(reports.some((line) => /background service/.test(line)));
+  assert.ok(reports.some((line) => /run in the background/.test(line)));
   assert.deepEqual(world.serveProxies, ["http://127.0.0.1:8787"]);
 });
 
@@ -214,13 +220,27 @@ test("Serve refused for HTTPS certificates: explains the one-time admin setting 
   assert.deepEqual(world.serveProxies, ["http://127.0.0.1:8787"]);
 });
 
-test("pair bootstrap fails honestly when the installed service never answers", async () => {
+test("when the service cannot start, Tavi runs for the session, says so in plain words, and pairing continues", async () => {
+  const world: World = { ...READY, serviceLoaded: false, healthy: false, answers: [true], serviceFails: "`systemctl --user restart tavi-host.service` failed: bad unit file setting" };
+  const { deps, commands, reports } = createDeps(world);
+
+  await bootstrap(config, deps);
+
+  assert.ok(commands.includes("start-for-session"), commands.join("\n"));
+  const explanation = reports.find((line) => /didn't start on this computer/.test(line)) ?? "";
+  assert.match(explanation, /run Tavi for this session/);
+  assert.match(explanation, /host\.log/);
+  assert.doesNotMatch(explanation, /systemctl/);
+});
+
+test("pair bootstrap fails honestly when nothing can start the host", async () => {
   const world: World = { ...READY, serviceLoaded: false, healthy: false, answers: [true] };
   const { deps } = createDeps(world);
   deps.installService = async () => {
     world.serviceLoaded = true; // installed, but stays unhealthy
   };
-  await assert.rejects(() => bootstrap(config, deps), /not answering on port 8787 after 15s/);
+  deps.startForSession = async () => {};
+  await assert.rejects(() => bootstrap(config, deps), /could not start on this computer on port 8787 after 15s/);
 });
 
 test("herdr is offered: installed on yes, skipped with a note on no", async () => {
