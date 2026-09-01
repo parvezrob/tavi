@@ -157,13 +157,19 @@ Removed (#53, 2026-08-31). Herdr is the only backend; there is no separate multi
 - Confirm file upload, session destruction, and other high-impact actions.
 - Provide a “lock now” action that removes decrypted in-memory credentials and disconnects.
 
+### 7.10 Files: changed, mentioned, browse (#25, #57, #61 — shipped 2026-09-02)
+
+- One **Files** sheet per agent (terminal toolbar; long-press a home row → "What it changed"), three lists: **Changed** (the default from the home — `git status` of the repository containing the agent's cwd, with `+n −n`, state word, one unified diff per file on tap), **Mentioned** (the default from the terminal — path-like tokens the agent printed, scanned on the phone from the terminal's own transcript, offered only when the host confirms they exist; anything outside the roots or a secret is listed as refused, never hidden), **Browse** (the fallback — one folder at a time from the agent's cwd, gitignored entries dimmed and last, never hidden).
+- One read-only viewer: Markdown rendered as blocks, code monospaced with line numbers and scrolled to the `:line` the agent printed, images, PDFs, diffs with additions/deletions coloured (the theme's one muted red exists for this alone). Truncation ("first 1 MB of 3 MB") and refusals ("binary, 2.3 MB"; "looks like credentials") are said in words. Share hands the text off. No edit, rename, or delete anywhere — the host has no route for them.
+- Host contract: `protocol/README.md` → `/api/changes`, `/api/changes/file`, `/api/files`, `/api/files/stat`, `/api/files/content`, `/api/files/raw`. Every path is joined to the agent's cwd, **realpath'd, then** checked against the configured roots (themselves realpath'd) — a symlink out of a root is refused after realpath. Secrets are refused by name (`.env*`, keys, `credentials`/`secret`, `.npmrc`…) in previews and diffs. Three fixed git reads, no mutating operation on the path.
+
 ## 8. V1.1 candidate scope
 
 - Push notifications from explicit Herdr/provider events.
 - Live Activities / Dynamic Island for active or waiting sessions.
-- Diff and changed-file viewer.
+- ~~Diff and changed-file viewer.~~ Shipped as §7.10 (read-only).
 - Photo/file upload to the active working directory with preview and confirmation.
-- File tree plus code/Markdown/image/PDF preview.
+- ~~File tree plus code/Markdown/image/PDF preview.~~ Shipped as §7.10 (browse is the fallback behind changed/mentioned; no editor).
 - Private localhost/dev-server preview.
 - Saved quick prompts and commands.
 - On-device dictation to the composer.

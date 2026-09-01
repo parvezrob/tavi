@@ -251,6 +251,9 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
     private static let logger = Logger(subsystem: "com.farfield.tavi", category: "terminal.surface")
 
     var onGridSizeChange: ((TerminalGridSize) -> Void)?
+    // The same plain-text transcript VoiceOver reads, published at most
+    // every 250 ms; "Files mentioned" (#61) scans it on the phone.
+    var onTranscript: ((String) -> Void)?
     // Set by the real terminal only (#51): a pinch that settles is saved as
     // the one font size preference. The Settings preview leaves this nil,
     // which also disables its pinch entirely.
@@ -362,6 +365,7 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         self.surface = surface
         outputPump = GhosttyOutputPump(surface: surface) { [weak self] transcriptValue in
             self?.accessibilityValue = transcriptValue
+            self?.onTranscript?(transcriptValue)
         }
         ghostty_surface_set_write_callback(
             surface,

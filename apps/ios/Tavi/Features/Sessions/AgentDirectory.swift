@@ -352,6 +352,14 @@ final class AgentDirectory {
         host != nil && !credential.isEmpty
     }
 
+    // The read-only file routes for this computer (#25, #57, #61). The
+    // directory stays the owner of the credential; the client only borrows
+    // it for GETs. nil until the host is configured.
+    var filesClient: HostFilesClient? {
+        guard let host, !credential.isEmpty else { return nil }
+        return HostFilesClient(endpoint: host, credential: credential)
+    }
+
     // The folders the New Agent picker offers (#24). One call: recent
     // choices plus the browsable roots, both ordered by the host.
     func fetchProjects() async -> ProjectsFetch {

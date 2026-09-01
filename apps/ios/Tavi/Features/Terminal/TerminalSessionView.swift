@@ -12,6 +12,8 @@ private enum TerminalInputMode {
 struct TerminalSessionView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var showingJump = false
+    // Files (#25 #57 #61): what this agent changed, mentioned, or has.
+    @State private var showingFiles = false
     @State private var showingRename = false
     @State private var renameDraft = ""
     @State private var renameError: String?
@@ -94,7 +96,8 @@ struct TerminalSessionView: View {
                 isActive: scenePhase == .active,
                 onGridSizeChange: controller.terminalGridDidChange,
                 onRendererReady: controller.terminalRendererDidAttach,
-                onRendererFailure: controller.rendererDidFail
+                onRendererFailure: controller.rendererDidFail,
+                onTranscript: controller.transcriptDidChange
             )
             .background(.black)
             // Tapping the terminal is an implicit switch to live typing, so
@@ -158,6 +161,14 @@ struct TerminalSessionView: View {
                     )
                 }
             }
+            if activeAgent != nil, agentDirectory != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Files", systemImage: "doc.text.magnifyingglass") {
+                        showingFiles = true
+                    }
+                    .accessibilityIdentifier("terminal.files")
+                }
+            }
             if canJump {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Jump", systemImage: "arrow.triangle.branch") {
@@ -165,6 +176,17 @@ struct TerminalSessionView: View {
                     }
                     .accessibilityIdentifier("terminal.jump")
                 }
+            }
+        }
+        .sheet(isPresented: $showingFiles) {
+            if let agent = activeAgent {
+                FilesSheet(
+                    agent: agent,
+                    client: agentDirectory?.filesClient,
+                    computerName: computerName,
+                    transcript: controller.latestTranscript,
+                    initialTab: .mentioned
+                )
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {

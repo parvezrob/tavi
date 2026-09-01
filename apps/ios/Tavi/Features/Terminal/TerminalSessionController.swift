@@ -14,6 +14,10 @@ final class TerminalSessionController {
     @ObservationIgnored private(set) var firstPaintMilliseconds: Double?
     @ObservationIgnored private(set) var inputToOutputMilliseconds: Double?
     private(set) var latestGridSize: TerminalGridSize?
+    // What is on and recently above the screen, as plain text — the
+    // renderer's accessibility transcript. Read by "Files mentioned" (#61)
+    // when the sheet opens; nothing is derived from it eagerly.
+    private(set) var latestTranscript = ""
 
     let bridge = TerminalIOBridge()
 
@@ -168,6 +172,10 @@ final class TerminalSessionController {
         guard !text.isEmpty else { return }
         paste(text)
         deliverTerminalInput(Data("\r".utf8), canCoalesce: false)
+    }
+
+    func transcriptDidChange(_ value: String) {
+        latestTranscript = value
     }
 
     func terminalGridDidChange(_ grid: TerminalGridSize) {

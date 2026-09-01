@@ -222,6 +222,8 @@ struct ProjectCard: View {
     let preview: (AgentSummary) -> String?
     let observedAt: (AgentSummary) -> Date?
     let onOpen: (AgentSummary) -> Void
+    // Long-press: what this agent changed (#25), without opening its terminal.
+    var onShowFiles: ((AgentSummary) -> Void)? = nil
 
     private var agents: [AgentSummary] { project.active + project.recent }
 
@@ -232,6 +234,11 @@ struct ProjectCard: View {
             ForEach(agents, id: \.cardIdentity) { agent in
                 ProjectAgentRow(agent: agent, preview: preview(agent), observedAt: observedAt(agent)) {
                     onOpen(agent)
+                }
+                .contextMenu {
+                    if let onShowFiles {
+                        Button("What it changed", systemImage: "doc.text.magnifyingglass") { onShowFiles(agent) }
+                    }
                 }
                 if agent.cardIdentity != agents.last?.cardIdentity {
                     Divider().overlay(TaviTheme.hairline).padding(.leading, 60)

@@ -6,6 +6,7 @@ struct AgentTerminalView: UIViewRepresentable {
     let onGridSizeChange: @MainActor (TerminalGridSize) -> Void
     let onRendererReady: @MainActor () -> Void
     let onRendererFailure: @MainActor (String) -> Void
+    var onTranscript: (@MainActor (String) -> Void)? = nil
 
     func makeUIView(context: Context) -> TerminalContainerView {
         let container = TerminalContainerView()
@@ -18,6 +19,7 @@ struct AgentTerminalView: UIViewRepresentable {
                 onFailure: onRendererFailure
             )
             terminal.onGridSizeChange = onGridSizeChange
+            terminal.onTranscript = onTranscript
             terminal.recordsViewport = true
             terminal.onFontSizeCommit = { size in
                 TerminalFontPreference.save(size)

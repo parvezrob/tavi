@@ -1104,6 +1104,92 @@ final class TaviUITests: XCTestCase {
         XCTAssertTrue(resolved, "The dialog was still present after tapping the option.")
     }
 
+
+    // Files mentioned (#61): a path the agent printed is offered only when it
+    // is a real file inside the roots; a made-up one is not. Then the two
+    // other lists — Changed (#25) and Browse (#57) — render from the same
+    // sheet. Screenshots kept for the design pass.
+    @MainActor
+    func testFilesMentionedOffersOnlyRealPaths() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["TAVI_DEV_HOST"],
+              let token = environment["TAVI_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_DEV_HOST/TOKEN to run the live files test.")
+        }
+        let paneId = try await createDisposableShell(host: host, token: token)
+        let app = launchIntoAgent(paneId, host: host, token: token)
+        let surface = app.descendants(matching: .any)["terminal.surface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 20))
+        try await Task.sleep(for: .seconds(2))
+
+        // Type the echo through the terminal itself, like the streaming
+        // tests do: herdr refuses send_keys to a shell pane this young.
+        let marker = "definitely-missing-\(Int.random(in: 1000...9999)).md"
+        surface.tap()
+        surface.typeText("echo README.md docs/\(marker)\n")
+        XCTAssertTrue(
+            waitForTranscript(of: surface, timeout: 15) { $0.contains(marker) },
+            "The echoed paths never reached the terminal transcript."
+        )
+        if app.buttons["terminal.dismissKeyboard"].firstMatch.exists {
+            app.buttons["terminal.dismissKeyboard"].firstMatch.tap()
+        }
+        let files = app.buttons["terminal.files"]
+        XCTAssertTrue(files.waitForExistence(timeout: 5), "No Files button on the terminal.")
+        // What the phone actually scans: the surface's accessibility value
+        // is the same transcript. Kept as evidence when the list is empty.
+        let surfaceValue = (app.descendants(matching: .any)["terminal.surface"].value as? String) ?? ""
+        let transcriptNote = XCTAttachment(string: String(surfaceValue.suffix(1500)))
+        transcriptNote.name = "surface-transcript-tail"
+        transcriptNote.lifetime = .keepAlways
+        add(transcriptNote)
+        files.tap()
+
+        let real = app.buttons["files.mentioned.README.md"]
+        XCTAssertTrue(real.waitForExistence(timeout: 20), "README.md was echoed but not offered.")
+        XCTAssertFalse(
+            app.descendants(matching: .any).matching(NSPredicate(format: "identifier CONTAINS 'definitely-missing'")).firstMatch.exists,
+            "A made-up path was offered."
+        )
+        keepScreenshot("files-01-mentioned")
+
+        real.tap()
+        XCTAssertTrue(app.navigationBars["README.md"].waitForExistence(timeout: 10), "The viewer did not open.")
+        try await Task.sleep(for: .seconds(1))
+        keepScreenshot("files-02-markdown")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        app.buttons["Changed"].tap()
+        let changedOrEmpty = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'files.changed.' OR identifier == 'files.changes.empty' OR identifier == 'files.changes.failed'")
+        ).firstMatch
+        XCTAssertTrue(changedOrEmpty.waitForExistence(timeout: 20), "Changed never settled.")
+        keepScreenshot("files-03-changed")
+        if app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'files.changed.'")).firstMatch.exists {
+            app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'files.changed.'")).firstMatch.tap()
+            _ = app.descendants(matching: .any)["files.viewer.diff"].waitForExistence(timeout: 15)
+                || app.descendants(matching: .any)["files.viewer.message"].waitForExistence(timeout: 2)
+            try await Task.sleep(for: .seconds(1))
+            keepScreenshot("files-04-diff")
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+        }
+
+        app.buttons["Browse"].tap()
+        XCTAssertTrue(
+            app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'files.browse.'")).firstMatch.waitForExistence(timeout: 20),
+            "Browse listed nothing."
+        )
+        keepScreenshot("files-05-browse")
+    }
+
+    @MainActor
+    private func keepScreenshot(_ name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     private func waitForAgentStatus(
         host: String,
         token: String,

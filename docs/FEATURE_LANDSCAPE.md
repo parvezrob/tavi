@@ -84,11 +84,11 @@ Priority labels:
 
 | Feature | Evidence | Tavi decision | Priority |
 | --- | --- | --- | --- |
-| Diff viewer | Codex Remote, Orca, Moshi, T3-style clients. | Read-only review first; explicit handoff to terminal for commands. | Next |
+| Diff viewer | Codex Remote, Orca, Moshi, T3-style clients. | Read-only review first; explicit handoff to terminal for commands. | Shipped (#25, PRD §7.10) |
 | Changed-file/source-control actions | Orca supports stage/unstage/commit. | Add review before write actions; confirmation and repository state checks. | Later |
 | Photo/file upload | Orca, Moshi, Agentmux, Remux. | Upload to selected session cwd, preview and confirm remote path. | Next |
-| File tree and preview | Orca, Agentmux, Remux, ShadowTerm. | Read-only code/Markdown/image/PDF preview; avoid full editor initially. | Next |
-| Path and URL recognition | Remux/Agentmux turn terminal text into native actions. | Tappable links now; file-path actions with cautious parsing next. | Next |
+| File tree and preview | Orca, Agentmux, Remux, ShadowTerm. | Read-only code/Markdown/image/PDF preview; avoid full editor initially. | Shipped as changed-first + browse fallback (#57, PRD §7.10) |
+| Path and URL recognition | Remux/Agentmux turn terminal text into native actions. | Tappable links now; file-path actions with cautious parsing next. | Paths shipped as "Files mentioned" (#61, PRD §7.10); URLs still Next |
 | Local dev-server preview | Orca, Moshi, Remux. | Private forwarding through host; WebKit view; no public tunnel. | Next |
 | Full code editor | Orca/Agentmux/ShadowTerm have editor features. | Scope trap for the core product; add only if user data shows repeated laptop fallback for tiny edits. | Avoid for early releases |
 

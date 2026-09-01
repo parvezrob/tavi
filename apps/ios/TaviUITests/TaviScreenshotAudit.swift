@@ -153,6 +153,41 @@ final class TaviScreenshotAudit: XCTestCase {
         }
     }
 
+    // Changed files and one diff (#25) against a repository with real
+    // uncommitted work: TEST_RUNNER_TAVI_AUDIT_CWD names it (default: the
+    // Tavi checkout). Skips like the audit above.
+    @MainActor
+    func testCaptureChangedFilesAndDiff() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["TAVI_AUDIT"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_AUDIT=1 to capture the design-audit screens.")
+        }
+        guard let host = environment["TAVI_DEV_HOST"],
+              let token = environment["TAVI_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_DEV_HOST/TOKEN to run the audit against a live host.")
+        }
+        let cwd = environment["TAVI_AUDIT_CWD"] ?? "\(NSHomeDirectory())/Projects/tavi"
+        let shell = try await createAgentTab(host: host, token: token, cwd: cwd, agent: "shell")
+        let app = XCUIApplication()
+        app.launchEnvironment["TAVI_DEV_RESET"] = "1"
+        app.launchEnvironment["TAVI_DEV_HOST"] = host
+        app.launchEnvironment["TAVI_DEV_TOKEN"] = token
+        app.launchEnvironment["TAVI_DEV_AGENT"] = shell.paneId
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["terminal.surface"].waitForExistence(timeout: 20))
+        sleep(2)
+        app.buttons["terminal.files"].tap()
+        app.buttons["Changed"].tap()
+        let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'files.changed.'")).firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 20), "No changed files in \(cwd).")
+        sleep(1)
+        keep("audit-11-files-changed")
+        first.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["files.viewer.diff"].waitForExistence(timeout: 15))
+        sleep(1)
+        keep("audit-12-files-diff")
+    }
+
     // MARK: - Helpers (self-contained; the main suite's are private)
 
     @MainActor

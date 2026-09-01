@@ -37,6 +37,8 @@ struct SessionsView: View {
     @State private var chipSheet: HostFleet.Entry?
     // Stacks of indistinguishable waiting agents the user opened in place.
     @State private var expandedWaitingStacks: Set<String> = []
+    // Files for one agent from the home (#25): a long-press on its row.
+    @State private var filesAgent: AgentSummary?
 
     var body: some View {
         NavigationStack {
@@ -155,6 +157,15 @@ struct SessionsView: View {
             .onChange(of: fleet.hosts.map(\.id)) { _, ids in
                 if let selectedHostId, !ids.contains(selectedHostId) { self.selectedHostId = nil }
                 if let chipSheet, !ids.contains(chipSheet.id) { self.chipSheet = nil }
+            }
+            .sheet(item: $filesAgent) { agent in
+                FilesSheet(
+                    agent: agent,
+                    client: fleet.directory(for: agent.hostId)?.filesClient,
+                    computerName: computerLabel(for: agent.hostId),
+                    transcript: nil,
+                    initialTab: .changed
+                )
             }
             .sheet(item: $decisionAgent) { target in
                 // The decision goes to the computer the agent lives on; the
@@ -340,7 +351,8 @@ struct SessionsView: View {
                             computerName: severalShown ? item.computer.name : nil,
                             preview: { fleet.directory(for: $0.hostId)?.previews[$0.id] },
                             observedAt: { fleet.directory(for: $0.hostId)?.statusObservedAt[$0.id] },
-                            onOpen: { openAgent($0) }
+                            onOpen: { openAgent($0) },
+                            onShowFiles: { filesAgent = $0 }
                         )
                     }
                 }

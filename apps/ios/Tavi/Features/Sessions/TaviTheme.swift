@@ -32,6 +32,9 @@ enum TaviTheme {
     static let statusWorking = Color(red: 0.553, green: 0.624, blue: 0.722)
     static let statusDone = Color(red: 0.549, green: 0.686, blue: 0.545)
     static let statusIdle = Color(white: 0.46)
+    // Deletions in a diff, and nothing else: a diff without red is not a
+    // diff anyone can read. Muted to sit beside statusDone, never a button.
+    static let diffRemoved = Color(red: 0.788, green: 0.463, blue: 0.443)
 
     // Two radii: surfaces and controls. Anything else is drift.
     static let cardRadius: CGFloat = 14
