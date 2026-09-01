@@ -7,7 +7,6 @@ import { resolvePublicUrl, runPairCommand } from "./pair-command.js";
 import { loadConfig, VERSION } from "./config.js";
 import { HerdrService } from "./herdr.js";
 import { HerdrEventFeed } from "./herdr-events.js";
-import { createTaviServer } from "./server.js";
 import { installService, uninstallService } from "./service.js";
 
 const SHUTDOWN_DEADLINE_MS = 2_000;
@@ -146,6 +145,10 @@ const reconciler = new AttentionReconciler({
   },
 });
 reconciler.start();
+// server.js pulls in node-pty's native module; loading it lazily keeps
+// `doctor`/`pair` working (and able to explain the failure) on a machine
+// where that module did not build.
+const { createTaviServer } = await import("./server.js");
 const server = await createTaviServer({ config, herdr, agentEvents, attention });
 server.on("close", () => reconciler.stop());
 server.listen(config.port, config.bindHost, () => {

@@ -19,6 +19,7 @@ const config: HostConfig = {
 
 interface World {
   tools: Record<string, string | undefined>;
+  ptyError?: string;
   backendState: string;
   serveProxies: string[];
   serviceLoaded: boolean;
@@ -51,6 +52,9 @@ function createDeps(world: World) {
       }
       throw new Error(`unexpected command ${command} ${args.join(" ")}`);
     },
+    loadPty: async () => {
+      if (world.ptyError) throw new Error(world.ptyError);
+    },
     which: async (tool) => world.tools[tool],
     healthy: async () => world.healthy,
     installService: async () => {
@@ -81,6 +85,7 @@ test("doctor reports every check green on a configured machine", async () => {
   const { deps } = createDeps({ ...READY, serveProxies: [...READY.serveProxies] });
   const checks = await diagnose(config, deps);
   assert.deepEqual(checks.map((check) => [check.name, check.ok]), [
+    ["Terminal (pty)", true],
     ["Tailscale", true],
     ["Tailscale Serve", true],
     ["Tavi host", true],
@@ -93,7 +98,7 @@ test("doctor reports every check green on a configured machine", async () => {
 test("doctor says exactly what to install when Tailscale is missing, and marks herdr optional", async () => {
   const { deps } = createDeps({ ...READY, tools: {}, serveProxies: [] });
   const checks = await diagnose(config, deps);
-  const [tailscale, serve, , herdr] = checks;
+  const [, tailscale, serve, , herdr] = checks;
   assert.equal(tailscale?.ok, false);
   assert.match(tailscale?.fix ?? "", /tailscale.com\/download/);
   assert.equal(serve?.ok, false);
@@ -113,6 +118,17 @@ test("pair bootstrap configures Serve and installs the service, then waits for h
   assert.ok(reports.some((line) => /Tailscale Serve/.test(line)));
   assert.ok(reports.some((line) => /login service/.test(line)));
   assert.deepEqual(world.serveProxies, ["http://127.0.0.1:8787"]);
+});
+
+test("a missing pty module on Linux names the toolchain to install and how to reinstall", async () => {
+  const { deps, commands } = createDeps({ ...READY, ptyError: "Failed to load native module: pty.node, checked: build/Release" });
+  deps.operatingSystem = "linux";
+  const checks = await diagnose(config, deps);
+  assert.equal(checks[0]?.ok, false);
+  assert.match(checks[0]?.fix ?? "", /dnf install -y gcc-c\+\+/);
+  assert.match(checks[0]?.fix ?? "", /rm -rf ~\/.npm\/_npx/);
+  await assert.rejects(() => bootstrap(config, deps), /gcc-c\+\+/);
+  assert.ok(!commands.includes("install-service"));
 });
 
 test("pair bootstrap stops with the sign-in instruction when Tailscale is stopped", async () => {

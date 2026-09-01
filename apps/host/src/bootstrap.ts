@@ -30,6 +30,8 @@ export interface Check {
 
 export interface BootstrapDeps {
   execute: (command: string, args: string[]) => Promise<string>;
+  /** Loads the pty native module; rejects with the loader's message when it is missing. */
+  loadPty: () => Promise<void>;
   which: (command: string) => Promise<string | undefined>;
   healthy: (port: number) => Promise<boolean>;
   installService: () => Promise<void>;
@@ -45,6 +47,9 @@ export function defaultDeps(config: HostConfig): BootstrapDeps {
     execute: async (command, args) => {
       const { stdout } = await execFileAsync(command, args, { timeout: 20_000 });
       return stdout;
+    },
+    loadPty: async () => {
+      await import("node-pty");
     },
     which: async (command) => {
       try {
@@ -77,6 +82,7 @@ export function defaultDeps(config: HostConfig): BootstrapDeps {
 export async function diagnose(config: HostConfig, deps: BootstrapDeps): Promise<Check[]> {
   const tailscale = await checkTailscale(deps);
   return [
+    await checkPty(deps),
     tailscale.check,
     await checkServe(config, deps, tailscale.cli),
     await checkService(config, deps),
@@ -91,6 +97,8 @@ export async function diagnose(config: HostConfig, deps: BootstrapDeps): Promise
  * needs a person — installing Tailscale, signing in.
  */
 export async function bootstrap(config: HostConfig, deps: BootstrapDeps): Promise<void> {
+  const pty = await checkPty(deps);
+  if (!pty.ok) throw new BootstrapError([pty]);
   const tailscale = await checkTailscale(deps);
   if (!tailscale.check.ok) throw new BootstrapError([tailscale.check]);
   const cli = tailscale.cli as string;
@@ -156,6 +164,31 @@ export function formatChecks(checks: Check[]): string {
       return `  ${mark} ${check.name.padEnd(16)} ${check.detail}${fix}`;
     })
     .join("\n");
+}
+
+// node-pty ships prebuilt binaries for macOS and Windows only; on Linux npm
+// compiles it at install time, which silently fails without a C++ toolchain
+// and only surfaces when the host first spawns a terminal.
+async function checkPty(deps: BootstrapDeps): Promise<Check> {
+  const name = "Terminal (pty)";
+  try {
+    await deps.loadPty();
+    return { name, ok: true, detail: "native module loads" };
+  } catch (error) {
+    const linux = deps.operatingSystem === "linux";
+    return {
+      name,
+      ok: false,
+      detail: `node-pty's native module is missing (${firstLine(describe(error))}).`,
+      fix: linux
+        ? "Install a C++ toolchain — Fedora: sudo dnf install -y gcc-c++ make python3 · Debian/Ubuntu: sudo apt install -y build-essential python3 — then reinstall: rm -rf ~/.npm/_npx && npx tavi-host doctor"
+        : "Reinstall the package: rm -rf ~/.npm/_npx && npx tavi-host doctor (or `npm rebuild node-pty` in a checkout).",
+    };
+  }
+}
+
+function firstLine(text: string): string {
+  return text.split("\n")[0]?.trim() ?? text;
 }
 
 async function checkTailscale(deps: BootstrapDeps): Promise<{ check: Check; cli?: string }> {
