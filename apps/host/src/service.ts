@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { HostConfig } from "./config.js";
+import { installSystemdService, uninstallSystemdService } from "./service-linux.js";
 
 const execFileAsync = promisify(execFile);
 export const SERVICE_LABEL = "com.farfield.tavi.host";
@@ -45,6 +46,7 @@ const BOOTSTRAP_ATTEMPTS = 5;
 const TRANSIENT_BOOTSTRAP_ERROR = /Input\/output error|Operation now in progress|already in progress/i;
 
 export async function installService(config: HostConfig, options: ServiceOptions = {}): Promise<string> {
+  if ((options.operatingSystem ?? platform()) === "linux") return installSystemdService(config, options);
   const runtime = createRuntime(options);
   const entrypoint = path.join(runtime.packageRoot, "dist", "index.js");
   const logFile = path.join(config.stateDir, "host.log");
@@ -87,6 +89,7 @@ export async function installService(config: HostConfig, options: ServiceOptions
 }
 
 export async function uninstallService(options: ServiceOptions = {}): Promise<string[]> {
+  if ((options.operatingSystem ?? platform()) === "linux") return uninstallSystemdService(options);
   const runtime = createRuntime(options);
   await bootout(runtime, LABEL);
   await bootout(runtime, LEGACY_LABEL);
@@ -98,7 +101,7 @@ export async function uninstallService(options: ServiceOptions = {}): Promise<st
 function createRuntime(options: ServiceOptions): ServiceRuntime {
   const operatingSystem = options.operatingSystem ?? platform();
   if (operatingSystem !== "darwin") {
-    throw new Error("Automatic service installation currently supports macOS only.");
+    throw new Error("Automatic service installation supports macOS (launchd) and Linux (systemd --user).");
   }
 
   const homeDirectory = options.homeDirectory ?? homedir();

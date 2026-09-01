@@ -15,7 +15,7 @@ import {
 import { homedir, hostname, platform } from "node:os";
 import path from "node:path";
 
-export const VERSION = "0.1.2";
+export const VERSION = "0.1.3";
 
 const CONFIG_FILE_NAME = "config.json";
 const DEFAULT_STATE_DIRECTORY = ".tavi";

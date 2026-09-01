@@ -25,19 +25,19 @@ Native iPhone app
 
 ## Quick start on macOS
 
-You need [Tailscale](https://tailscale.com/download) signed in on both the Mac and the phone, Node.js 20+ on the Mac, and the Tavi app on the phone. Then, on the Mac:
+You need Node.js 20+ on the computer (macOS or Linux), Tailscale signed in on the phone, and the Tavi app on the phone. Then, on the computer:
 
 ```bash
 npx tavi-host pair
 ```
 
-That one command installs the host as a login service, exposes it as a private HTTPS address on your tailnet (`tailscale serve`), checks for [herdr](https://herdr.dev) and tmux, and prints a QR code. In Tavi on the phone, tap **Scan pairing code**, confirm the fingerprint matches what the terminal shows, and you are in. If anything is missing the command says exactly what to install and why, and `npx tavi-host doctor` re-checks every prerequisite without changing anything.
+That one command checks what the computer needs and asks before fixing each thing — *Tailscale isn't installed. Install it now? (Y/n)* — installs Tailscale and opens its sign-in link if needed, gives the host a private HTTPS address on your tailnet, runs the host in the background at login (launchd on macOS, systemd on Linux), offers [herdr](https://herdr.dev) and tmux, and then prints a QR code. In Tavi on the phone, tap **Scan pairing code**, confirm the fingerprint matches what the terminal shows, and you are in. `npx tavi-host doctor` shows every check without changing anything; `npx tavi-host pair --yes` answers yes to everything for scripts.
 
 herdr is optional but is what makes the agent cards work: without it Tavi is a plain remote terminal. Enable HTTPS certificates for your tailnet once (Tailscale admin → DNS → HTTPS Certificates) if `tailscale serve` refuses.
 
 Afterwards the `tavi` command manages the host: `npx tavi-host devices` lists paired phones, `devices revoke <id>` cuts one off, `uninstall-service` removes the login service, `install-claude-hooks` lets Claude Code report permission waits to the phone. To update, run `npx tavi-host@latest pair` again. (`npx` runs from a temporary cache, so the first pair installs a permanent copy under `~/.tavi/runtime` and the service runs from there; `npm i -g tavi-host` gives you a plain `tavi` command instead.)
 
-The login service is macOS-only for now; on Linux run `npx tavi-host` in a terminal and keep it open (#48 adds a systemd unit), and let your user manage Tailscale once with `sudo tailscale set --operator=$USER` (the command tells you if this is needed). No compiler is needed on Linux x64/arm64; if the terminal module ever fails to load, `npx tavi-host doctor` says exactly what to do.
+On Linux the host runs as a systemd user service (`~/.config/systemd/user/tavi-host.service`) and the command asks for your password once if Tailscale needs your user made an operator. No compiler is needed on Linux x64/arm64; if the terminal module ever fails to load, `npx tavi-host doctor` says exactly what to do.
 
 ## Development
 

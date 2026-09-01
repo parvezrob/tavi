@@ -20,18 +20,46 @@ const config: HostConfig = {
 interface World {
   tools: Record<string, string | undefined>;
   ptyError?: string;
+  /** Answers to questions, in order; missing answers are "no". */
+  answers?: boolean[];
+  os?: NodeJS.Platform;
   backendState: string;
   serveProxies: string[];
   serviceLoaded: boolean;
   healthy: boolean;
-  serveFails?: string;
+  serveFails?: string | undefined;
 }
 
 function createDeps(world: World) {
   const commands: string[] = [];
+  const ran: string[] = [];
+  const questions: string[] = [];
   const reports: string[] = [];
+  const answers = [...(world.answers ?? [])];
   let clock = 0;
   const deps: BootstrapDeps = {
+    run: async (command, args) => {
+      const line = [command, ...args].join(" ");
+      ran.push(line);
+      // Simulate what each fix does to the world.
+      if (/tailscale\.com\/install|brew install --cask tailscale/.test(line)) {
+        world.tools.tailscale = "/usr/bin/tailscale";
+        world.backendState = "NeedsLogin";
+      } else if (/tailscale up$/.test(line)) {
+        world.backendState = "Running";
+      } else if (/--operator=/.test(line)) {
+        world.serveFails = undefined;
+      } else if (/herdr/.test(line)) {
+        world.tools.herdr = "/usr/local/bin/herdr";
+      } else if (/tmux/.test(line)) {
+        world.tools.tmux = "/usr/bin/tmux";
+      }
+    },
+    ask: async (question) => {
+      questions.push(question);
+      return answers.shift() ?? false;
+    },
+    env: { USER: "robin" },
     execute: async (command, args) => {
       commands.push([path.basename(command), ...args].join(" "));
       if (args[0] === "status" && args[1] === "--json") {
@@ -50,6 +78,10 @@ function createDeps(world: World) {
         if (world.serviceLoaded) return "state = running";
         throw new Error("Could not find service");
       }
+      if (command === "systemctl") {
+        if (world.serviceLoaded) return "active\n";
+        throw new Error("inactive");
+      }
       throw new Error(`unexpected command ${command} ${args.join(" ")}`);
     },
     loadPty: async () => {
@@ -62,7 +94,7 @@ function createDeps(world: World) {
       world.serviceLoaded = true;
       world.healthy = true;
     },
-    operatingSystem: "darwin",
+    operatingSystem: world.os ?? "darwin",
     userId: 501,
     report: (message) => reports.push(message),
     sleep: async (ms) => {
@@ -70,7 +102,7 @@ function createDeps(world: World) {
     },
     now: () => clock,
   };
-  return { deps, commands, reports };
+  return { deps, commands, ran, questions, reports };
 }
 
 const READY: World = {
@@ -95,6 +127,12 @@ test("doctor reports every check green on a configured machine", async () => {
   assert.match(formatChecks(checks), /✓ Tailscale {8}connected as studio.tail1234.ts.net/);
 });
 
+test("doctor on Linux reads the systemd unit state", async () => {
+  const { deps } = createDeps({ ...READY, os: "linux", serveProxies: [...READY.serveProxies] });
+  const checks = await diagnose(config, deps);
+  assert.match(checks[3]?.detail ?? "", /running as tavi-host.service/);
+});
+
 test("doctor says exactly what to install when Tailscale is missing, and marks herdr optional", async () => {
   const { deps } = createDeps({ ...READY, tools: {}, serveProxies: [] });
   const checks = await diagnose(config, deps);
@@ -107,53 +145,78 @@ test("doctor says exactly what to install when Tailscale is missing, and marks h
   assert.match(formatChecks(checks), /– herdr/);
 });
 
-test("pair bootstrap configures Serve and installs the service, then waits for health", async () => {
-  const world: World = { ...READY, serveProxies: [], serviceLoaded: false, healthy: false };
-  const { deps, commands, reports } = createDeps(world);
+test("pair asks before each fix and does them: Serve, then the login service, then waits for health", async () => {
+  const world: World = { ...READY, serveProxies: [], serviceLoaded: false, healthy: false, answers: [true] };
+  const { deps, commands, questions, reports } = createDeps(world);
 
   await bootstrap(config, deps);
 
   assert.ok(commands.includes("tailscale serve --bg 8787"), commands.join("\n"));
+  assert.equal(questions.length, 1);
+  assert.match(questions[0] ?? "", /Run it at login \(launchd\)/);
   assert.ok(commands.includes("install-service"));
-  assert.ok(reports.some((line) => /Tailscale Serve/.test(line)));
-  assert.ok(reports.some((line) => /login service/.test(line)));
+  assert.ok(reports.some((line) => /background service/.test(line)));
   assert.deepEqual(world.serveProxies, ["http://127.0.0.1:8787"]);
 });
 
-test("a missing pty module on Linux names the toolchain to install and how to reinstall", async () => {
-  const { deps, commands } = createDeps({ ...READY, ptyError: "Failed to load native module: pty.node, checked: build/Release" });
-  deps.operatingSystem = "linux";
-  const checks = await diagnose(config, deps);
-  assert.equal(checks[0]?.ok, false);
-  assert.match(checks[0]?.fix ?? "", /dnf install -y gcc-c\+\+/);
-  assert.match(checks[0]?.fix ?? "", /rm -rf ~\/.npm\/_npx/);
-  await assert.rejects(() => bootstrap(config, deps), /gcc-c\+\+/);
+test("declining the service install ends with the doctor instructions instead of a half-set-up machine", async () => {
+  const { deps, commands } = createDeps({ ...READY, serviceLoaded: false, healthy: false, answers: [false] });
+  await assert.rejects(() => bootstrap(config, deps), /tavi install-service/);
   assert.ok(!commands.includes("install-service"));
 });
 
-test("pair bootstrap stops with the sign-in instruction when Tailscale is stopped", async () => {
-  const { deps, commands } = createDeps({ ...READY, backendState: "Stopped" });
-  await assert.rejects(() => bootstrap(config, deps), (error: unknown) => {
-    assert.ok(error instanceof BootstrapError);
-    assert.match(error.message, /Run: tailscale up/);
+test("Tailscale missing on Linux: offers the install, then the sign-in, then continues to pairing", async () => {
+  const world: World = { ...READY, os: "linux", tools: { herdr: "/usr/local/bin/herdr", tmux: "/usr/bin/tmux" }, answers: [true, true] };
+  const { deps, ran, questions } = createDeps(world);
+
+  await bootstrap(config, deps);
+
+  assert.match(questions[0] ?? "", /Tailscale isn't installed.*Install it now\?/);
+  assert.match(questions[1] ?? "", /not running\. Start it and sign in now\?/);
+  assert.equal(ran[0], "sh -c curl -fsSL https://tailscale.com/install.sh | sh");
+  assert.ok(ran.includes("/usr/bin/tailscale up"), ran.join("\n"));
+  assert.equal(world.backendState, "Running");
+});
+
+test("Tailscale missing and the person says no: stops with the download link", async () => {
+  const { deps, ran } = createDeps({ ...READY, tools: {}, answers: [false] });
+  await assert.rejects(() => bootstrap(config, deps), /tailscale.com\/download/);
+  assert.deepEqual(ran, []);
+});
+
+test("Tailscale stopped on the Mac: one question, then `tailscale up`", async () => {
+  const world: World = { ...READY, backendState: "Stopped", answers: [true] };
+  const { deps, ran } = createDeps(world);
+  await bootstrap(config, deps);
+  assert.ok(ran.includes("/opt/homebrew/bin/tailscale up"));
+});
+
+test("Serve denied on Linux: asks to make the user an operator, runs the sudo command, then Serve succeeds", async () => {
+  const world: World = { ...READY, os: "linux", serveProxies: [], serveFails: "sending serve config: Access denied: serve config denied", answers: [true] };
+  const { deps, ran, questions } = createDeps(world);
+
+  await bootstrap(config, deps);
+
+  assert.match(questions[0] ?? "", /Allow your user to manage Tailscale/);
+  assert.ok(ran.includes("sudo /opt/homebrew/bin/tailscale set --operator=robin"), ran.join("\n"));
+  assert.deepEqual(world.serveProxies, ["http://127.0.0.1:8787"]);
+});
+
+test("Serve refused for HTTPS certificates: explains the one-time admin setting and retries on yes", async () => {
+  const world: World = { ...READY, serveProxies: [], serveFails: "error: HTTPS is not enabled for this tailnet", answers: [true] };
+  const { deps, reports } = createDeps(world);
+  // The person enables it in the browser before answering.
+  deps.ask = async () => {
+    world.serveFails = undefined;
     return true;
-  });
-  assert.ok(!commands.includes("install-service"));
-});
-
-test("pair bootstrap explains the HTTPS-certificate prerequisite when Serve refuses", async () => {
-  const { deps } = createDeps({ ...READY, serveProxies: [], serveFails: "error: HTTPS is not enabled for this tailnet" });
-  await assert.rejects(() => bootstrap(config, deps), /HTTPS Certificates.*tailscale serve --bg 8787/s);
-});
-
-test("pair bootstrap passes on Tailscale's operator requirement on Linux instead of guessing", async () => {
-  const { deps } = createDeps({ ...READY, serveProxies: [], serveFails: "sending serve config: Access denied: serve config denied\n\nUse 'sudo tailscale serve --bg 8787'." });
-  deps.operatingSystem = "linux";
-  await assert.rejects(() => bootstrap(config, deps), /sudo tailscale set --operator=\$USER/);
+  };
+  await bootstrap(config, deps);
+  assert.ok(reports.some((line) => /admin\/dns/.test(line)));
+  assert.deepEqual(world.serveProxies, ["http://127.0.0.1:8787"]);
 });
 
 test("pair bootstrap fails honestly when the installed service never answers", async () => {
-  const world: World = { ...READY, serviceLoaded: false, healthy: false };
+  const world: World = { ...READY, serviceLoaded: false, healthy: false, answers: [true] };
   const { deps } = createDeps(world);
   deps.installService = async () => {
     world.serviceLoaded = true; // installed, but stays unhealthy
@@ -161,11 +224,20 @@ test("pair bootstrap fails honestly when the installed service never answers", a
   await assert.rejects(() => bootstrap(config, deps), /not answering on port 8787 after 15s/);
 });
 
-test("optional tools only produce a note, never a failure", async () => {
-  const { deps, reports } = createDeps({ ...READY, tools: { tailscale: "/usr/bin/tailscale" } });
+test("herdr and tmux are offered, installed on yes, skipped with a note on no", async () => {
+  const world: World = { ...READY, tools: { tailscale: "/usr/bin/tailscale" }, answers: [true, false] };
+  const { deps, ran, reports } = createDeps(world);
   await bootstrap(config, deps);
-  assert.ok(reports.some((line) => /herdr not found/.test(line)));
-  assert.ok(reports.some((line) => /tmux not found/.test(line)));
+  assert.ok(ran.includes("brew install herdr"), ran.join("\n"));
+  assert.ok(!ran.some((line) => /tmux/.test(line)));
+  assert.ok(reports.some((line) => /Skipping tmux/.test(line)));
+});
+
+test("non-interactive runs never change anything they were not told to", async () => {
+  const { deps, ran, commands } = createDeps({ ...READY, tools: {}, answers: [] });
+  await assert.rejects(() => bootstrap(config, deps), BootstrapError);
+  assert.deepEqual(ran, []);
+  assert.ok(!commands.includes("install-service"));
 });
 
 test("a checkout or global install is used in place; the npx cache gets a durable copy", async (context) => {

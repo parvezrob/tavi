@@ -1,11 +1,13 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { userInfo } from "node:os";
+import { createInterface } from "node:readline/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { HostConfig } from "./config.js";
 import { installService, SERVICE_LABEL } from "./service.js";
+import { LINUX_UNIT } from "./service-linux.js";
 
 // `tavi pair` on a fresh Mac (#47): everything a tester would otherwise do by
 // hand — install the service, expose it through Tailscale Serve, notice a
@@ -29,7 +31,13 @@ export interface Check {
 }
 
 export interface BootstrapDeps {
+  /** Runs a command quietly and returns its stdout (status checks). */
   execute: (command: string, args: string[]) => Promise<string>;
+  /** Runs a command on the person's terminal (installs, sign-in links, sudo prompts). */
+  run: (command: string, args: string[]) => Promise<void>;
+  /** Yes/no question; the default answer is yes. Non-interactive runs answer with `assumeYes`. */
+  ask: (question: string) => Promise<boolean>;
+  env: NodeJS.ProcessEnv;
   /** Loads the pty native module; rejects with the loader's message when it is missing. */
   loadPty: () => Promise<void>;
   which: (command: string) => Promise<string | undefined>;
@@ -42,12 +50,31 @@ export interface BootstrapDeps {
   now: () => number;
 }
 
-export function defaultDeps(config: HostConfig): BootstrapDeps {
+export function defaultDeps(config: HostConfig, options: { assumeYes?: boolean } = {}): BootstrapDeps {
+  const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
   return {
     execute: async (command, args) => {
       const { stdout } = await execFileAsync(command, args, { timeout: 20_000 });
       return stdout;
     },
+    run: (command, args) =>
+      new Promise((resolve, reject) => {
+        const child = spawn(command, args, { stdio: "inherit" });
+        child.on("error", reject);
+        child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`\`${[command, ...args].join(" ")}\` exited with ${code}`))));
+      }),
+    ask: async (question) => {
+      if (options.assumeYes) return true;
+      if (!interactive) return false;
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        const answer = (await rl.question(`${question} (Y/n) `)).trim().toLowerCase();
+        return answer === "" || answer === "y" || answer === "yes";
+      } finally {
+        rl.close();
+      }
+    },
+    env: process.env,
     loadPty: async () => {
       await import("node-pty");
     },
@@ -92,56 +119,152 @@ export async function diagnose(config: HostConfig, deps: BootstrapDeps): Promise
 }
 
 /**
- * Fix what can be fixed (install the service, configure Serve), then
- * re-check. Throws with the printed instructions when something still
- * needs a person — installing Tailscale, signing in.
+ * Make the machine ready to pair, asking before each change. Every gap has
+ * a yes/no question and a real fix behind it; "no" (or a non-interactive
+ * run) ends with the same instructions `doctor` prints. Throws with those
+ * instructions when something still needs a person.
  */
 export async function bootstrap(config: HostConfig, deps: BootstrapDeps): Promise<void> {
   const pty = await checkPty(deps);
   if (!pty.ok) throw new BootstrapError([pty]);
-  const tailscale = await checkTailscale(deps);
-  if (!tailscale.check.ok) throw new BootstrapError([tailscale.check]);
-  const cli = tailscale.cli as string;
 
-  let serve = await checkServe(config, deps, cli);
-  if (!serve.ok) {
-    deps.report(`Exposing the host through Tailscale Serve: tailscale serve --bg ${config.port}`);
+  const cli = await ensureTailscale(deps);
+  await ensureServe(config, deps, cli);
+  await ensureService(config, deps);
+
+  await offerTool(deps, "herdr", "herdr isn't installed. It keeps your agents running and gives you the agent cards; without it Tavi is a plain remote terminal. Install it now?", installHerdrCommand(deps));
+  await offerTool(deps, "tmux", "tmux isn't installed. herdr uses it to keep agents alive when the phone disconnects. Install it now?", await installPackageCommand(deps, "tmux"));
+}
+
+async function ensureTailscale(deps: BootstrapDeps): Promise<string> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const { check, cli } = await checkTailscale(deps);
+    if (check.ok && cli) return cli;
+
+    if (!cli) {
+      const install = tailscaleInstallCommand(deps);
+      if (!install || !(await deps.ask("Tailscale isn't installed. It is the private link between your phone and this computer. Install it now?"))) {
+        throw new BootstrapError([check]);
+      }
+      deps.report(`Installing Tailscale: ${install.join(" ")}`);
+      await deps.run(install[0] as string, install.slice(1));
+      continue;
+    }
+
+    // Installed but stopped or signed out. `tailscale up` prints the sign-in
+    // link and returns once the browser side is done.
+    if (!(await deps.ask("Tailscale is installed but not running. Start it and sign in now?"))) {
+      throw new BootstrapError([check]);
+    }
+    if (deps.operatingSystem === "linux") await ensureOperator(deps, cli);
+    deps.report("Starting Tailscale — a sign-in link will appear if this computer is not signed in yet.");
+    await deps.run(cli, ["up"]).catch(async () => {
+      await deps.run("sudo", [cli, "up"]);
+    });
+  }
+  throw new BootstrapError([(await checkTailscale(deps)).check]);
+}
+
+async function ensureServe(config: HostConfig, deps: BootstrapDeps, cli: string): Promise<void> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const serve = await checkServe(config, deps, cli);
+    if (serve.ok) return;
+    deps.report(`Giving the host a private HTTPS address on your tailnet: tailscale serve --bg ${config.port}`);
     try {
       await deps.execute(cli, ["serve", "--bg", String(config.port)]);
+      continue;
     } catch (error) {
-      throw new BootstrapError([{ ...serve, ...explainServeFailure(describe(error), config.port) }]);
-    }
-    serve = await checkServe(config, deps, cli);
-    if (!serve.ok) throw new BootstrapError([serve]);
-  }
-
-  let service = await checkService(config, deps);
-  if (!service.ok) {
-    if (deps.operatingSystem !== "darwin") throw new BootstrapError([service]);
-    deps.report("Installing the Tavi host as a login service (launchd)…");
-    await deps.installService();
-    const deadline = deps.now() + HEALTH_WAIT_MS;
-    while (!(await deps.healthy(config.port))) {
-      if (deps.now() >= deadline) {
-        throw new BootstrapError([
-          {
-            ...service,
-            detail: `The service was installed but is not answering on port ${config.port} after ${HEALTH_WAIT_MS / 1000}s.`,
-            fix: `Check ${path.join(config.stateDir, "host.log")} and \`launchctl print gui/${deps.userId}/${SERVICE_LABEL}\`.`,
-          },
-        ]);
+      const explained = explainServeFailure(describe(error), config.port);
+      if (explained.kind === "operator") {
+        if (!(await deps.ask("Tailscale only lets root change this. Allow your user to manage Tailscale (asks for your password once)?"))) {
+          throw new BootstrapError([{ ...serve, ...explained }]);
+        }
+        await ensureOperator(deps, cli, true);
+        continue;
       }
-      await deps.sleep(250);
+      if (explained.kind === "https") {
+        deps.report(`Tailscale needs HTTPS certificates enabled for your tailnet (one-time): https://login.tailscale.com/admin/dns → HTTPS Certificates.`);
+        if (!(await deps.ask("Enabled it? Try again"))) throw new BootstrapError([{ ...serve, ...explained }]);
+        continue;
+      }
+      throw new BootstrapError([{ ...serve, ...explained }]);
     }
-    service = await checkService(config, deps);
   }
+  throw new BootstrapError([await checkServe(config, deps, cli)]);
+}
 
-  for (const optional of [
-    await checkOptionalTool(deps, "herdr", "Agent cards and launching agents need herdr; the plain terminal works without it.", "Install herdr: https://herdr.dev"),
-    await checkOptionalTool(deps, "tmux", "herdr keeps agents alive in tmux so they survive the phone disconnecting.", "brew install tmux"),
-  ]) {
-    if (!optional.ok) deps.report(`Note: ${optional.name} not found. ${optional.detail} ${optional.fix ?? ""}`.trim());
+async function ensureOperator(deps: BootstrapDeps, cli: string, force = false): Promise<void> {
+  const user = deps.env.USER || deps.env.LOGNAME;
+  if (!user) return;
+  if (!force) {
+    // Already allowed if serve status answers without complaint.
+    const ok = await deps.execute(cli, ["serve", "status", "--json"]).then(() => true).catch(() => false);
+    if (ok) return;
   }
+  await deps.run("sudo", [cli, "set", `--operator=${user}`]);
+}
+
+async function ensureService(config: HostConfig, deps: BootstrapDeps): Promise<void> {
+  const service = await checkService(config, deps);
+  if (service.ok) return;
+  const where = deps.operatingSystem === "darwin" ? "at login (launchd)" : "at login (systemd)";
+  if (!(await deps.ask(`Tavi isn't running in the background yet. Run it ${where} so it is always there for your phone?`))) {
+    throw new BootstrapError([service]);
+  }
+  deps.report("Installing the Tavi host as a background service…");
+  await deps.installService();
+  const deadline = deps.now() + HEALTH_WAIT_MS;
+  while (!(await deps.healthy(config.port))) {
+    if (deps.now() >= deadline) {
+      throw new BootstrapError([
+        {
+          ...service,
+          detail: `The service was installed but is not answering on port ${config.port} after ${HEALTH_WAIT_MS / 1000}s.`,
+          fix: `Check ${path.join(config.stateDir, "host.log")}${deps.operatingSystem === "darwin" ? ` and \`launchctl print gui/${deps.userId}/${SERVICE_LABEL}\`` : ` and \`systemctl --user status ${LINUX_UNIT}\``}.`,
+        },
+      ]);
+    }
+    await deps.sleep(250);
+  }
+}
+
+async function offerTool(deps: BootstrapDeps, tool: string, question: string, install: string[] | undefined): Promise<void> {
+  if (await deps.which(tool)) return;
+  if (!install) {
+    deps.report(`Note: ${tool} isn't installed and I don't know how to install it here.`);
+    return;
+  }
+  if (!(await deps.ask(question))) {
+    deps.report(`Skipping ${tool}. You can install it later; \`tavi doctor\` will remind you.`);
+    return;
+  }
+  deps.report(`Installing ${tool}: ${install.join(" ")}`);
+  try {
+    await deps.run(install[0] as string, install.slice(1));
+  } catch (error) {
+    deps.report(`${tool} did not install (${firstLine(describe(error))}). Tavi still works as a terminal; run \`tavi doctor\` later.`);
+  }
+}
+
+function tailscaleInstallCommand(deps: BootstrapDeps): string[] | undefined {
+  if (deps.operatingSystem === "darwin") return ["brew", "install", "--cask", "tailscale"];
+  if (deps.operatingSystem === "linux") return ["sh", "-c", "curl -fsSL https://tailscale.com/install.sh | sh"];
+  return undefined;
+}
+
+function installHerdrCommand(deps: BootstrapDeps): string[] | undefined {
+  if (deps.operatingSystem === "darwin") return ["brew", "install", "herdr"];
+  if (deps.operatingSystem === "linux") return ["sh", "-c", "curl -fsSL https://herdr.dev/install.sh | sh"];
+  return undefined;
+}
+
+async function installPackageCommand(deps: BootstrapDeps, pkg: string): Promise<string[] | undefined> {
+  if (deps.operatingSystem === "darwin") return ["brew", "install", pkg];
+  if (deps.operatingSystem !== "linux") return undefined;
+  if (await deps.which("apt-get")) return ["sudo", "apt-get", "install", "-y", pkg];
+  if (await deps.which("dnf")) return ["sudo", "dnf", "install", "-y", pkg];
+  if (await deps.which("pacman")) return ["sudo", "pacman", "-S", "--noconfirm", pkg];
+  return undefined;
 }
 
 export class BootstrapError extends Error {
@@ -184,21 +307,23 @@ async function checkPty(deps: BootstrapDeps): Promise<Check> {
 // Tailscale's own error text names the real cause; pass the right one on
 // rather than guessing. On Linux the CLI needs root or an operator user to
 // change serve config; HTTPS certs are a one-time tailnet setting.
-function explainServeFailure(message: string, port: number): { detail: string; fix: string } {
+function explainServeFailure(message: string, port: number): { kind: "operator" | "https" | "other"; detail: string; fix: string } {
   const command = `tailscale serve --bg ${port}`;
   if (/Access denied|serve config denied|operator/i.test(message)) {
     return {
+      kind: "operator",
       detail: "Tailscale would not let this user change its serve config (Linux needs root or an operator user).",
       fix: `Run once: sudo tailscale set --operator=$USER — then run \`tavi pair\` again (or: sudo ${command}).`,
     };
   }
   if (/HTTPS|cert|MagicDNS/i.test(message)) {
     return {
+      kind: "https",
       detail: `Tailscale refused: ${firstLine(message)}`,
       fix: `Enable HTTPS certificates for your tailnet (Tailscale admin → DNS → HTTPS Certificates), then run: ${command}`,
     };
   }
-  return { detail: `Configuring it failed: ${firstLine(message)}`, fix: `Run ${command} yourself and read Tailscale's message.` };
+  return { kind: "other", detail: `Configuring it failed: ${firstLine(message)}`, fix: `Run ${command} yourself and read Tailscale's message.` };
 }
 
 function firstLine(text: string): string {
@@ -214,7 +339,7 @@ async function checkTailscale(deps: BootstrapDeps): Promise<{ check: Check; cli?
         name,
         ok: false,
         detail: "Tailscale is not installed. The phone reaches this computer only over your tailnet.",
-        fix: "Install Tailscale from https://tailscale.com/download, open it and sign in — on the phone too — then run this again.",
+        fix: "Install Tailscale from https://tailscale.com/download and sign in — on the phone too — then run `tavi pair` again (it offers to install it for you).",
       },
     };
   }
@@ -264,10 +389,24 @@ async function checkServe(config: HostConfig, deps: BootstrapDeps, cli: string |
 async function checkService(config: HostConfig, deps: BootstrapDeps): Promise<Check> {
   const name = "Tavi host";
   const healthy = await deps.healthy(config.port);
+  if (deps.operatingSystem === "linux") {
+    const active = await deps
+      .execute("systemctl", ["--user", "is-active", LINUX_UNIT])
+      .then((out) => out.trim() === "active")
+      .catch(() => false);
+    if (healthy && active) return { name, ok: true, detail: `running as ${LINUX_UNIT} on port ${config.port}` };
+    if (healthy) return { name, ok: true, detail: `running on port ${config.port} (not as a service — it will not survive a reboot)`, fix: "tavi install-service" };
+    return {
+      name,
+      ok: false,
+      detail: active ? `${LINUX_UNIT} is active but not answering on port ${config.port}.` : "Not installed yet.",
+      fix: active ? `Check ${path.join(config.stateDir, "host.log")}` : "tavi install-service (tavi pair offers this)",
+    };
+  }
   if (deps.operatingSystem !== "darwin") {
     return healthy
       ? { name, ok: true, detail: `running on port ${config.port}` }
-      : { name, ok: false, detail: "Not running. Automatic service install is macOS-only for now.", fix: "Run `tavi` in a terminal and keep it open (Linux service: #48)." };
+      : { name, ok: false, detail: "Not running. Automatic service install supports macOS and Linux.", fix: "Run `tavi` in a terminal and keep it open." };
   }
   const loaded = await deps
     .execute("launchctl", ["print", `gui/${deps.userId}/${SERVICE_LABEL}`])
@@ -279,7 +418,7 @@ async function checkService(config: HostConfig, deps: BootstrapDeps): Promise<Ch
     name,
     ok: false,
     detail: loaded ? `${SERVICE_LABEL} is loaded but not answering on port ${config.port}.` : "Not installed yet.",
-    fix: loaded ? `Check ${path.join(config.stateDir, "host.log")}` : "tavi install-service (tavi pair does this for you)",
+    fix: loaded ? `Check ${path.join(config.stateDir, "host.log")}` : "tavi install-service (tavi pair offers this)",
   };
 }
 

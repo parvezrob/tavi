@@ -22,7 +22,8 @@ const USAGE = `Tavi host ${VERSION} — pairs your phone with the coding agents 
 
 Usage: tavi <command>
 
-  pair [--url https://…]   Set everything up (service, Tailscale Serve) and show a pairing code
+  pair [--url https://…]   Set everything up, asking before each fix, then show a pairing code
+       [--yes]             Answer yes to every question (for scripts)
   doctor                   Check every prerequisite without changing anything
   devices [revoke <id>]    List paired phones, or cut one off
   install-service          Run the host at login (macOS); uninstall-service removes it
@@ -74,13 +75,14 @@ if (process.argv[2] === "uninstall-service") {
 
 if (process.argv[2] === "pair") {
   try {
-    await bootstrap(config, defaultDeps(config));
+    const assumeYes = process.argv.includes("--yes") || process.argv.includes("-y");
+    await bootstrap(config, defaultDeps(config, { assumeYes }));
     const publicUrl = await resolvePublicUrl(config, process.argv.slice(3));
     await runPairCommand(config, publicUrl);
     process.exit(0);
   } catch (error) {
     if (error instanceof BootstrapError) {
-      console.error(`Not ready to pair yet.\n${error.message}\n\nFix the above and run \`tavi pair\` again; \`tavi doctor\` shows every check.`);
+      console.error(`Not ready to pair yet.\n${error.message}\n\nFix the above (or answer yes next time) and run \`tavi pair\` again; \`tavi doctor\` shows every check.`);
     } else {
       console.error(describeFailure(error));
     }
