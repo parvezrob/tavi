@@ -96,6 +96,21 @@ struct HomeHostInput: Equatable {
     }
 }
 
+// Waiting agents the phone cannot tell apart — same computer, same kind,
+// same identity line, same asking line (usually none: herdr-restored
+// `claude --resume` panes with blank screens) — render as one stacked row
+// that expands in place (owner call 2026-09-02). A real question never
+// merges: the asking line is part of the key.
+struct WaitingGroup: Identifiable, Equatable {
+    let key: String
+    let agents: [AgentSummary]
+    let askingLine: String?
+
+    var id: String { key }
+    var isStacked: Bool { agents.count > 1 }
+    var primary: AgentSummary { agents[0] }
+}
+
 struct HomeLayout: Equatable {
     let needsYou: [AgentSummary]
     let computers: [HomeComputer]
@@ -126,6 +141,25 @@ enum HomeGrouping {
             )
         }
         return HomeLayout(needsYou: needsYou, computers: computers)
+    }
+
+    // Identical waiting rows collapse into one; everything else stays a row
+    // of its own. Groups keep the order of first appearance so a stack
+    // never moves as its members change.
+    static func waitingGroups(_ agents: [AgentSummary], askingLine: (AgentSummary) -> String?) -> [WaitingGroup] {
+        var order: [String] = []
+        var members: [String: [AgentSummary]] = [:]
+        var asking: [String: String?] = [:]
+        for agent in agents {
+            let line = askingLine(agent)
+            let key = [agent.hostId, agent.agent, agent.secondaryIdentity ?? agent.projectName, line ?? ""].joined(separator: "|")
+            if members[key] == nil {
+                order.append(key)
+                asking[key] = line
+            }
+            members[key, default: []].append(agent)
+        }
+        return order.map { WaitingGroup(key: $0, agents: members[$0] ?? [], askingLine: asking[$0] ?? nil) }
     }
 
     // Projects by name; agents inside a project keep the host's order. The

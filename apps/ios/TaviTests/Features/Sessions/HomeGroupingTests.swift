@@ -195,4 +195,37 @@ struct HomeGroupingTests {
         #expect(HomeGrouping.computerName(pairedName: nil, hostText: "my-mac.tailnet.ts.net") == "my-mac")
         #expect(HomeGrouping.computerName(pairedName: nil, hostText: "") == "Paired computer")
     }
+
+    // Owner call 2026-09-02: waiting rows the phone cannot tell apart stack
+    // into one; a real question, a name, another folder, or another
+    // computer keeps its own row.
+    @Test
+    func stacksIndistinguishableWaitingAgentsAndKeepsDistinctOnesApart() {
+        var blank1 = agent("a", status: "blocked", cwd: "/Users/dev"); blank1.hostId = "mac"
+        var blank2 = agent("b", status: "blocked", cwd: "/Users/dev"); blank2.hostId = "mac"
+        var asking = agent("c", status: "blocked", cwd: "/Users/dev"); asking.hostId = "mac"
+        var otherFolder = agent("d", status: "blocked", cwd: "/Users/dev/Projects/api"); otherFolder.hostId = "mac"
+        var otherHost = agent("e", status: "blocked", cwd: "/Users/dev"); otherHost.hostId = "pc"
+        var named = agent("f", status: "blocked", cwd: "/Users/dev"); named.hostId = "mac"; named.tabLabel = "Redesign"
+        var blank3 = agent("g", status: "blocked", cwd: "/Users/dev"); blank3.hostId = "mac"
+
+        let groups = HomeGrouping.waitingGroups([blank1, blank2, asking, otherFolder, otherHost, named, blank3]) { agent in
+            agent.id == "c" ? "Allow Bash(npm test)?" : nil
+        }
+
+        #expect(groups.map { $0.agents.map(\.id) } == [["a", "b", "g"], ["c"], ["d"], ["e"], ["f"]])
+        #expect(groups[0].isStacked)
+        #expect(groups[0].askingLine == nil)
+        #expect(groups[1].askingLine == "Allow Bash(npm test)?")
+        #expect(!groups[1].isStacked)
+    }
+
+    @Test
+    func sameQuestionOnTwoPanesStacksToo() {
+        var one = agent("a", status: "blocked", cwd: "/Users/dev/p"); one.hostId = "mac"
+        var two = agent("b", status: "blocked", cwd: "/Users/dev/p"); two.hostId = "mac"
+        let groups = HomeGrouping.waitingGroups([one, two]) { _ in "Continue? [y/N]" }
+        #expect(groups.count == 1)
+        #expect(groups[0].askingLine == "Continue? [y/N]")
+    }
 }

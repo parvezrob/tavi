@@ -35,6 +35,8 @@ struct SessionsView: View {
     @State private var selectedHostId: String?
     // The computer whose sheet was opened from its chip.
     @State private var chipSheet: HostFleet.Entry?
+    // Stacks of indistinguishable waiting agents the user opened in place.
+    @State private var expandedWaitingStacks: Set<String> = []
 
     var body: some View {
         NavigationStack {
@@ -289,19 +291,34 @@ struct SessionsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     SectionHeader(title: "Needs you", count: needsYou.count > 1 ? needsYou.count : nil, countTint: TaviTheme.accent)
                         .accessibilityIdentifier("sessions.needsYou")
+                    let groups = HomeGrouping.waitingGroups(needsYou) { agent in
+                        NeedsYouRow.askingLine(in: fleet.directory(for: agent.hostId)?.previews[agent.id])
+                    }
                     VStack(spacing: 0) {
-                        ForEach(needsYou, id: \.cardIdentity) { agent in
-                            let directory = fleet.directory(for: agent.hostId)
-                            NeedsYouRow(
-                                agent: agent,
-                                preview: directory?.previews[agent.id],
-                                observedAt: directory?.statusObservedAt[agent.id],
-                                computerName: severalShown ? computerName(for: agent.hostId) : nil
-                            ) {
-                                guard directory != nil else { return }
-                                decisionAgent = DecisionTarget(agent: agent)
+                        ForEach(groups) { group in
+                            if group.isStacked {
+                                WaitingStackRow(
+                                    group: group,
+                                    computerName: severalShown ? computerName(for: group.primary.hostId) : nil,
+                                    isExpanded: expandedWaitingStacks.contains(group.key)
+                                ) {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        if expandedWaitingStacks.remove(group.key) == nil {
+                                            expandedWaitingStacks.insert(group.key)
+                                        }
+                                    }
+                                }
+                                if expandedWaitingStacks.contains(group.key) {
+                                    ForEach(group.agents, id: \.cardIdentity) { agent in
+                                        Divider().overlay(TaviTheme.hairline).padding(.leading, 60)
+                                        needsYouRow(agent, computerName: nil, primaryOverride: agent.tabLabel ?? agent.id)
+                                            .padding(.leading, 16)
+                                    }
+                                }
+                            } else {
+                                needsYouRow(group.primary, computerName: severalShown ? computerName(for: group.primary.hostId) : nil, primaryOverride: nil)
                             }
-                            if agent.cardIdentity != needsYou.last?.cardIdentity {
+                            if group.id != groups.last?.id {
                                 Divider().overlay(TaviTheme.hairline).padding(.leading, 60)
                             }
                         }
@@ -410,6 +427,20 @@ struct SessionsView: View {
 
     private var jumpSources: [JumpSource] {
         fleet.entries.map { JumpSource(hostId: $0.host.id, name: $0.host.displayName, directory: $0.directory) }
+    }
+
+    private func needsYouRow(_ agent: AgentSummary, computerName: String?, primaryOverride: String?) -> some View {
+        let directory = fleet.directory(for: agent.hostId)
+        return NeedsYouRow(
+            agent: agent,
+            preview: directory?.previews[agent.id],
+            observedAt: directory?.statusObservedAt[agent.id],
+            computerName: computerName,
+            primaryOverride: primaryOverride
+        ) {
+            guard directory != nil else { return }
+            decisionAgent = DecisionTarget(agent: agent)
+        }
     }
 
     // The computer's name, only when there is more than one to tell apart

@@ -65,17 +65,23 @@ struct NeedsYouRow: View {
     let preview: String?
     let observedAt: Date?
     var computerName: String? = nil
+    // Inside an expanded stack the folder is already on the stack's row,
+    // so the member row shows the only thing left that differs: herdr's
+    // raw tab label, else the pane id.
+    var primaryOverride: String? = nil
     let action: () -> Void
 
-    private var primary: String { agent.secondaryIdentity ?? agent.projectName }
+    private var primary: String { primaryOverride ?? agent.secondaryIdentity ?? agent.projectName }
 
     private var secondary: String {
         [agent.displayName, computerName].compactMap { $0 }.joined(separator: " · ")
     }
 
+    private var askingLine: String? { Self.askingLine(in: preview) }
+
     // The last non-empty line of the sanitized preview: the question, in
     // the agent's own words, when there is one on screen.
-    private var askingLine: String? {
+    static func askingLine(in preview: String?) -> String? {
         preview?
             .split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -119,6 +125,87 @@ struct NeedsYouRow: View {
         .accessibilityLabel("\(primary), \(secondary), needs you")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("sessions.agent.\(agent.id)")
+    }
+}
+
+// Several waiting agents the phone cannot tell apart, as one row: the
+// tile is drawn stacked, the secondary line says how many and that there
+// is nothing on their screens, the trailing numeral is the count. A tap
+// expands the stack in place to its member rows; it never picks one.
+struct WaitingStackRow: View {
+    let group: WaitingGroup
+    var computerName: String? = nil
+    let isExpanded: Bool
+    let action: () -> Void
+
+    private var primary: String { group.primary.secondaryIdentity ?? group.primary.projectName }
+
+    private var secondary: String {
+        var parts = [group.primary.displayName]
+        if let computerName { parts.append(computerName) }
+        let count = "\(group.agents.count) waiting"
+        parts.append(group.askingLine == nil ? "\(count), nothing on screen" : count)
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .center, spacing: 12) {
+                AgentGlyphTile(agent: group.primary, tint: TaviTheme.statusBlocked)
+                    .background(alignment: .topTrailing) {
+                        // Two more tiles peeking out behind: a stack, at a glance.
+                        RoundedRectangle(cornerRadius: TaviTheme.wellRadius, style: .continuous)
+                            .strokeBorder(TaviTheme.textSecondary.opacity(0.35), lineWidth: 1)
+                            .frame(width: 34, height: 34)
+                            .offset(x: 3, y: -3)
+                    }
+                    .background(alignment: .topTrailing) {
+                        RoundedRectangle(cornerRadius: TaviTheme.wellRadius, style: .continuous)
+                            .strokeBorder(TaviTheme.textSecondary.opacity(0.2), lineWidth: 1)
+                            .frame(width: 34, height: 34)
+                            .offset(x: 6, y: -6)
+                    }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(primary)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(TaviTheme.textPrimary)
+                        .lineLimit(1)
+                    Text(secondary)
+                        .font(.caption)
+                        .foregroundStyle(TaviTheme.textSecondary)
+                        .lineLimit(1)
+                    if let askingLine = group.askingLine {
+                        Text(askingLine)
+                            .font(.footnote)
+                            .foregroundStyle(TaviTheme.textPrimary.opacity(0.8))
+                            .lineLimit(1)
+                            .padding(.top, 3)
+                    }
+                }
+                Spacer(minLength: 8)
+                HStack(spacing: 8) {
+                    Text("\(group.agents.count)")
+                        .font(.caption2.weight(.bold))
+                        .monospacedDigit()
+                        .foregroundStyle(TaviTheme.accentInk)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(TaviTheme.accent, in: Capsule())
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(TaviTheme.textSecondary.opacity(0.6))
+                }
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(primary), \(secondary)")
+        .accessibilityValue(isExpanded ? "expanded" : "collapsed")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("sessions.waitingStack.\(group.primary.id)")
     }
 }
 
@@ -187,9 +274,10 @@ struct ProjectCard: View {
 
 // One agent under its folder. Primary: your name for it or its own
 // title, else the kind. The kind repeats as the second line only when
-// something else took the first. Trailing: the status word — a dot alone
-// cannot tell Done from Idle — then how long ago for finished work, and
-// the chevron that says this row pushes the terminal.
+// something else took the first. Trailing: the status word for Working
+// and Done — Idle is the resting state and says nothing, its tile dims
+// instead (owner call 2026-09-02) — then how long ago, and the chevron
+// that says this row pushes the terminal.
 struct ProjectAgentRow: View {
     let agent: AgentSummary
     let preview: String?
@@ -200,6 +288,12 @@ struct ProjectAgentRow: View {
     private var primary: String { agent.secondaryIdentity ?? agent.displayName }
     private var secondary: String? { agent.secondaryIdentity == nil ? nil : agent.displayName }
     private var isRunning: Bool { agent.homeSection == .active }
+    private var isIdle: Bool { agent.status == "idle" }
+
+    private var tileTint: Color {
+        if isRunning { return TaviTheme.statusWorking }
+        return isIdle ? TaviTheme.textSecondary.opacity(0.45) : TaviTheme.textSecondary
+    }
 
     private var showsFreshness: Bool {
         observedAt.map { FreshnessRule.shows(status: agent.status, observedAt: $0) } ?? false
@@ -209,7 +303,7 @@ struct ProjectAgentRow: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .center, spacing: 12) {
-                    AgentGlyphTile(agent: agent, tint: isRunning ? TaviTheme.statusWorking : TaviTheme.textSecondary)
+                    AgentGlyphTile(agent: agent, tint: tileTint)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(primary)
                             .font(.subheadline.weight(isRunning ? .semibold : .regular))
@@ -224,9 +318,11 @@ struct ProjectAgentRow: View {
                     }
                     Spacer(minLength: 8)
                     HStack(spacing: 8) {
-                        Text(status.label)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(isRunning ? status.color : TaviTheme.textSecondary)
+                        if !isIdle {
+                            Text(status.label)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(isRunning ? status.color : TaviTheme.textSecondary)
+                        }
                         if let observedAt, showsFreshness, !isRunning {
                             FreshnessLabel(observedAt: observedAt)
                         }
