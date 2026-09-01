@@ -155,6 +155,76 @@ struct AgentCard: View {
     }
 }
 
+// One waiting agent as a row in the needs-you block (#50 live pass: five
+// full cards in a column read as a wall, not a list). Name, then where
+// (computer · folder, or your name for the tab), then — when the host
+// has one — the line the agent is asking on. The clock says how long it
+// has been waiting.
+struct NeedsYouRow: View {
+    let agent: AgentSummary
+    let preview: String?
+    let observedAt: Date?
+    var computerName: String? = nil
+    let action: () -> Void
+
+    private var location: String {
+        [computerName, agent.userTabName ?? agent.projectName].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    // The last non-empty line of the sanitized preview: the question, in
+    // the agent's own words, when there is one on screen.
+    private var askingLine: String? {
+        preview?
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 10) {
+                Circle()
+                    .fill(TaviTheme.statusBlocked)
+                    .frame(width: 7, height: 7)
+                    .padding(.top, 6)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(agent.displayName)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(TaviTheme.textPrimary)
+                    Text(location)
+                        .font(.caption)
+                        .foregroundStyle(TaviTheme.textSecondary)
+                        .lineLimit(1)
+                    if let askingLine {
+                        Text(askingLine)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(TaviTheme.textSecondary.opacity(0.85))
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                HStack(spacing: 6) {
+                    if let observedAt {
+                        FreshnessLabel(observedAt: observedAt)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(TaviTheme.textSecondary)
+                }
+                .padding(.top, 2)
+            }
+            .padding(.vertical, 11)
+            .padding(.horizontal, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(agent.displayName), \(location), needs you")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("sessions.agent.\(agent.id)")
+    }
+}
+
 // Compact row for done and idle agents; several rows share one card.
 // Always under a project header, so the folder is not repeated; the
 // status word is, because a dot alone cannot tell Done from Idle.

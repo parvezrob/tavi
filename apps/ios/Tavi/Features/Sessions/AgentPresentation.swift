@@ -55,13 +55,28 @@ extension AgentSummary {
     }
 
     // The title the agent set, when it says more than the agent name does.
-    // Herdr titles a tab with the product name ("Claude Code") by default.
+    // Herdr titles a tab with the product name ("Claude Code") by default,
+    // and a resumed session with its command line ("claude --resume
+    // 04c714cc-…") — neither is a name (#50 live pass).
     var ownTitle: String? {
         let trimmed = title.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty { return nil }
         let normalized = trimmed.lowercased()
         if normalized == agent.lowercased() || normalized == displayName.lowercased() { return nil }
+        if Self.looksLikeACommandLine(normalized, agent: agent) { return nil }
         return trimmed
+    }
+
+    // "claude --resume …", "codex resume …", "npm run dev -- --port": the
+    // process a pane runs, as herdr reports it, never a person's words.
+    static func looksLikeACommandLine(_ lowered: String, agent: String) -> Bool {
+        if lowered.hasPrefix("-") || lowered.contains(" --") || lowered.contains(" -") { return true }
+        if lowered.hasPrefix(agent.lowercased() + " ") { return true }
+        for binary in ["claude", "codex", "gemini", "opencode", "copilot", "cursor", "amp", "droid", "kimi", "kiro", "grok", "cline", "devin", "npm", "npx", "pnpm", "yarn", "bun", "node", "python", "python3", "bash", "zsh", "sh", "ssh", "git", "make", "cargo", "go"]
+            where lowered.hasPrefix(binary + " ") {
+            return true
+        }
+        return false
     }
 
     // Under a project header on the home: a shell titles itself with its
@@ -94,10 +109,7 @@ extension AgentSummary {
                 return nil
             }
         }
-        // A command line: starts with the agent's binary, or carries flags.
-        if lowered.hasPrefix(agent.lowercased() + " ") || lowered.contains(" --") || lowered.hasPrefix("-") {
-            return nil
-        }
+        if Self.looksLikeACommandLine(lowered, agent: agent) { return nil }
         return raw
     }
 

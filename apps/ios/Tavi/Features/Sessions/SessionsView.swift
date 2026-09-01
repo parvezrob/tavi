@@ -294,17 +294,29 @@ struct SessionsView: View {
                 }
                 Color.clear.frame(height: 0).id("home.needsYou")
                 // Needs-you is flat and first, across every computer and
-                // project: a waiting agent never hides under a group.
-                // Identity includes the status so a section move always
-                // rebuilds the card instead of reusing a cached one. A
-                // needs-you card opens the decision sheet (approve/deny
-                // without the terminal); everything else opens the terminal.
-                ForEach(needsYou, id: \.cardIdentity) { agent in
-                    agentCard(agent, showsLocation: true, computerName: severalShown ? computerName(for: agent.hostId) : nil) {
-                        guard fleet.directory(for: agent.hostId) != nil else { return }
-                        decisionAgent = DecisionTarget(agent: agent)
+                // project: a waiting agent never hides under a group. One
+                // block of rows, not a column of cards. Identity includes
+                // the status so a section move always rebuilds the row
+                // instead of reusing a cached one. A row opens the decision
+                // sheet (approve/deny without the terminal).
+                VStack(spacing: 0) {
+                    ForEach(needsYou, id: \.cardIdentity) { agent in
+                        let directory = fleet.directory(for: agent.hostId)
+                        NeedsYouRow(
+                            agent: agent,
+                            preview: directory?.previews[agent.id],
+                            observedAt: directory?.statusObservedAt[agent.id],
+                            computerName: severalShown ? computerName(for: agent.hostId) : nil
+                        ) {
+                            guard directory != nil else { return }
+                            decisionAgent = DecisionTarget(agent: agent)
+                        }
+                        if agent.cardIdentity != needsYou.last?.cardIdentity {
+                            Divider().overlay(TaviTheme.hairline)
+                        }
                     }
                 }
+                .taviCard(stripe: TaviTheme.statusBlocked)
             }
 
             // Project → agents (#26), one list across every computer shown
@@ -314,7 +326,10 @@ struct SessionsView: View {
             // them. A blocked agent is only in the flat list above — its
             // project header counts it, never repeats it.
             ForEach(shown) { computer in
-                ForEach(computer.projects) { project in
+                // A folder whose every agent is waiting above has nothing to
+                // show here; a header pointing upward was noise (owner,
+                // 2026-09-02 — supersedes the #26 "keeps its header" rule).
+                ForEach(computer.projects.filter { !$0.active.isEmpty || !$0.recent.isEmpty }) { project in
                     ProjectHeader(project: project, computerName: severalShown ? computer.name : nil)
                     ForEach(project.active, id: \.cardIdentity) { agent in
                         agentCard(agent, showsLocation: false, computerName: nil) { openAgent(agent) }
@@ -331,7 +346,7 @@ struct SessionsView: View {
             ForEach(shown.filter { $0.projects.isEmpty && !$0.isQuietlyIdle }) { computer in
                 computerStateCard(computer)
             }
-            if !shown.isEmpty, shown.allSatisfy({ $0.projects.isEmpty && $0.isQuietlyIdle }) {
+            if !shown.isEmpty, needsYou.isEmpty, shown.allSatisfy({ $0.projects.isEmpty && $0.isQuietlyIdle }) {
                 idleCard(shown)
             }
         }
