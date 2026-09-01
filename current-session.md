@@ -14,9 +14,9 @@
 
 **Review findings deliberately not done (owner call):** accessibility identifiers stay pane-only (test hooks; UI suite is single-host); computers keep pairing order even when the first is asleep; `Live · n ms` stays on the chip-era surfaces; no `.id(terminalHostId)` on the terminal destination (jumping keeps composer state).
 
-**#50 and #48 closed 2026-09-02 (owner call; robin-PC steps not exercised live — a fresh issue if any misbehaves). #63 built and deployed on the Mac checkout (0.1.10); owner publishes.** Next: #25 + #61 + #57 (diff glance → files-mentioned → project files, one read-only file endpoint), #58 dev-server preview, #59 worktrees. #54 P3 brand moments unblocked. #37 App Store epic gates any submission. Phase E push payloads must carry `hostId` + `paneId` (`AgentTarget`, noted in code).
+**#50 and #48 closed 2026-09-02 (owner call; robin-PC steps not exercised live — a fresh issue if any misbehaves). #63 shipped, deployed on the Mac checkout, and published as 0.1.10.** Next: #25 + #61 + #57 (diff glance → files-mentioned → project files, one read-only file endpoint), #58 dev-server preview, #59 worktrees. #54 P3 brand moments unblocked. #37 App Store epic gates any submission. Phase E push payloads must carry `hostId` + `paneId` (`AgentTarget`, noted in code).
 
-**Publish pending (2026-09-02):** `tavi-host` 0.1.10 — #63 grace window before the detach resize. `cd apps/host && npm publish` in Terminal.app; robin-PC picks it up on its daily check (or `tavi update`).
+**Published 2026-09-02:** `tavi-host` 0.1.10 (latest) — #63 grace window before the detach resize. robin-PC picks it up on its daily check when it is back (or `tavi update`).
 
 **Publishing rule (owner + agent, 2026-09-01):** the agent bumps `apps/host/package.json` + `VERSION` only when it says a release is worth publishing; the owner runs `cd apps/host && npm publish` in Terminal.app (2FA; the auth URL is masked under Claude Code). Versions are immutable, propagate in 1–2 min, and every publish restarts every paired host. Nothing in #50 touched the host; no publish needed.
 
@@ -24,7 +24,7 @@
 
 ## Live state
 
-- **Product:** Tavi by Farfield (Terminal Agent Vantage and Intervention). Repo `parvezrob/tavi`, checkout `~/Projects/tavi`. Host package `tavi-host` 0.1.9 on npm (Apache-2.0; everything else © Farfield). README quick start = `npx tavi-host pair`; the rest of the CLI: `doctor`, `update`, `devices [revoke]`, `install-service`/`uninstall-service`, `install-claude-hooks`, `uninstall`.
+- **Product:** Tavi by Farfield (Terminal Agent Vantage and Intervention). Repo `parvezrob/tavi`, checkout `~/Projects/tavi`. Host package `tavi-host` 0.1.10 on npm (Apache-2.0; everything else © Farfield). README quick start = `npx tavi-host pair`; the rest of the CLI: `doctor`, `update`, `devices [revoke]`, `install-service`/`uninstall-service`, `install-claude-hooks`, `uninstall`.
 - **Owner Mac:** host runs from the checkout as launchd `com.farfield.tavi.host` (deploy: `npm run build && npm run service:install`, then `/api/health`; it reported 0.1.6 at session end — the service predates the 0.1.9 source, redeploy when convenient); herdr 0.8.2 under `brew services start herdr` (headless; no tmux anywhere); Claude hooks installed. Phone runs `44216c5` as `com.farfield.tavi`, paired to the Mac (device `35348beb105b`). Tailscale Serve → :8787. Checkout hosts never self-update (by design).
 - **Owner ubuntu (`robin-PC`):** paired again 2026-09-01 late via `npx tavi-host pair` on the clean slate; live at 6 ms; two Claude Code agents in `~/Documents/Projects/portfolioai` at the time.
 - **Phone runs `f58adf2` (needs-you rows build); both the Mac and robin-PC (ubuntu) are paired** (#50). Profile expires 2026-09-08.
