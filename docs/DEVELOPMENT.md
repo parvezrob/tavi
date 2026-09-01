@@ -10,6 +10,7 @@ Practical knowledge for building, deploying, and verifying Mocha end-to-end. Pol
 - Reveal the host's own token: `npm run token` in `apps/host` — the CLI/dev credential, never handed to a phone once pairing is in use.
 - The launchd plist sets a UTF-8 `LANG` deliberately: launchd provides no locale, and agents, the pty bridge, and herdr's NDJSON all assume UTF-8.
 - Host tests: `npm test` in `apps/host`.
+- Needs-you truth (#22, #60): Claude hooks force `blocked · claude-hook` until `PostToolUse`/`Stop`/`UserPromptSubmit`; because Esc on a dialog fires no hook, `AttentionReconciler` reads the pane's viewport every 3 s while anything is hook-blocked and clears the block after two consecutive reads with no dialog on screen. Hooks apply to new Claude sessions only.
 
 ## iOS
 

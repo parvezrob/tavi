@@ -90,6 +90,18 @@ export class AttentionOverlay {
     return true;
   }
 
+  /** Sessions the hooks currently hold as blocked (expired ones dropped). */
+  blockedSessions(): string[] {
+    return [...this.blockedBySession.keys()].filter((sessionId) => this.isBlocked(sessionId));
+  }
+
+  /** Drops a block on evidence other than a hook (the screen shows no dialog). */
+  clear(sessionId: string): boolean {
+    if (!this.blockedBySession.delete(sessionId)) return false;
+    this.notify();
+    return true;
+  }
+
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => {
@@ -99,6 +111,103 @@ export class AttentionOverlay {
 
   private notify(): void {
     for (const listener of [...this.listeners]) listener();
+  }
+}
+
+// Hooks only ever say "a dialog appeared" and "a tool ran / the turn ended /
+// a prompt was typed". Nothing fires when a person presses Esc on the
+// dialog (Claude Code skips Stop on an interrupt and PostToolUse for a tool
+// that never ran), denies it and walks away, or kills the session — so the
+// overlay would pin "Needs you" on an idle agent for the whole TTL (owner
+// hit exactly this). The screen is the tiebreaker: a permission dialog is
+// defined by being on screen, and the host can already read the viewport
+// (the phone's "Already resolved" sheet uses the same read). While anything
+// is hook-blocked, poll its pane; two consecutive reads with no dialog clear
+// the block. Two, not one, so a mid-repaint read cannot drop a real dialog;
+// a read that fails outright never counts either way.
+export interface AttentionReconcilerOptions {
+  overlay: AttentionOverlay;
+  /** The latest agents the feed knows, with their Claude session refs. */
+  agents: () => readonly { id: string; sessionRef?: string | undefined }[];
+  /** Whether a permission dialog is on the pane's screen; undefined = could not read. */
+  dialogPresent: (paneId: string) => Promise<boolean | undefined>;
+  intervalMilliseconds?: number;
+  missesToClear?: number;
+}
+
+export class AttentionReconciler {
+  private readonly misses = new Map<string, number>();
+  private readonly interval: number;
+  private readonly missesToClear: number;
+  private timer: NodeJS.Timeout | undefined;
+  private ticking = false;
+  private unsubscribe: (() => void) | undefined;
+
+  constructor(private readonly options: AttentionReconcilerOptions) {
+    this.interval = options.intervalMilliseconds ?? 3_000;
+    this.missesToClear = options.missesToClear ?? 2;
+  }
+
+  start(): void {
+    if (this.unsubscribe) return;
+    this.unsubscribe = this.options.overlay.subscribe(() => this.arm());
+    this.arm();
+  }
+
+  stop(): void {
+    this.unsubscribe?.();
+    this.unsubscribe = undefined;
+    this.disarm();
+  }
+
+  // The timer only runs while a block exists — an idle host does no reads.
+  private arm(): void {
+    if (this.timer || this.options.overlay.blockedSessions().length === 0) return;
+    this.timer = setInterval(() => void this.tick(), this.interval);
+    this.timer.unref?.();
+  }
+
+  private disarm(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+    this.misses.clear();
+  }
+
+  async tick(): Promise<void> {
+    if (this.ticking) return;
+    this.ticking = true;
+    try {
+      const blocked = this.options.overlay.blockedSessions();
+      if (blocked.length === 0) {
+        this.disarm();
+        return;
+      }
+      const agents = this.options.agents();
+      for (const sessionId of blocked) {
+        const agent = agents.find((candidate) => candidate.sessionRef === sessionId);
+        // No pane carries this session any more: the dialog cannot be on
+        // any screen. Counted like an empty screen so a killed session
+        // clears on the same two-read rule.
+        const present = agent ? await this.options.dialogPresent(agent.id) : false;
+        if (present === undefined) continue;
+        if (present) {
+          this.misses.delete(sessionId);
+          continue;
+        }
+        const count = (this.misses.get(sessionId) ?? 0) + 1;
+        if (count >= this.missesToClear) {
+          this.misses.delete(sessionId);
+          this.options.overlay.clear(sessionId);
+        } else {
+          this.misses.set(sessionId, count);
+        }
+      }
+      for (const sessionId of [...this.misses.keys()]) {
+        if (!blocked.includes(sessionId)) this.misses.delete(sessionId);
+      }
+    } finally {
+      this.ticking = false;
+    }
   }
 }
 

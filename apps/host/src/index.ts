@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { AttentionOverlay, AttentiveAgentEvents } from "./attention.js";
+import { AttentionOverlay, AttentionReconciler, AttentiveAgentEvents } from "./attention.js";
 import { installClaudeHooks } from "./claude-hooks.js";
 import { DeviceRegistry } from "./pairing.js";
 import { resolvePublicUrl, runPairCommand } from "./pair-command.js";
@@ -88,7 +88,19 @@ const agentEvents = new AttentiveAgentEvents(
   new HerdrEventFeed(herdr, { socketPath: config.herdrSocket }),
   attention,
 );
+// Hook-reported blocks are checked against the screen so an Esc'd or
+// abandoned dialog cannot pin "Needs you" (see AttentionReconciler).
+const reconciler = new AttentionReconciler({
+  overlay: attention,
+  agents: () => agentEvents.latest?.agents ?? [],
+  dialogPresent: async (paneId) => {
+    const result = await herdr.readDialog(paneId).catch(() => undefined);
+    return result && !("available" in result) ? result.present : undefined;
+  },
+});
+reconciler.start();
 const server = await createMochaServer({ config, herdr, agentEvents, attention });
+server.on("close", () => reconciler.stop());
 server.listen(config.port, config.bindHost, () => {
   console.log(`Mocha ${VERSION} is running on http://${config.bindHost}:${config.port}`);
   console.log(`Machine: ${config.machineName}`);

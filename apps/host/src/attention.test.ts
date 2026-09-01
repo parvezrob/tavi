@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AttentionOverlay, AttentiveAgentEvents, parseClaudeHookEvent } from "./attention.js";
+import { AttentionOverlay, AttentionReconciler, AttentiveAgentEvents, parseClaudeHookEvent } from "./attention.js";
 import type { AgentEventSource, HerdrAgentsSnapshot } from "./herdr-events.js";
 import type { HerdrAgentInfo } from "./types.js";
 
@@ -100,4 +100,95 @@ test("merged snapshots force blocked with hook authority and republish on overla
   overlay.report({ event: "Notification", sessionId: "other", message: "permission" });
   const merged = detached.merge({ available: true, agents: [agent({ sessionRef: undefined })] });
   assert.equal(merged.agents[0]?.status, "idle");
+});
+
+// The screen tiebreaker: an Esc'd dialog fires no hook, so the overlay must
+// yield to what the viewport shows.
+test("reconciler clears a hook block after two reads with no dialog on screen", async () => {
+  const overlay = new AttentionOverlay();
+  overlay.report({ event: "PermissionRequest", sessionId: "sess-1" });
+  const reads: string[] = [];
+  const reconciler = new AttentionReconciler({
+    overlay,
+    agents: () => [agent()],
+    dialogPresent: async (paneId) => {
+      reads.push(paneId);
+      return false;
+    },
+    intervalMilliseconds: 60_000,
+  });
+
+  await reconciler.tick();
+  assert.equal(overlay.isBlocked("sess-1"), true, "one empty read is not enough — a repaint can blank a real dialog");
+  await reconciler.tick();
+  assert.equal(overlay.isBlocked("sess-1"), false);
+  assert.deepEqual(reads, ["wB:p1", "wB:p1"]);
+  reconciler.stop();
+});
+
+test("reconciler keeps the block while the dialog is on screen and resets the count", async () => {
+  const overlay = new AttentionOverlay();
+  overlay.report({ event: "PermissionRequest", sessionId: "sess-1" });
+  const script = [false, true, false, false];
+  const reconciler = new AttentionReconciler({
+    overlay,
+    agents: () => [agent()],
+    dialogPresent: async () => script.shift() ?? false,
+    intervalMilliseconds: 60_000,
+  });
+
+  await reconciler.tick(); // miss 1
+  await reconciler.tick(); // present → count resets
+  await reconciler.tick(); // miss 1 again
+  assert.equal(overlay.isBlocked("sess-1"), true);
+  await reconciler.tick(); // miss 2
+  assert.equal(overlay.isBlocked("sess-1"), false);
+  reconciler.stop();
+});
+
+test("reconciler ignores reads that fail and clears a session whose pane is gone", async () => {
+  const overlay = new AttentionOverlay();
+  overlay.report({ event: "PermissionRequest", sessionId: "sess-1" });
+  overlay.report({ event: "PermissionRequest", sessionId: "sess-gone" });
+  const reconciler = new AttentionReconciler({
+    overlay,
+    agents: () => [agent()],
+    dialogPresent: async () => undefined,
+    intervalMilliseconds: 60_000,
+  });
+
+  await reconciler.tick();
+  await reconciler.tick();
+  await reconciler.tick();
+  assert.equal(overlay.isBlocked("sess-1"), true, "an unreadable pane never counts as resolved");
+  assert.equal(overlay.isBlocked("sess-gone"), false, "no pane carries the session — nothing can be waiting");
+  reconciler.stop();
+});
+
+test("reconciler polls on its own only while something is blocked", async () => {
+  const overlay = new AttentionOverlay();
+  let reads = 0;
+  const reconciler = new AttentionReconciler({
+    overlay,
+    agents: () => [agent()],
+    dialogPresent: async () => {
+      reads += 1;
+      return false;
+    },
+    intervalMilliseconds: 5,
+  });
+  reconciler.start();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(reads, 0, "idle host, no reads");
+
+  overlay.report({ event: "PermissionRequest", sessionId: "sess-1" });
+  const deadline = Date.now() + 2_000;
+  while (overlay.isBlocked("sess-1") && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(overlay.isBlocked("sess-1"), false);
+  const settled = reads;
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(reads, settled, "timer stops once nothing is blocked");
+  reconciler.stop();
 });
