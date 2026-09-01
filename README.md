@@ -84,6 +84,8 @@ Copy [`.env.example`](./.env.example) or set environment variables before runnin
 | `TAVI_ROOTS` | common folders in home | Comma-separated roots shown in the project launcher. |
 | `TAVI_SHELL` | login shell | Shell used to identify shell sessions. |
 | `TAVI_MACHINE_NAME` | hostname | Display name sent to the phone. |
+| `TAVI_PREVIEW_PORT` | `8788` | Loopback listener for dev-server previews (the "door"). |
+| `TAVI_PREVIEW_DOOR_PORT` | `8443` | The tailnet HTTPS port `pair` publishes the door on. |
 
 If you change configuration after installing the macOS service, run `npm run service:install` again so the LaunchAgent receives the new values.
 
@@ -93,7 +95,8 @@ If you change configuration after installing the macOS service, run `npm run ser
 - Every API and terminal connection also requires a random per-computer pairing token.
 - Tokens are stored locally on the phone and computer. Tavi has no account, telemetry, or hosted backend.
 - Treat the token as shell access. Anyone who has it and can reach the service can execute commands as your user.
-- Do not use Tailscale Funnel or expose port `8787` directly to the public internet.
+- Do not use Tailscale Funnel or expose port `8787` (or the preview door, `8788`/`8443`) directly to the public internet.
+- Dev-server previews go through a second tailnet-only address on port `8443` that forwards nothing without a ticket the phone obtained over the authenticated API; each ticket is bound to one phone and one `localhost` port and ends when the preview closes.
 
 Tailscale documents that Serve proxies a localhost service over tailnet-only HTTPS and applies tailnet access rules: [Tailscale Serve documentation](https://tailscale.com/docs/features/tailscale-serve). The host terminal layer uses [node-pty](https://github.com/microsoft/node-pty) over `herdr agent attach`; the native client standardizes on a pinned GhosttyKit/Metal renderer.
 

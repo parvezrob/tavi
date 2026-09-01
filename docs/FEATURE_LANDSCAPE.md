@@ -89,7 +89,7 @@ Priority labels:
 | Photo/file upload | Orca, Moshi, Agentmux, Remux. | Upload to selected session cwd, preview and confirm remote path. | Next |
 | File tree and preview | Orca, Agentmux, Remux, ShadowTerm. | Read-only code/Markdown/image/PDF preview; avoid full editor initially. | Shipped as changed-first + browse fallback (#57, PRD §7.10) |
 | Path and URL recognition | Remux/Agentmux turn terminal text into native actions. | Tappable links now; file-path actions with cautious parsing next. | Paths shipped as "Files mentioned" (#61, PRD §7.10); URLs still Next |
-| Local dev-server preview | Orca, Moshi, Remux. | Private forwarding through host; WebKit view; no public tunnel. | Next |
+| Local dev-server preview | Orca, Moshi, Remux. | Private forwarding through host; WebKit view; no public tunnel. | Shipped as the ticket-routed preview door (#58, PRD §7.11); in-app only |
 | Full code editor | Orca/Agentmux/ShadowTerm have editor features. | Scope trap for the core product; add only if user data shows repeated laptop fallback for tiny edits. | Avoid for early releases |
 
 ### F. Chat and provider intelligence
