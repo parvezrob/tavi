@@ -109,13 +109,7 @@ export async function bootstrap(config: HostConfig, deps: BootstrapDeps): Promis
     try {
       await deps.execute(cli, ["serve", "--bg", String(config.port)]);
     } catch (error) {
-      throw new BootstrapError([
-        {
-          ...serve,
-          detail: `${serve.detail} Configuring it failed: ${describe(error)}`,
-          fix: `Enable HTTPS certificates for your tailnet (Tailscale admin → DNS → HTTPS Certificates), then run: tailscale serve --bg ${config.port}`,
-        },
-      ]);
+      throw new BootstrapError([{ ...serve, ...explainServeFailure(describe(error), config.port) }]);
     }
     serve = await checkServe(config, deps, cli);
     if (!serve.ok) throw new BootstrapError([serve]);
@@ -185,6 +179,26 @@ async function checkPty(deps: BootstrapDeps): Promise<Check> {
         : "Reinstall the package: rm -rf ~/.npm/_npx && npx tavi-host doctor (or `npm rebuild node-pty` in a checkout).",
     };
   }
+}
+
+// Tailscale's own error text names the real cause; pass the right one on
+// rather than guessing. On Linux the CLI needs root or an operator user to
+// change serve config; HTTPS certs are a one-time tailnet setting.
+function explainServeFailure(message: string, port: number): { detail: string; fix: string } {
+  const command = `tailscale serve --bg ${port}`;
+  if (/Access denied|serve config denied|operator/i.test(message)) {
+    return {
+      detail: "Tailscale would not let this user change its serve config (Linux needs root or an operator user).",
+      fix: `Run once: sudo tailscale set --operator=$USER — then run \`tavi pair\` again (or: sudo ${command}).`,
+    };
+  }
+  if (/HTTPS|cert|MagicDNS/i.test(message)) {
+    return {
+      detail: `Tailscale refused: ${firstLine(message)}`,
+      fix: `Enable HTTPS certificates for your tailnet (Tailscale admin → DNS → HTTPS Certificates), then run: ${command}`,
+    };
+  }
+  return { detail: `Configuring it failed: ${firstLine(message)}`, fix: `Run ${command} yourself and read Tailscale's message.` };
 }
 
 function firstLine(text: string): string {

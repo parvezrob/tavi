@@ -146,6 +146,12 @@ test("pair bootstrap explains the HTTPS-certificate prerequisite when Serve refu
   await assert.rejects(() => bootstrap(config, deps), /HTTPS Certificates.*tailscale serve --bg 8787/s);
 });
 
+test("pair bootstrap passes on Tailscale's operator requirement on Linux instead of guessing", async () => {
+  const { deps } = createDeps({ ...READY, serveProxies: [], serveFails: "sending serve config: Access denied: serve config denied\n\nUse 'sudo tailscale serve --bg 8787'." });
+  deps.operatingSystem = "linux";
+  await assert.rejects(() => bootstrap(config, deps), /sudo tailscale set --operator=\$USER/);
+});
+
 test("pair bootstrap fails honestly when the installed service never answers", async () => {
   const world: World = { ...READY, serviceLoaded: false, healthy: false };
   const { deps } = createDeps(world);

@@ -37,7 +37,7 @@ herdr is optional but is what makes the agent cards work: without it Tavi is a p
 
 Afterwards the `tavi` command manages the host: `npx tavi-host devices` lists paired phones, `devices revoke <id>` cuts one off, `uninstall-service` removes the login service, `install-claude-hooks` lets Claude Code report permission waits to the phone. To update, run `npx tavi-host@latest pair` again. (`npx` runs from a temporary cache, so the first pair installs a permanent copy under `~/.tavi/runtime` and the service runs from there; `npm i -g tavi-host` gives you a plain `tavi` command instead.)
 
-The login service is macOS-only for now; on Linux run `npx tavi-host` in a terminal and keep it open (#48 adds a systemd unit). No compiler is needed on Linux x64/arm64; if the terminal module ever fails to load, `npx tavi-host doctor` says exactly what to do.
+The login service is macOS-only for now; on Linux run `npx tavi-host` in a terminal and keep it open (#48 adds a systemd unit), and let your user manage Tailscale once with `sudo tailscale set --operator=$USER` (the command tells you if this is needed). No compiler is needed on Linux x64/arm64; if the terminal module ever fails to load, `npx tavi-host doctor` says exactly what to do.
 
 ## Development
 
