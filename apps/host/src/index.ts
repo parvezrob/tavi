@@ -251,6 +251,19 @@ const server = await createTaviServer({
       : { status: "skipped", reason: managed ? "automatic updates are off (TAVI_AUTO_UPDATE=off)" : "this host runs from a checkout or global install; update it there" },
 });
 server.on("close", () => reconciler.stop());
+server.on("error", (error: NodeJS.ErrnoException) => {
+  if (error.code === "EADDRINUSE") {
+    // Almost always a person typing `npx tavi-host` on a computer where the
+    // background host is already up (a colleague, 2026-09-01). Not a fault.
+    console.error(
+      `Tavi is already running on this computer (port ${config.port}) — nothing else to start.\n` +
+        "To pair a phone: npx tavi-host pair   ·   To check everything: npx tavi-host doctor",
+    );
+    process.exit(0);
+  }
+  console.error(`Tavi could not start: ${error.message}`);
+  process.exit(1);
+});
 server.listen(config.port, config.bindHost, () => {
   if (managed && markStarted(runtimeLayout(config.stateDir), VERSION)) console.log(`Updated to Tavi ${VERSION}.`);
   console.log(`Tavi ${VERSION} is running on http://${config.bindHost}:${config.port}`);
