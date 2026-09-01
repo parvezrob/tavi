@@ -22,7 +22,7 @@
 
 **Published 2026-09-02 (dawn):** `tavi-host` 0.1.12 (latest) — #64 `tavi` command shim written by `pair`, reported by `doctor`, removed by `uninstall`. On robin-PC run `npx tavi-host pair` once more (the checklist adds the command in one step) — from then on `tavi update` is real there. (A second `npm publish` of the same version fails with "cannot publish over the previously published versions" — versions are immutable; that error means it is already up.)
 
-**Test debt:** #65 `testLiveTypingEchoesToTheScreenWhileKeyboardIsUp` fails in full runs after the streaming test and passes alone (twice tonight). The two Claude-permission tests depend on the owner's Claude actually raising a Bash dialog — it did at 04:0x, it did not at 01:xx; staging through `POST /api/hooks/claude` would make them deterministic (#39 seam).
+**Test debt:** (#65 fixed 2026-09-02: the typed echo was split by a prompt repaint — "LIVE -TYPING-ECHO-OK" — so a contiguous count saw one occurrence; whitespace is dropped before counting; typing waits for the keyboard.) The two Claude-permission tests depend on the owner's Claude actually raising a Bash dialog — it did at 04:0x, it did not at 01:xx; staging through `POST /api/hooks/claude` would make them deterministic (#39 seam).
 
 **Open owner decisions:** whether phones should stop accepting the shared host token; a hosted relay opt-in for people who bounce off Tailscale (docs/PRODUCT.md principle 2 says direct only; decide after testers); GitHub Actions publish job.
 

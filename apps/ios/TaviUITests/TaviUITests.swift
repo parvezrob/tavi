@@ -171,16 +171,29 @@ final class TaviUITests: XCTestCase {
             "The connected terminal never rendered its prompt."
         )
 
-        surface.tap()
+        // Type only once the keyboard is really up (#65): a single tap and an
+        // immediate typeText raced the surface becoming first responder when
+        // the previous test had just dismissed the keyboard, and the
+        // keystrokes went nowhere — deterministic in that order, never alone.
         let marker = "LIVE-TYPING-ECHO-OK"
-        surface.typeText("echo \(marker)\n")
+        XCTAssertTrue(type("echo \(marker)\n", into: surface, in: app), "The terminal never took keyboard focus.")
 
-        XCTAssertTrue(
-            waitForTranscript(of: surface, timeout: 8) { value in
-                value.components(separatedBy: marker).count > 2
-            },
-            "Typed input and its output did not reach the screen while the keyboard was up."
-        )
+        // Two occurrences: the typed echo and the command's output. The
+        // transcript is a flattening of the grid, and a prompt repaint that
+        // lands mid-typing (starship redraws its right side on every key)
+        // can put a space inside the typed echo — "LIVE -TYPING-ECHO-OK" —
+        // so whitespace is dropped before counting. Both strings are on the
+        // screen; that is what this test claims.
+        let echoed = waitForTranscript(of: surface, timeout: 12) { value in
+            value.filter { !$0.isWhitespace }.components(separatedBy: marker).count > 2
+        }
+        if !echoed {
+            let note = XCTAttachment(string: "keyboards=\(app.keyboards.count)\n\(((surface.value as? String) ?? "").suffix(800))")
+            note.name = "echo-failure-evidence"
+            note.lifetime = .keepAlways
+            add(note)
+        }
+        XCTAssertTrue(echoed, "Typed input and its output did not reach the screen while the keyboard was up.")
     }
 
     // Issue #9: keyboard show/hide during continuous output must not leave
