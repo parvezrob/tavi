@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 import { AttentionOverlay, AttentionReconciler, AttentiveAgentEvents } from "./attention.js";
 import { bootstrap, BootstrapError, defaultDeps, diagnose, durablePackageRoot, formatChecks, serviceEntrypoint } from "./bootstrap.js";
-import { installClaudeHooks } from "./claude-hooks.js";
+import { installClaudeHooks, removeClaudeHooks } from "./claude-hooks.js";
+import { uninstallHerdrService } from "./herdr-service.js";
+import { uninstall } from "./uninstall.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { DeviceRegistry } from "./pairing.js";
 import { resolvePublicUrl, runPairCommand } from "./pair-command.js";
 import { loadConfig, VERSION } from "./config.js";
@@ -30,7 +34,8 @@ Usage: tavi <command>
        [--yes]             Answer yes to every question (for scripts)
   doctor                   Check every prerequisite without changing anything
   devices [revoke <id>]    List paired phones, or cut one off
-  install-service          Run the host at login (macOS); uninstall-service removes it
+  install-service          Run the host at login (macOS, Linux); uninstall-service removes it
+  uninstall                Remove Tavi from this computer entirely (asks first)
   install-claude-hooks     Report Claude Code permission waits to the phone
   update                   Check for a newer Tavi now (the background host also checks daily)
   token                    Print this host's own token (for the CLI, never for a phone)
@@ -71,6 +76,39 @@ if (process.argv[2] === "install-service") {
     console.error(`Tavi service installation failed.\n${describeFailure(error)}`);
     process.exit(1);
   }
+}
+
+if (command === "uninstall") {
+  const deps = defaultDeps(config, { assumeYes: process.argv.includes("--yes") || process.argv.includes("-y") });
+  const execFileAsync = promisify(execFile);
+  const tailscale = await deps.which("tailscale");
+  const removed = await uninstall(config, {
+    ask: deps.ask,
+    report: deps.report,
+    uninstallService: async () => {
+      await uninstallService();
+    },
+    uninstallHerdrService: async () => {
+      await uninstallHerdrService();
+    },
+    removeClaudeHooks,
+    serveHandlers: async () => {
+      if (!tailscale) return [];
+      try {
+        const { stdout } = await execFileAsync(tailscale, ["serve", "status", "--json"], { timeout: 10_000 });
+        const status = JSON.parse(stdout) as { Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }> };
+        return Object.entries(status.Web ?? {}).flatMap(([host, site]) =>
+          Object.values(site.Handlers ?? {}).map((handler): [string, string] => [host, handler.Proxy ?? ""]),
+        );
+      } catch {
+        return [];
+      }
+    },
+    resetServe: async () => {
+      if (tailscale) await execFileAsync(tailscale, ["serve", "reset"], { timeout: 10_000 });
+    },
+  });
+  process.exit(removed ? 0 : 1);
 }
 
 if (process.argv[2] === "uninstall-service") {
@@ -150,7 +188,7 @@ if (command === "update") {
   process.exit(outcome.status === "failed" ? 1 : 0);
 }
 
-const KNOWN = ["token", "install-service", "uninstall-service", "pair", "devices", "install-claude-hooks", "update"];
+const KNOWN = ["token", "install-service", "uninstall-service", "uninstall", "pair", "devices", "install-claude-hooks", "update"];
 if (command !== undefined && !KNOWN.includes(command)) {
   console.error(`Unknown command: ${command}\n\n${USAGE}`);
   process.exit(2);

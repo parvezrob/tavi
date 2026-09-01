@@ -66,3 +66,21 @@ export function installClaudeHooks(
   }
   return { settingsPath, changed };
 }
+
+/** Removes Tavi's hook entries and nothing else; true when the file changed. */
+export function removeClaudeHooks(settingsPath = path.join(homedir(), ".claude", "settings.json")): boolean {
+  if (!existsSync(settingsPath)) return false;
+  const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as Record<string, unknown>;
+  const hooks = typeof settings.hooks === "object" && settings.hooks !== null ? (settings.hooks as Record<string, unknown>) : undefined;
+  if (!hooks) return false;
+  let changed = false;
+  for (const event of Object.keys(hooks)) {
+    const entries = Array.isArray(hooks[event]) ? (hooks[event] as unknown[]) : [];
+    const kept = entries.filter((entry) => !HOOK_MARKERS.some((marker) => JSON.stringify(entry).includes(marker)));
+    if (kept.length !== entries.length) changed = true;
+    if (kept.length === 0) delete hooks[event];
+    else hooks[event] = kept;
+  }
+  if (changed) writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  return changed;
+}
