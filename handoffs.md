@@ -12,7 +12,7 @@
 
 **Learned:** Vite 8 binds `[::1]` only on macOS — probe both loopbacks. A SwiftUI container with `.accessibilityIdentifier` swallows its buttons for XCUITest unless `.accessibilityElement(children: .contain)` comes first. `NSHomeDirectory()` in the UI-test runner is the simulator sandbox — every audit path must come from env. `tailscale serve --bg --https=8443 8788` coexists with the `:443` entry; `serve status --json` keys sites by `host:port`.
 
-**Left open on #58:** the durability numbers promised to the owner (2-hour soak, burst first paint, 200 cycles, failure cases, 20 MB asset), the owner's phone test, publishing 0.1.13, `pair` once on robin-PC, a home badge later. `~/Projects/preview-demo` (Vite) was created for the check and left in place.
+**Then (05:15–05:45):** owner published 0.1.13; owner tested Preview on the phone — works. Durability pass posted to the issue (200 cycles flat, burst 133 ms, 300 parallel all 200 in 1.5 s, 20 MB in 0.26 s, server killed → 502 + `listening:false`, restarted → same ticket 200, idle lapse → 401 after 130 s). Two-hour soak left running (05:23 → ~07:25; `soak.mjs` in the Claude session scratchpad, result line in `soak.log`; the numbers go on #58 and, if flat with bad=0, #58 closes). #47 closed; the outside-tester acceptance run moved to #37. **Left open on #58:** the soak result, `pair` once on robin-PC (door), a home badge later. `~/Projects/preview-demo` (Vite) was created for the check and left in place.
 
 ## 2026-09-02 (before dawn) — #25 + #61 + #57: Files on the phone (host 0.1.11, published), then #64 + test fixes (0.1.12, published)
 
