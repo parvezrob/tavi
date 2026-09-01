@@ -2,6 +2,14 @@
 
 > Append-only log of completed work sessions, newest first. Each entry is what the *next* agent needs to know about that session: what shipped, what was learned, what was left open. The live starting point is always [`current-session.md`](./current-session.md); prune entries older than a few sessions — git history keeps everything.
 
+## 2026-09-02 (small hours) — #50/#48 closed; #63 grace window shipped (host 0.1.10, publish pending)
+
+**Shipped:** `TerminalAttachment.release()` no longer hands the pty back to the desktop at once. It arms an 8 s `DETACH_GRACE_MS` timer; `claim()` inside the window cancels it, so a reconnect flap never resizes the Mac pane; a release that outlives the window asks herdr for the viewer rect exactly once; `dispose()` cancels. `AttachmentStore` passes `detachGraceMs` through. Three new unit tests (`#63`), existing hand-back tests run with a 1 ms grace. `docs/HERDR_INTEGRATION.md` updated. Version 0.1.10 (`package.json` + `config.ts` `VERSION`). Deployed on the Mac checkout (`/api/health` → 0.1.10). **Owner publishes** (`cd apps/host && npm publish`).
+
+**Verified live** on a disposable shell pane through `herdr pane get … scroll.viewport_rows`: Mac 46 → phone attached 29 → dropped 3 s: 29 → re-attached: 29 → real detach 4 s: 29 → 12 s: 46. Host tests 161/161, `npm run check`, `npm run build`.
+
+**Closed:** #50, #48 (owner call after home v3 + the offline fix; the robin-PC-only steps — block/answer, create, Jump-to, revoke-one — were not exercised live because robin-PC was unplugged; a fresh issue if any misbehaves).
+
 ## 2026-09-02 (late) — #50 home v3: one grammar for the home, on the owner's "design is messy" call
 
 **Shipped (main; nothing host-side):** `SessionsHomeComponents` rebuilt around two objects — `SectionHeader` (small caps + trailing count, amber only for needs-you) and cards of rows (`NeedsYouRow`, `ProjectCard` + `ProjectAgentRow`) on one skeleton: `AgentGlyphTile` (SF Symbol per kind via `AgentSummary.kindGlyph`; tint = state) · primary = `secondaryIdentity ?? projectName` · secondary = `displayName · computer` · one trailing fact. Removed: `NeedsYouBanner` (+ the scroll proxy), `AgentCard`, `RecentAgentRow`, `ProjectHeader`, the amber stripe on the block. Chips show a waiting numeral when several computers are paired. DEBUG seed: `TAVI_DEV_HOST` accepts a comma list, `TAVI_DEV_HOST_NAMES` aliases in order. Audit harness gained `testCaptureHomeTwoComputers` (strip, scrolled cards, decision sheet from a row, filtered). PRD §7.3 + DEVELOPMENT.md updated. Design page: https://claude.ai/code/artifact/2a2d609e-d2bd-418e-b55a-b7621823a098.
