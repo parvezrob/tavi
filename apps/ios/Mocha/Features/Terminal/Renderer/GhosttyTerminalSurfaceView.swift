@@ -302,8 +302,14 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
     // dozen re-flows per gesture.
     private var pinchInFlight = false
     private var outputPump: GhosttyOutputPump?
-    private var scrollMomentumLink: CADisplayLink?
+    // Scrolling state (#10). One display link runs for the whole of a drag and
+    // its momentum; Ghostty is fed as touches arrive, but the surface is drawn
+    // at most once per frame from the link.
+    private var scrollLink: CADisplayLink?
     private var scrollMomentumVelocity: CGFloat = 0
+    private var scrollMomentumActive = false
+    private var scrollDragActive = false
+    private var scrollDrawPending = false
     private var surface: ghostty_surface_t?
 
     init(
@@ -491,23 +497,31 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         }
     }
 
-    // Touch scrolling maps finger drags to Ghostty's precision scroll input
-    // (mods bit 0), with display-link momentum after release. Like terminal
-    // output, scrolling must drive refresh + draw itself because the
-    // embedded surface never presents frames on its own.
+    // Touch scrolling maps finger drags to Ghostty's precision scroll input,
+    // with momentum after release. Two things make it feel like a native list
+    // (#10): Ghostty's precision `yoff` is in *pixels* (its cell height is
+    // DPI-scaled — upstream's AppKit view has the same open TODO), so points
+    // are multiplied by the content scale or a 3× phone scrolls at a third of
+    // finger speed in visible row jumps; and drawing happens once per display
+    // frame from a display link rather than synchronously on every touch
+    // sample, so a 120 Hz drag never queues more draws than frames.
     @objc private func handleScrollPan(_ gesture: UIPanGestureRecognizer) {
         switch gesture.state {
         case .began:
             stopScrollMomentum()
+            scrollDragActive = true
             updateMousePosition(gesture.location(in: self))
+            startScrollLink()
         case .changed:
             updateMousePosition(gesture.location(in: self))
             let translation = gesture.translation(in: self)
             gesture.setTranslation(.zero, in: self)
-            applyScroll(deltaY: translation.y)
+            feedScroll(pointsY: translation.y, momentum: GHOSTTY_MOUSE_MOMENTUM_NONE)
         case .ended:
+            scrollDragActive = false
             startScrollMomentum(velocity: gesture.velocity(in: self).y)
         case .cancelled, .failed:
+            scrollDragActive = false
             stopScrollMomentum()
         default:
             break
@@ -522,36 +536,79 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)
     }
 
-    private func applyScroll(deltaY: CGFloat) {
-        guard let surface, deltaY != 0 else { return }
-        ghostty_surface_mouse_scroll(surface, 0, Double(deltaY), 1)
-        ghostty_surface_refresh(surface)
-        ghostty_surface_draw(surface)
+    // Momentum is packed into the scroll mods exactly as upstream's AppKit
+    // view does: bit 0 = precision, bits 1… = the momentum phase.
+    private func feedScroll(pointsY: CGFloat, momentum: ghostty_input_mouse_momentum_e) {
+        guard let surface, pointsY != 0 else { return }
+        let scale = contentScaleFactor > 0 ? contentScaleFactor : traitCollection.displayScale
+        let mods: Int32 = 1 | Int32(momentum.rawValue) << 1
+        ghostty_surface_mouse_scroll(surface, 0, Double(pointsY * scale), mods)
+        scrollDrawPending = true
     }
+
+    private func startScrollLink() {
+        guard scrollLink == nil else { return }
+        let link = CADisplayLink(target: self, selector: #selector(stepScroll(_:)))
+        // Ask for the panel's full rate: a scroll is the one interaction
+        // where frame pacing is the whole experience.
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        link.add(to: .main, forMode: .common)
+        scrollLink = link
+    }
+
+    // Deceleration matches UIScrollView's normal rate (0.998 per millisecond),
+    // applied per elapsed time so 60 Hz and 120 Hz panels coast the same
+    // distance instead of the old per-frame factor stopping twice as fast on
+    // ProMotion.
+    private static let momentumDecelerationPerMillisecond = UIScrollView.DecelerationRate.normal.rawValue
+    private static let momentumStartThreshold: CGFloat = 80
+    private static let momentumStopThreshold: CGFloat = 20
 
     private func startScrollMomentum(velocity: CGFloat) {
-        stopScrollMomentum()
-        guard abs(velocity) > 80 else { return }
+        scrollMomentumVelocity = 0
+        scrollMomentumActive = false
+        // Below the threshold the link still flushes the last drag sample,
+        // then retires itself.
+        guard abs(velocity) > Self.momentumStartThreshold else { return }
         scrollMomentumVelocity = velocity
-        let link = CADisplayLink(target: self, selector: #selector(stepScrollMomentum(_:)))
-        link.add(to: .main, forMode: .common)
-        scrollMomentumLink = link
+        scrollMomentumActive = true
+        startScrollLink()
     }
 
-    @objc private func stepScrollMomentum(_ link: CADisplayLink) {
-        scrollMomentumVelocity *= 0.94
-        guard abs(scrollMomentumVelocity) > 30 else {
-            stopScrollMomentum()
-            return
+    @objc private func stepScroll(_ link: CADisplayLink) {
+        if scrollMomentumActive {
+            let elapsed = max(0, link.targetTimestamp - link.timestamp)
+            let decay = pow(Self.momentumDecelerationPerMillisecond, elapsed * 1000)
+            let distance = scrollMomentumVelocity * CGFloat(elapsed)
+            scrollMomentumVelocity *= CGFloat(decay)
+            if abs(scrollMomentumVelocity) <= Self.momentumStopThreshold {
+                scrollMomentumActive = false
+                scrollMomentumVelocity = 0
+                feedScroll(pointsY: distance, momentum: GHOSTTY_MOUSE_MOMENTUM_ENDED)
+            } else {
+                feedScroll(pointsY: distance, momentum: GHOSTTY_MOUSE_MOMENTUM_CHANGED)
+            }
         }
-        let frameDuration = link.targetTimestamp - link.timestamp
-        applyScroll(deltaY: scrollMomentumVelocity * CGFloat(frameDuration))
+        if scrollDrawPending, let surface {
+            scrollDrawPending = false
+            ghostty_surface_refresh(surface)
+            ghostty_surface_draw(surface)
+        }
+        if !scrollMomentumActive, !scrollDrawPending, !scrollDragActive {
+            stopScrollLink()
+        }
     }
 
     private func stopScrollMomentum() {
-        scrollMomentumLink?.invalidate()
-        scrollMomentumLink = nil
+        scrollMomentumActive = false
         scrollMomentumVelocity = 0
+        // Draw whatever was fed, then let the link retire itself.
+        if scrollDrawPending { startScrollLink() }
+    }
+
+    private func stopScrollLink() {
+        scrollLink?.invalidate()
+        scrollLink = nil
     }
 
     func dismissKeyboard() {
@@ -578,7 +635,10 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         guard let surface else { return }
         self.surface = nil
         onGridSizeChange = nil
-        stopScrollMomentum()
+        scrollMomentumActive = false
+        scrollDragActive = false
+        scrollDrawPending = false
+        stopScrollLink()
         keyboardObservers.forEach(NotificationCenter.default.removeObserver)
         keyboardObservers.removeAll()
         resignFirstResponder()
