@@ -276,8 +276,14 @@ export class HerdrService implements HerdrAgentSource {
     return agent ? { available: true, agent } : { available: true };
   }
 
+  // `--takeover` always: Tavi is the only external attach client a pane
+  // has, and a fresh attach often lands while the previous one (a phone that
+  // dropped, or the retained pty being disposed a millisecond earlier) is
+  // still registered with herdr — without the flag herdr refuses with
+  // "already has an attached client", the pty exits at once, and the phone
+  // shows a Claude session as ended (owner, robin-PC, 2026-09-02).
   attachCommand(paneId: string): AttachCommand {
-    return { bin: this.options.bin ?? "herdr", args: ["agent", "attach", paneId] };
+    return { bin: this.options.bin ?? "herdr", args: ["agent", "attach", paneId, "--takeover"] };
   }
 
   // Bounded plain-text snapshot for session cards. The text comes straight

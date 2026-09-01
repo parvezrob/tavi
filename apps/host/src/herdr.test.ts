@@ -486,3 +486,8 @@ function listen(context: TestContext, server: Server, socketPath: string): Promi
     server.listen(socketPath, resolve);
   });
 }
+
+test("attach always takes over a stale client (owner, robin-PC 2026-09-02)", () => {
+  const herdr = new HerdrService({ socketPath: "/tmp/none.sock" });
+  assert.deepEqual(herdr.attachCommand("wB:p1"), { bin: "herdr", args: ["agent", "attach", "wB:p1", "--takeover"] });
+});

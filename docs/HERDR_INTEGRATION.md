@@ -25,7 +25,7 @@ Host-side implementation: `apps/host/src/herdr.ts` (request/response) and `apps/
 | `tab.close` | `{tab_id}` | `{type: "ok"}` |
 | `events.subscribe` | `{subscriptions: [...]}` | `{type: "subscription_started"}`, then a stream of `{data, event}` lines on the same connection |
 
-CLI attach used by the terminal bridge: `herdr agent attach <pane_id>` (option `--takeover` exists; Tavi does not use it).
+CLI attach used by the terminal bridge: `herdr agent attach <pane_id> --takeover` — always with the flag (2026-09-02): herdr keeps a departed client registered for a moment, so a fresh attach right after a drop or after the host disposed the retained pty was refused with "already has an attached client" and the phone showed a live Claude session as ended (owner, robin-PC). Tavi is the only external attach client a pane has, so taking over is always right.
 
 ## Event subscription semantics (hard-won)
 
