@@ -12,9 +12,35 @@ import type { ServiceOptions } from "./service.js";
 // systemd quoting: ExecStart and Environment take quoted words; path
 // settings such as WorkingDirectory do not (a quoted one is "a bad unit
 // file setting" — the first ubuntu run, 2026-09-01).
-export const LINUX_UNIT = "tavi-host.service";
-
 type Execute = (command: string, args: string[]) => Promise<void>;
+
+export const LINUX_UNIT = "tavi-host.service";
+export const LINUX_UNIT_DIR = path.join(".config", "systemd", "user");
+
+/** Writes a user unit, reloads, enables it, and (re)starts it. Linger is best-effort. */
+export async function installSystemdUnit(
+  unit: string,
+  contents: string,
+  options: { homeDirectory: string; execute: Execute },
+): Promise<string> {
+  const unitFile = path.join(options.homeDirectory, LINUX_UNIT_DIR, unit);
+  await mkdir(path.dirname(unitFile), { recursive: true });
+  await writeFile(unitFile, contents, { encoding: "utf8", mode: 0o600 });
+  await options.execute("systemctl", ["--user", "daemon-reload"]);
+  await options.execute("systemctl", ["--user", "enable", unit]);
+  await options.execute("systemctl", ["--user", "restart", unit]);
+  await options.execute("loginctl", ["enable-linger"]).catch(() => undefined);
+  return unitFile;
+}
+
+export async function uninstallSystemdUnit(unit: string, options: { homeDirectory: string; execute: Execute }): Promise<string[]> {
+  const unitFile = path.join(options.homeDirectory, LINUX_UNIT_DIR, unit);
+  await options.execute("systemctl", ["--user", "disable", "--now", unit]).catch(() => undefined);
+  await rm(unitFile, { force: true });
+  await options.execute("systemctl", ["--user", "daemon-reload"]).catch(() => undefined);
+  return [unitFile];
+}
+
 
 export async function installSystemdService(config: HostConfig, options: ServiceOptions = {}): Promise<string> {
   const execute = options.execute ?? defaultExecute;

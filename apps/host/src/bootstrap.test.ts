@@ -24,6 +24,7 @@ interface World {
   answers?: boolean[];
   os?: NodeJS.Platform;
   serviceFails?: string;
+  herdrRunning?: boolean;
   backendState: string;
   serveProxies: string[];
   serviceLoaded: boolean;
@@ -100,6 +101,11 @@ function createDeps(world: World) {
       commands.push("start-for-session");
       world.healthy = true;
     },
+    herdrRunning: async () => world.herdrRunning === true,
+    startHerdr: async (herdrPath) => {
+      commands.push(`start-herdr ${herdrPath}`);
+      world.herdrRunning = true;
+    },
     operatingSystem: world.os ?? "darwin",
     userId: 501,
     report: (message) => reports.push(message),
@@ -113,6 +119,7 @@ function createDeps(world: World) {
 
 const READY: World = {
   tools: { tailscale: "/opt/homebrew/bin/tailscale", herdr: "/opt/homebrew/bin/herdr" },
+  herdrRunning: true,
   backendState: "Running",
   serveProxies: ["http://127.0.0.1:8787"],
   serviceLoaded: true,
@@ -161,7 +168,7 @@ test("pair shows one checklist, asks once, then does the work and reports each �
   assert.match(plan, /✓ Tailscale connected  \(studio.tail1234.ts.net\)/);
   assert.match(plan, /• Private address for your phone  — will set up/);
   assert.match(plan, /• Run Tavi in the background  — will set up/);
-  assert.match(plan, /✓ herdr installed/);
+  assert.match(plan, /✓ herdr running/);
   assert.deepEqual(questions, ["Do these 2 things now? Your password may be asked once."]);
   assert.ok(commands.includes("tailscale serve --bg 8787"), commands.join("\n"));
   assert.ok(commands.includes("install-service"));
@@ -185,7 +192,7 @@ test("saying no ends with the doctor instructions and changes nothing", async ()
 });
 
 test("Tailscale missing on Linux: the plan says install and sign in; one yes installs it, signs in, and continues", async () => {
-  const world: World = { ...READY, os: "linux", tools: { herdr: "/usr/local/bin/herdr" }, answers: [true] };
+  const world: World = { ...READY, os: "linux", tools: { herdr: "/usr/local/bin/herdr" }, herdrRunning: true, answers: [true] };
   const { deps, ran, questions, reports } = createDeps(world);
 
   await bootstrap(config, deps);
@@ -258,14 +265,27 @@ test("pair bootstrap fails honestly when nothing can start the host", async () =
   await assert.rejects(() => bootstrap(config, deps), /could not start on this computer on port 8787 after 15s/);
 });
 
-test("herdr is in the plan when missing; a failed install is skipped with a note, never fatal", async () => {
-  const yes = createDeps({ ...READY, tools: { tailscale: "/usr/bin/tailscale" }, answers: [true] });
-  await bootstrap(config, yes.deps);
-  assert.match(yes.reports[0] ?? "", /• herdr, for the agent cards  — will install/);
-  assert.ok(yes.ran.includes("brew install herdr"), yes.ran.join("\n"));
-  assert.ok(yes.reports.some((line) => /✓ herdr installed/.test(line)));
+test("herdr installed but not running: the plan starts it in the background", async () => {
+  const { deps, commands, reports } = createDeps({ ...READY, herdrRunning: false, answers: [true] });
+  await bootstrap(config, deps);
+  assert.match(reports[0] ?? "", /• Start herdr in the background, for the agent cards/);
+  assert.ok(commands.includes("start-herdr /opt/homebrew/bin/herdr"), commands.join("\n"));
+  assert.ok(reports.some((line) => /✓ herdr running/.test(line)));
+});
 
-  const failing = createDeps({ ...READY, tools: { tailscale: "/usr/bin/tailscale" }, answers: [true] });
+test("herdr is in the plan when missing; a failed install is skipped with a note, never fatal", async () => {
+  const yes = createDeps({ ...READY, tools: { tailscale: "/usr/bin/tailscale" }, herdrRunning: false, answers: [true] });
+  const originalRun = yes.deps.run;
+  yes.deps.run = async (command, args) => {
+    await originalRun(command, args);
+  };
+  await bootstrap(config, yes.deps);
+  assert.match(yes.reports[0] ?? "", /• Install herdr and start it, for the agent cards  — will do/);
+  assert.ok(yes.ran.includes("brew install herdr"), yes.ran.join("\n"));
+  assert.ok(yes.commands.includes("start-herdr /usr/local/bin/herdr"), yes.commands.join("\n"));
+  assert.ok(yes.reports.some((line) => /✓ herdr running/.test(line)));
+
+  const failing = createDeps({ ...READY, tools: { tailscale: "/usr/bin/tailscale" }, herdrRunning: false, answers: [true] });
   failing.deps.run = async () => {
     throw new Error("brew: command not found");
   };

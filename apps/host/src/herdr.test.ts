@@ -346,7 +346,19 @@ test("fails closed on an unsupported herdr protocol", async (context) => {
 
   assert.equal(result.available, false);
   assert.equal(result.agents.length, 0);
-  assert.match(result.reason ?? "", /protocol 16 is not supported/);
+  assert.match(result.reason ?? "", /too old for Tavi \(protocol 16/);
+});
+
+test("accepts the newest verified herdr protocol and refuses a newer one with an update hint", async (context) => {
+  const ok = temporarySocketPath(context);
+  await startFakeHerdr(context, ok, { protocol: 20, agents: [] });
+  assert.equal((await new HerdrService({ socketPath: ok }).listAgents()).available, true);
+
+  const newer = temporarySocketPath(context);
+  await startFakeHerdr(context, newer, { protocol: 21, agents: [] });
+  const result = await new HerdrService({ socketPath: newer }).listAgents();
+  assert.equal(result.available, false);
+  assert.match(result.reason ?? "", /newer than Tavi knows \(protocol 21.*npx tavi-host@latest pair/);
 });
 
 test("reports unavailable when herdr stops responding", async (context) => {

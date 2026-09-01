@@ -1,13 +1,13 @@
 # Herdr integration notes
 
-**Status:** verified live against herdr 0.7.5, socket protocol 17 (2026-08-25).
+**Status:** verified live against herdr 0.7.5 / protocol 17 (2026-08-25) and herdr 0.8.2 / protocol 20 (2026-09-01: ping, workspace/tab/agent lists, session.snapshot, agent.read, tab.create, pane.report_agent, agent.send_keys, tab.close all answer with the same shapes; 0.8.2 adds fields such as `agent_session`, `foreground_cwd`, `capabilities`). `herdr server` runs headless with no PTY (brew services / launchd / systemd) — the old "needs a tmux session" note was about 0.7.x.
 Host-side implementation: `apps/host/src/herdr.ts` (request/response) and `apps/host/src/herdr-events.ts` (event feed). This file records the externally-observed contract and the traps that cost debugging time; the bundled schema is authoritative: `herdr api schema --json`.
 
 ## Socket API basics
 
 - Unix socket at `~/.config/herdr/herdr.sock` (override: `TAVI_HERDR_SOCKET`).
 - Newline-delimited JSON: `{id, method, params}` → `{id, result}` or `{id, error: {code, message}}`.
-- Gate every integration on `ping` → `result.protocol === 17`. An unexpected protocol must degrade to "unavailable", never mis-parse.
+- Gate every integration on `ping` → `result.protocol` within the verified range (`MIN_PROTOCOL`..`MAX_PROTOCOL` in `herdr.ts`, 17–20 today). Outside it, degrade to "unavailable" with an update hint (too old → `brew upgrade herdr`; too new → `npx tavi-host@latest pair`), never mis-parse. Raise `MAX_PROTOCOL` only after a live probe of every method the host uses.
 - Surface `error.message` to callers — it carries actionable detail (e.g. `agent_name_taken` explains which pane owns the name).
 
 ## Methods Tavi uses

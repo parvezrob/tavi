@@ -7,7 +7,13 @@ import type { AgentStatus, AttachCommand, HerdrAgentInfo, HerdrAgentsResult } fr
 // Verified against herdr 0.7.5. The socket speaks newline-delimited JSON:
 // {id, method, params} -> {id, result}. Gate on the protocol number so an
 // incompatible herdr degrades to "unavailable" instead of mis-parsed state.
-const SUPPORTED_PROTOCOL = 17;
+// Verified live: protocol 17 (herdr 0.7.5, 2026-08-25) and protocol 20
+// (herdr 0.8.2, 2026-09-01) — same shapes for every method used here; herdr
+// adds fields but keeps them. Anything outside this range degrades to
+// "unavailable" rather than mis-parsing.
+const MIN_PROTOCOL = 17;
+const MAX_PROTOCOL = 20;
+const SUPPORTED_PROTOCOL = MAX_PROTOCOL;
 const REQUEST_TIMEOUT_MILLISECONDS = 2_000;
 // Enough lines to always capture a dialog's option list plus its footer.
 const DIALOG_READ_LINES = 40;
@@ -116,8 +122,12 @@ export class HerdrService implements HerdrAgentSource {
     } catch (error) {
       return unavailable(describeConnectionFailure(error));
     }
-    if (protocol !== SUPPORTED_PROTOCOL) {
-      return unavailable(`Herdr protocol ${protocol} is not supported (expected ${SUPPORTED_PROTOCOL}).`);
+    if (protocol < MIN_PROTOCOL || protocol > MAX_PROTOCOL) {
+      return unavailable(
+        protocol > MAX_PROTOCOL
+          ? `This herdr is newer than Tavi knows (protocol ${protocol}; Tavi supports up to ${MAX_PROTOCOL}). Update Tavi: npx tavi-host@latest pair`
+          : `This herdr is too old for Tavi (protocol ${protocol}; Tavi needs ${MIN_PROTOCOL} or newer). Update herdr: brew upgrade herdr`,
+      );
     }
 
     try {

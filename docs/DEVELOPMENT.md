@@ -42,7 +42,7 @@ Practical knowledge for building, deploying, and verifying Tavi end-to-end. Poli
 
 ## Running herdr on the host
 
-- herdr's server needs a PTY to start. On the owner's Mac it currently runs inside a detached tmux session (`tmux -L tavi new-session -d -s herdr-host 'herdr'`); that is an ops convenience on that machine only — Tavi itself no longer uses or requires tmux (#53). Running herdr as a service is part of the one-command install (#47).
+- herdr's server runs headless: on the owner's Mac it is `brew services start herdr` (launchd, since 2026-09-01, herdr 0.8.2); `tavi pair` starts it as a service where it is missing (`herdr server` under launchd or a systemd user unit). The 0.7.x-era tmux workaround is gone; Tavi does not use tmux (#53).
 - Stop it with `herdr server stop`. When it is down the phone shows the degraded card and keeps retrying; there is no other terminal route.
 
 ## Transport quick reference

@@ -8,6 +8,8 @@ import { promisify } from "node:util";
 import type { HostConfig } from "./config.js";
 import { installService, SERVICE_LABEL } from "./service.js";
 import { LINUX_UNIT } from "./service-linux.js";
+import { installHerdrService } from "./herdr-service.js";
+import { HerdrService } from "./herdr.js";
 
 // `tavi pair` on a fresh Mac (#47): everything a tester would otherwise do by
 // hand — install the service, expose it through Tailscale Serve, notice a
@@ -43,6 +45,10 @@ export interface BootstrapDeps {
   which: (command: string) => Promise<string | undefined>;
   healthy: (port: number) => Promise<boolean>;
   installService: () => Promise<void>;
+  /** True when herdr's server answers on its socket. */
+  herdrRunning: () => Promise<boolean>;
+  /** Starts herdr's server as a background service. */
+  startHerdr: (herdrPath: string) => Promise<void>;
   /** Runs the host detached from this terminal, for this login session only. */
   startForSession: () => Promise<void>;
   operatingSystem: NodeJS.Platform;
@@ -99,6 +105,10 @@ export function defaultDeps(config: HostConfig, options: { assumeYes?: boolean }
     installService: async () => {
       await installService(config, { packageRoot: await durablePackageRoot(config) });
     },
+    herdrRunning: async () => (await new HerdrService({ socketPath: config.herdrSocket }).listAgents()).available,
+    startHerdr: async (herdrPath) => {
+      await installHerdrService(herdrPath, { userId: userInfo().uid });
+    },
     startForSession: async () => {
       const root = await durablePackageRoot(config);
       const child = spawn(process.execPath, [path.join(root, "dist", "index.js")], {
@@ -124,7 +134,7 @@ export async function diagnose(config: HostConfig, deps: BootstrapDeps): Promise
     tailscale.check,
     await checkServe(config, deps, tailscale.cli),
     await checkService(config, deps),
-    await checkOptionalTool(deps, "herdr", "Agent cards and launching agents need herdr; the plain terminal works without it.", "Install herdr: https://herdr.dev"),
+    await checkHerdr(deps),
   ];
 }
 
@@ -180,18 +190,35 @@ export async function bootstrap(config: HostConfig, deps: BootstrapDeps): Promis
     pending.push(service);
     steps.push({ label: "Run Tavi in the background", done: "Tavi runs in the background", run: () => stepService(config, deps) });
   }
-  if (herdr) {
-    lines.push("  ✓ herdr installed  (agent cards)");
+  const herdrRunning = herdr ? await deps.herdrRunning() : false;
+  if (herdr && herdrRunning) {
+    lines.push("  ✓ herdr running  (agent cards)");
+  } else if (herdr) {
+    lines.push("  • Start herdr in the background, for the agent cards  — will set up");
+    steps.push({
+      label: "herdr",
+      done: "herdr running",
+      optional: true,
+      run: async () => {
+        await deps.startHerdr(herdr);
+        await waitFor(deps, () => deps.herdrRunning(), "herdr did not answer");
+        return undefined;
+      },
+    });
   } else {
     const install = installHerdrCommand(deps);
     if (install) {
-      lines.push("  • herdr, for the agent cards  — will install");
+      lines.push("  • Install herdr and start it, for the agent cards  — will do");
       steps.push({
         label: "herdr",
-        done: "herdr installed",
+        done: "herdr running",
         optional: true,
         run: async () => {
           await deps.run(install[0] as string, install.slice(1));
+          const installed = await deps.which("herdr");
+          if (!installed) throw new Error("herdr was not found after the install");
+          await deps.startHerdr(installed);
+          await waitFor(deps, () => deps.herdrRunning(), "herdr did not answer");
           return undefined;
         },
       });
@@ -296,6 +323,14 @@ async function stepService(config: HostConfig, deps: BootstrapDeps): Promise<str
   await deps.startForSession();
   await waitHealthy(config, deps, "Tavi could not start on this computer");
   return "until you log out";
+}
+
+async function waitFor(deps: BootstrapDeps, ready: () => Promise<boolean>, problem: string): Promise<void> {
+  const deadline = deps.now() + HEALTH_WAIT_MS;
+  while (!(await ready())) {
+    if (deps.now() >= deadline) throw new Error(`${problem} after ${HEALTH_WAIT_MS / 1000}s.`);
+    await deps.sleep(250);
+  }
 }
 
 async function waitHealthy(config: HostConfig, deps: BootstrapDeps, problem: string): Promise<void> {
@@ -473,6 +508,16 @@ async function checkService(config: HostConfig, deps: BootstrapDeps): Promise<Ch
     detail: loaded ? `${SERVICE_LABEL} is loaded but not answering on port ${config.port}.` : "Not installed yet.",
     fix: loaded ? `Check ${path.join(config.stateDir, "host.log")}` : "tavi install-service (tavi pair offers this)",
   };
+}
+
+async function checkHerdr(deps: BootstrapDeps): Promise<Check> {
+  const name = "herdr";
+  const found = await deps.which("herdr");
+  if (!found) {
+    return { name, ok: false, optional: true, detail: "Not installed. Agent cards and launching agents need it; the plain terminal works without it.", fix: "npx tavi-host pair (offers to install it)" };
+  }
+  if (await deps.herdrRunning()) return { name, ok: true, optional: true, detail: `running (${found})` };
+  return { name, ok: false, optional: true, detail: "Installed but its server is not running, so the app shows no agent cards.", fix: "npx tavi-host pair (starts it in the background)" };
 }
 
 async function checkOptionalTool(deps: BootstrapDeps, tool: string, detail: string, fix: string): Promise<Check> {
