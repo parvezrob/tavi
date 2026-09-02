@@ -75,10 +75,20 @@ struct ManageAccessView: View {
                     .disabled(unpairing)
                     .accessibilityIdentifier("manageAccess.unpair")
                 } footer: {
+                    // A computer that is off cannot revoke anything; the
+                    // way out is offered at once rather than after a
+                    // failed attempt (owner, 2026-09-02).
                     if let failure {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(failure)
                                 .foregroundStyle(TaviTheme.statusBlocked)
+                            Button("Forget on this iPhone only") { confirmingForget = true }
+                                .font(.footnote)
+                                .accessibilityIdentifier("manageAccess.forgetOnly")
+                        }
+                    } else if directory.health == .offline {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("\(host.displayName) isn't answering, so it cannot revoke this iPhone right now. Unpair when it is back, or forget it here and revoke on the computer later: `npx tavi-host devices revoke`.")
                             Button("Forget on this iPhone only") { confirmingForget = true }
                                 .font(.footnote)
                                 .accessibilityIdentifier("manageAccess.forgetOnly")

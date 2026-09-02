@@ -470,13 +470,17 @@ final class AgentDirectory {
                 // (`fetchRepos` guards on host/credential) when there is
                 // nothing to answer it — `isRevoked` is the one state worth
                 // skipping, a dead credential that redialing cannot fix.
-                if !self.isRevoked, !self.isOffline, case let .repos(repos) = await self.fetchRepos() {
+                // `isStale` too: while the stream is down this poll would
+                // only add a 20 s half-open socket to the redial's own.
+                if !self.isRevoked, !self.isOffline, !self.isStale, case let .repos(repos) = await self.fetchRepos() {
                     // Equatable, so an unchanged answer never triggers the
                     // @Observable re-render every poll would otherwise cost
                     // the whole home for state that rarely moves.
                     if repos != self.repos { self.repos = repos }
                 }
-                try? await Task.sleep(for: Self.reposInterval)
+                // Jittered so it never ticks in lockstep with the latency
+                // probe's 30 s (cold review, 2026-09-02).
+                try? await Task.sleep(for: Self.reposInterval * Double.random(in: 0.8...1.2))
             }
         }
     }
@@ -701,6 +705,11 @@ final class AgentDirectory {
 
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
+        // A computer that is off waits out the system's 60 s here before
+        // the sheet offers "Forget on this iPhone only" (owner, 2026-09-02:
+        // "I can't remove a device that is offline"). Ten seconds is
+        // plenty for a computer that is on.
+        request.timeoutInterval = 10
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
         do {
             let (data, response) = try await Self.session.data(for: request)
@@ -1047,22 +1056,32 @@ final class AgentDirectory {
             // host directly before deciding. The same probe says whether
             // the computer answers at all (#50): "reconnecting" and
             // "offline" are different headers on the home.
-            switch await probeHostTwice() {
-            case .rejected:
-                isRevoked = true
-                isOffline = false
-                available = false
-                reason = "This iPhone is no longer paired with this computer. Pair it again to reconnect."
-                hasLoaded = true
-                isStale = false
-                agents = []
-                stop()
-            case let .reachable(latency):
-                isOffline = false
-                latencyMilliseconds = latency
-            case .unreachable:
-                guard !Task.isCancelled else { return }
-                isOffline = true
+            // The probe runs beside the redial, never in front of it: the
+            // reconnect backoff starts the moment the stream drops. Waiting
+            // out the double probe here (up to 11.5 s) before redialing made
+            // the app miss every short good window on a WiFi link that goes
+            // deaf for seconds at a time — the old single 3 s probe never
+            // did (three cold reviews, 2026-09-02 night). A snapshot that
+            // lands before the probe answers wins: the probe then says
+            // nothing about "offline".
+            Task { [weak self] in
+                guard let self else { return }
+                switch await self.probeHostTwice() {
+                case .rejected:
+                    self.isRevoked = true
+                    self.isOffline = false
+                    self.available = false
+                    self.reason = "This iPhone is no longer paired with this computer. Pair it again to reconnect."
+                    self.hasLoaded = true
+                    self.isStale = false
+                    self.agents = []
+                    self.stop()
+                case let .reachable(latency):
+                    self.isOffline = false
+                    self.latencyMilliseconds = latency
+                case .unreachable:
+                    if self.isStale { self.isOffline = true }
+                }
             }
         }
     }
