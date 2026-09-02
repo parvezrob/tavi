@@ -4,7 +4,7 @@ import { mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { listRepos, parseWorktreeList } from "./git.js";
+import { invalidateRepos, listRepos, listReposCached, parseWorktreeList } from "./git.js";
 
 // Tests never shell out to the developer's real `gh`.
 const noPullRequests = { pullRequests: async () => null };
@@ -184,4 +184,29 @@ test("listRepos skips an unreadable repository instead of failing the whole list
   const repos = await listRepos([parent, good.parent], noPullRequests);
   assert.equal(repos.some((r) => r.root === broken), false);
   assert.ok(repos.some((r) => r.root === good.dir), "the healthy repository is still reported");
+});
+
+test("listReposCached serves the last answer at once, refreshes behind it, and forgets it on invalidate", async () => {
+  const parent = realpathSync(mkdtempSync(path.join(tmpdir(), "tavi-repos-cache-")));
+  const dir = path.join(parent, "app");
+  execFileSync("git", ["init", "-q", "-b", "main", dir]);
+  writeFileSync(path.join(dir, "a.txt"), "a\n");
+  execFileSync("git", ["-C", dir, "add", "."]);
+  execFileSync("git", ["-C", dir, "commit", "-q", "-m", "init"], { env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+  const noPr = { pullRequests: async () => null };
+  invalidateRepos();
+  const first = await listReposCached([parent], noPr);
+  assert.equal(first.find((r) => r.root === dir)?.worktrees[0]?.dirty, 0);
+  writeFileSync(path.join(dir, "b.txt"), "b\n");
+  // Within the fresh window the cached answer comes back unchanged...
+  const cached = await listReposCached([parent], noPr);
+  assert.equal(cached.find((r) => r.root === dir)?.worktrees[0]?.dirty, 0);
+  // ...a `fresh` caller waits for git...
+  const fresh = await listReposCached([parent], noPr, true);
+  assert.equal(fresh.find((r) => r.root === dir)?.worktrees[0]?.dirty, 1);
+  // ...and a write the host made forgets it for everyone.
+  writeFileSync(path.join(dir, "c.txt"), "c\n");
+  invalidateRepos();
+  const after = await listReposCached([parent], noPr);
+  assert.equal(after.find((r) => r.root === dir)?.worktrees[0]?.dirty, 2);
 });

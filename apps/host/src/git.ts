@@ -105,6 +105,45 @@ export async function listRepos(roots: string[], options: ListReposOptions = {})
   return repos;
 }
 
+// `/api/repos` from the cache (#83, owner-felt 2026-09-02: a 3 s answer
+// every 30 s while the phone polled). The last answer is served at once
+// and refreshed in the background once it is older than REPOS_REFRESH_MS;
+// only an answer older than REPOS_FRESH_MS — or a caller asking for
+// `fresh` — waits for git. One computation at a time, and every write the
+// host makes to a repository calls `invalidateRepos()` so the next poll
+// sees it.
+const REPOS_FRESH_MS = 90_000;
+const REPOS_REFRESH_MS = 15_000;
+let reposCache: { key: string; at: number; value: RepoInfo[] } | null = null;
+let reposInFlight: Promise<RepoInfo[]> | null = null;
+
+export function invalidateRepos(): void {
+  reposCache = null;
+}
+
+export async function listReposCached(roots: string[], options: ListReposOptions = {}, fresh = false): Promise<RepoInfo[]> {
+  const key = roots.join("\0");
+  const now = monotonicNow();
+  const refresh = (): Promise<RepoInfo[]> => {
+    if (!reposInFlight) {
+      reposInFlight = listRepos(roots, options)
+        .then((value) => {
+          reposCache = { key, at: monotonicNow(), value };
+          return value;
+        })
+        .finally(() => {
+          reposInFlight = null;
+        });
+    }
+    return reposInFlight;
+  };
+  if (!fresh && reposCache && reposCache.key === key && now - reposCache.at < REPOS_FRESH_MS) {
+    if (now - reposCache.at > REPOS_REFRESH_MS) void refresh().catch(() => undefined);
+    return reposCache.value;
+  }
+  return refresh();
+}
+
 async function listWorktrees(repository: string): Promise<WorktreeInfo[]> {
   let stdout: string;
   try {

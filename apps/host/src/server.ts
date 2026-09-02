@@ -32,7 +32,7 @@ import type { AttachCommand, HostInfo, ServerTerminalMessage, WorkspaceInfo } fr
 import { InputError, safeSessionId } from "./validation.js";
 import { scanWorkspaces } from "./workspaces.js";
 import { diffFile, listChanges } from "./changes.js";
-import { forgetPullRequest, listRepos, type PullRequestLookup } from "./git.js";
+import { forgetPullRequest, invalidateRepos, listReposCached, type PullRequestLookup } from "./git.js";
 import { git } from "./git-exec.js";
 import { createWorktree, previewRemoval, removeWorktree } from "./worktrees.js";
 import { configureGh, type GhRunner } from "./gh.js";
@@ -487,7 +487,7 @@ async function routeRequest(
   // reachable from the configured roots, with every worktree git itself
   // knows about — "where is my work happening" in one call.
   if (url.pathname === "/api/repos" && request.method === "GET") {
-    const repos = await listRepos(config.roots, pullRequests ? { pullRequests } : {});
+    const repos = await listReposCached(config.roots, pullRequests ? { pullRequests } : {}, url.searchParams.get("fresh") === "1");
     sendJson(response, 200, { repos });
     return;
   }
@@ -512,6 +512,7 @@ async function routeRequest(
       return;
     }
     projects.remember(result.worktree.path);
+    invalidateRepos();
     sendJson(response, 201, { worktree: result.worktree });
     return;
   }
@@ -585,6 +586,7 @@ async function routeRequest(
       return;
     }
     projects.forget(result.removed.path);
+    invalidateRepos();
     sendJson(response, 200, { removed: result.removed });
     return;
   }
@@ -673,21 +675,25 @@ async function routeRequest(
         return;
       }
       const result = await stageFiles(target.path, files, action);
+      if (result.ok) invalidateRepos();
       sendJson(response, result.ok ? 200 : result.status, result.ok ? { staged: result.staged } : { error: result.error });
       return;
     }
     if (action === "commit") {
       const result = await commitStaged(target.path, typeof record.message === "string" ? record.message : "");
+      if (result.ok) invalidateRepos();
       sendJson(response, result.ok ? 201 : result.status, result.ok ? { commit: result.commit } : { error: result.error });
       return;
     }
     if (action === "push") {
       const result = await pushBranch(target.path);
+      if (result.ok) invalidateRepos();
       sendJson(response, result.ok ? 201 : result.status, result.ok ? { pushed: result.pushed, upstream: result.upstream } : { error: result.error });
       return;
     }
     if (action === "pull-base") {
       const result = await pullBase(target.path);
+      if (result.ok) invalidateRepos();
       sendJson(
         response,
         result.ok ? (result.merged > 0 ? 201 : 200) : result.status,
