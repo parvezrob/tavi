@@ -1279,10 +1279,16 @@ test("GET /api/host names the caller's path per the computer's Tailscale, and un
   await listen(server);
   try {
     const address = server.address() as AddressInfo;
+    // The first probe answers at once with unknown while the lookup runs;
+    // the next one has the answer.
+    const first = await fetch(`http://127.0.0.1:${address.port}/api/host`, {
+      headers: { Authorization: `Bearer ${config.token}`, "X-Forwarded-For": "100.102.71.0" },
+    });
+    assert.equal(first.status, 200);
+    await new Promise((resolve) => setTimeout(resolve, 20));
     const viaServe = await fetch(`http://127.0.0.1:${address.port}/api/host`, {
       headers: { Authorization: `Bearer ${config.token}`, "X-Forwarded-For": "100.102.71.0" },
     });
-    assert.equal(viaServe.status, 200);
     assert.deepEqual(((await viaServe.json()) as { connection: unknown }).connection, { path: "relay", relay: "blr" });
 
     const local = await fetch(`http://127.0.0.1:${address.port}/api/host`, {

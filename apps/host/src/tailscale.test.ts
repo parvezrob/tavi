@@ -48,7 +48,10 @@ test("connectionPath: asks tailscale once per window, and any failure is unknown
     return { stdout: JSON.stringify(status) };
   };
   const request = { headers: { "x-forwarded-for": "100.102.71.0" }, socket: { remoteAddress: "127.0.0.1" } } as never;
-  assert.deepEqual(await connectionPath(request, runner), { path: "direct" });
+  // The route never waits: the first answer is unknown while the lookup
+  // runs in the background; tests wait for it.
+  assert.deepEqual(await connectionPath(request, runner), { path: "unknown" });
+  assert.deepEqual(await connectionPath(request, runner, true), { path: "direct" });
   assert.deepEqual(await connectionPath(request, runner), { path: "direct" });
   assert.equal(calls, 1);
 
@@ -57,7 +60,7 @@ test("connectionPath: asks tailscale once per window, and any failure is unknown
   };
   const other = { headers: { "x-forwarded-for": "100.118.42.48" }, socket: { remoteAddress: "127.0.0.1" } } as never;
   // The cached document still answers for another peer within the window.
-  assert.deepEqual(await connectionPath(other, failing), { path: "relay", relay: "blr" });
+  assert.deepEqual(await connectionPath(other, failing, true), { path: "relay", relay: "blr" });
   // No tailnet caller: nothing to ask.
   assert.deepEqual(await connectionPath({ headers: {}, socket: { remoteAddress: "127.0.0.1" } } as never, runner), { path: "unknown" });
 });

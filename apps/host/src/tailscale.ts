@@ -122,29 +122,40 @@ function hasAddress(node: unknown, address: string): boolean {
   return Array.isArray(ips) && ips.some((ip) => typeof ip === "string" && ip === address);
 }
 
-let statusCache: { at: number; value: Promise<unknown> } | null = null;
+let statusCache: { at: number; value: unknown; refreshing: Promise<unknown> | null } | null = null;
 
-// The status is asked at most every 5 s however many phones probe; a
-// failure is remembered for the same window so a missing binary never
-// spawns a shell per probe.
-function status(runner: TailscaleRunner): Promise<unknown> {
+// The status is refreshed in the background at most every 5 s and never
+// waited for: the phone's latency probe is this very route, and a spawn
+// per probe put 60 ms on every number the header showed (owner, 2026-09-03
+// 01:00). The first answer after a start is "unknown"; the next is right.
+function status(runner: TailscaleRunner, wait: boolean): Promise<unknown> {
   const now = Date.now();
-  if (statusCache && now - statusCache.at < STATUS_CACHE_MS) return statusCache.value;
-  const value = runner(["status", "--json"])
-    .then(({ stdout }) => JSON.parse(stdout) as unknown)
-    .catch(() => null);
-  statusCache = { at: now, value };
-  return value;
+  const cache = statusCache ?? (statusCache = { at: 0, value: null, refreshing: null });
+  if (now - cache.at >= STATUS_CACHE_MS && !cache.refreshing) {
+    cache.refreshing = runner(["status", "--json"])
+      .then(({ stdout }) => JSON.parse(stdout) as unknown)
+      .catch(() => null)
+      .then((value) => {
+        cache.value = value;
+        cache.at = Date.now();
+        cache.refreshing = null;
+        return value;
+      });
+  }
+  if (wait && cache.refreshing) return cache.refreshing;
+  return Promise.resolve(cache.value);
 }
 
 export async function connectionPath(
   request: Pick<IncomingMessage, "headers" | "socket">,
   runner: TailscaleRunner = defaultRunner,
+  // Tests wait for the answer; the route never does.
+  wait = false,
 ): Promise<ConnectionPath> {
   const address = callerAddress(request);
   if (!address) return { path: "unknown" };
   try {
-    return describePeerPath(await status(runner), address);
+    return describePeerPath(await status(runner, wait), address);
   } catch {
     return { path: "unknown" };
   }
