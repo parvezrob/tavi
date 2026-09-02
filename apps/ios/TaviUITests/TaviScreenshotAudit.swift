@@ -192,6 +192,68 @@ final class TaviScreenshotAudit: XCTestCase {
     // TEST_RUNNER_TAVI_AUDIT_PREVIEW_CWD (default: ~/Projects/preview-demo, a
     // Vite app on localhost:5173). The host must find exactly one server
     // there, so the sheet goes straight to consent. Skips like the audit.
+    // Source Control — Changes (#77): opens the sheet from a worktree's
+    // header on the home, stages the first file, lets Claude write the
+    // message, commits, and keeps a screenshot of each step. Needs a
+    // worktree with uncommitted changes and an agent in it, named by
+    // TEST_RUNNER_TAVI_AUDIT_WORKTREE; the commit is real, in that branch.
+    @MainActor
+    func testCaptureSourceControl() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["TAVI_AUDIT"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_AUDIT=1 to capture the design-audit screens.")
+        }
+        guard let host = environment["TAVI_DEV_HOST"],
+              let token = environment["TAVI_DEV_TOKEN"],
+              let worktree = environment["TAVI_AUDIT_WORKTREE"] else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_DEV_HOST/TOKEN and TEST_RUNNER_TAVI_AUDIT_WORKTREE.")
+        }
+
+        let app = XCUIApplication()
+        app.launchEnvironment["TAVI_DEV_RESET"] = "1"
+        app.launchEnvironment["TAVI_DEV_HOST"] = host
+        app.launchEnvironment["TAVI_DEV_TOKEN"] = token
+        app.launch()
+
+        let header = app.buttons["sessions.worktree.\(worktree)"]
+        var tries = 0
+        while !header.exists, tries < 8 {
+            if tries == 0 { _ = header.waitForExistence(timeout: 20) } else { app.swipeUp() }
+            tries += 1
+        }
+        XCTAssertTrue(header.exists, "The home never showed the worktree \(worktree).")
+        keep("sc-00-home-worktree")
+        header.tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["sourceControl.sheet"].waitForExistence(timeout: 20), "Source Control did not open.")
+        let firstFile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sourceControl.stage.'")).firstMatch
+        XCTAssertTrue(firstFile.waitForExistence(timeout: 20), "No changed file was listed.")
+        keep("sc-01-changes")
+
+        firstFile.tap()
+        sleep(3)
+        keep("sc-02-staged")
+
+        let write = app.buttons["sourceControl.writeMessage"]
+        XCTAssertTrue(write.waitForExistence(timeout: 5))
+        write.tap()
+        let commit = app.buttons["sourceControl.commit"]
+        let deadline = Date().addingTimeInterval(90)
+        while Date() < deadline, !commit.isEnabled { sleep(1) }
+        XCTAssertTrue(commit.isEnabled, "Commit never became enabled — did Claude write a message?")
+        keep("sc-03-message")
+
+        commit.tap()
+        XCTAssertTrue(app.staticTexts["sourceControl.notice"].waitForExistence(timeout: 30), "No commit receipt.")
+        sleep(2)
+        keep("sc-04-committed")
+
+        app.buttons["Pull request"].firstMatch.tap()
+        keep("sc-05-pull-request")
+        app.buttons["Commits"].firstMatch.tap()
+        keep("sc-06-commits")
+    }
+
     @MainActor
     func testCapturePreviewDevServer() async throws {
         let environment = ProcessInfo.processInfo.environment

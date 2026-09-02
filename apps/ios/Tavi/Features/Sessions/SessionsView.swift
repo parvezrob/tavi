@@ -170,6 +170,15 @@ struct SessionsView: View {
                 if let selectedHostId, !ids.contains(selectedHostId) { self.selectedHostId = nil }
                 if let chipSheet, !ids.contains(chipSheet.id) { self.chipSheet = nil }
             }
+            .sheet(item: $sourceControlTarget) { target in
+                SourceControlSheet(
+                    worktree: target.worktree,
+                    repoName: target.repoName,
+                    client: fleet.directory(for: target.hostId)?.sourceControlClient,
+                    filesClient: fleet.directory(for: target.hostId)?.filesClient,
+                    computerName: computerLabel(for: target.hostId)
+                )
+            }
             .sheet(item: $filesAgent) { agent in
                 FilesSheet(
                     agent: agent,
@@ -383,6 +392,9 @@ struct SessionsView: View {
                             onNewWorktree: { project in
                                 newWorktreeIn = (hostId: item.computer.id, path: project.path)
                                 showingNewAgent = true
+                            },
+                            onOpenWorktree: { worktree in
+                                sourceControlTarget = SourceControlTarget(hostId: item.computer.id, repoName: item.project.name, worktree: worktree)
                             }
                         )
                     }
@@ -458,6 +470,16 @@ struct SessionsView: View {
     // part 2 lands, that starts an agent in the folder rather than
     // creating a worktree.
     @State private var newWorktreeIn: (hostId: String, path: String)?
+    // A worktree's Source Control sheet (#77), keyed by computer + path
+    // since two computers can hold the same path.
+    @State private var sourceControlTarget: SourceControlTarget?
+
+    private struct SourceControlTarget: Identifiable {
+        let hostId: String
+        let repoName: String
+        let worktree: HomeWorktree
+        var id: String { "\(hostId)|\(worktree.id)" }
+    }
 
     private var homeLayout: HomeLayout {
         HomeGrouping.layout(hosts: fleet.entries.map { entry in

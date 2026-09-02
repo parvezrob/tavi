@@ -508,6 +508,12 @@ final class AgentDirectory {
         return HostFilesClient(endpoint: host, credential: credential)
     }
 
+    // Source Control routes for this computer (#77); same ownership rule.
+    var sourceControlClient: HostSourceControlClient? {
+        guard let host, !credential.isEmpty else { return nil }
+        return HostSourceControlClient(endpoint: host, credential: credential)
+    }
+
     // Dev-server preview routes for this computer (#58); same ownership
     // rule. The web view never sees this credential, only a host ticket.
     var previewClient: HostPreviewClient? {

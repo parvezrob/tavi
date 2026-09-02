@@ -229,6 +229,8 @@ struct ProjectCard: View {
     // The card's last row when it is a repository (#74): start something in
     // a new worktree of it.
     var onNewWorktree: ((HomeProject) -> Void)? = nil
+    // Tap on a worktree's header: its Source Control (#77).
+    var onOpenWorktree: ((HomeWorktree) -> Void)? = nil
 
     private var agents: [AgentSummary] { project.active + project.recent }
 
@@ -242,7 +244,7 @@ struct ProjectCard: View {
                 // PRD §7.12): material separates, strokes don't.
                 VStack(spacing: 6) {
                     ForEach(project.worktrees) { worktree in
-                        WorktreeGroup(worktree: worktree, preview: preview, observedAt: observedAt, onOpen: onOpen, onShowFiles: onShowFiles, onShowPreview: onShowPreview)
+                        WorktreeGroup(worktree: worktree, preview: preview, observedAt: observedAt, onOpen: onOpen, onShowFiles: onShowFiles, onShowPreview: onShowPreview, onOpenWorktree: onOpenWorktree)
                     }
                 }
                 .padding(.horizontal, 6)
@@ -337,36 +339,51 @@ struct WorktreeGroup: View {
     let onOpen: (AgentSummary) -> Void
     var onShowFiles: ((AgentSummary) -> Void)? = nil
     var onShowPreview: ((AgentSummary) -> Void)? = nil
+    // Tap on the header: this worktree's Source Control (#77).
+    var onOpenWorktree: ((HomeWorktree) -> Void)? = nil
 
     private var agents: [AgentSummary] { worktree.active + worktree.recent }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 10) {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(TaviTheme.textSecondary)
-                    .frame(width: 16)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(worktree.info.title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(TaviTheme.textPrimary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    if !worktree.info.summary.isEmpty {
-                        Text(worktree.info.summary)
-                            .font(.footnote)
-                            .foregroundStyle(TaviTheme.textSecondary)
+            Button {
+                onOpenWorktree?(worktree)
+            } label: {
+                HStack(alignment: .center, spacing: 10) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(TaviTheme.textSecondary)
+                        .frame(width: 16)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(worktree.info.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(TaviTheme.textPrimary)
                             .lineLimit(1)
+                            .truncationMode(.middle)
+                        if !worktree.info.summary.isEmpty {
+                            Text(worktree.info.summary)
+                                .font(.footnote)
+                                .foregroundStyle(TaviTheme.textSecondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    if onOpenWorktree != nil {
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(TaviTheme.textSecondary.opacity(0.6))
                     }
                 }
-                Spacer(minLength: 8)
+                .padding(.horizontal, 12)
+                .padding(.top, 11)
+                .padding(.bottom, agents.isEmpty ? 11 : 6)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 11)
-            .padding(.bottom, agents.isEmpty ? 11 : 6)
+            .buttonStyle(.plain)
+            .disabled(onOpenWorktree == nil)
             .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("sessions.worktree.\(worktree.info.path)")
             ForEach(agents, id: \.cardIdentity) { agent in
                 ProjectAgentRow(agent: agent, preview: preview(agent), observedAt: observedAt(agent), leadingInset: 24) {
