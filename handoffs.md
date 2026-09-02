@@ -2,6 +2,16 @@
 
 > Append-only log of completed work sessions, newest first. Each entry is what the *next* agent needs to know about that session: what shipped, what was learned, what was left open. The live starting point is always [`current-session.md`](./current-session.md); prune entries older than a few sessions — git history keeps everything.
 
+## 2026-09-02 (afternoon) — #70 + #71 fixed on the owner's ask: Network.framework WebSockets, grid-based transcript
+
+**#70 (47ead86):** `Transport/NetworkWebSocketTask.swift` (`NWConnection` + `NWProtocolWebSocket`) replaces `URLSessionWebSocketTask` for the terminal client and the events stream, behind the existing `TerminalWebSocketTasking` seam (now `negotiatedProtocol` instead of `response`). Probed first: NW gives *no* HTTP status on a rejected upgrade — 401/404/400 all arrive as `.waiting(ECONNABORTED)` and NW would retry forever — so the task fails once with `handshakeRejected` and `TerminalWebSocketClient` classifies via `GET /api/agents` (`TerminalHandshakeProbe`, injectable; 401 → revoked, pane missing → gone, else `.disconnected`). Any `.waiting` is an immediate failure (controller/directory own retries). `URLRequest.timeoutInterval` → TCP connect timeout; `noDelay`; resume query verified to reach the server with a raw-socket listener. `handshakeRejected(status:)` error case removed. Measured over 200 trips: delta/40 trips 1.6 MB → 0.4 ± 0.5 MB, heap 243 → 3 connections, 2 916 → 20 certificates, leaks 0 (table on the issue).
+
+**#71 (5359687):** `Renderer/GhosttyScreenText.swift` reads the active area with `ghostty_surface_read_text` (`GHOSTTY_POINT_ACTIVE`, TOP_LEFT → BOTTOM_RIGHT), trims row tails / trailing blank rows, keeps 8 192 scalars; the pump publishes it after each 250 ms of output and after a reflow, only when changed. Byte-stream `TerminalAccessibleTranscript` + tests deleted. `GhosttyGridTranscriptTests` creates a real `GhosttyTerminalSurfaceView` in the unit-test host (works; grid width in that host is narrow, so keep test rows short) and feeds a cursor-positioned tail redraw. `testTerminalStaysOpen` asserts `streamed output line` every minute again — passed live (3 min). Scrollback deliberately excluded (unbounded; not what is on screen).
+
+**Tooling:** `scripts/memsample.sh` heap line now counts `nw_connection` and `NetworkWebSocketTask` (heap prints Swift classes without the module prefix) and keeps `__NSURLSessionWebSocketTask` as a must-be-0. Probes in the session scratchpad: `nwfail.swift` (what NW reports on 401/404/400/good), `nwquery.swift` + `reqline.py` (raw request line).
+
+**Process:** one live run was started while the owner was in the app on the phone — aborted, cleaned up (leftover test shell pane deleted via `DELETE /api/herdr/tabs/<tab>`), restarted after they said they were off. Ask first. The phone still runs the 05:10 build; a device build is due when the owner is off the phone.
+
 ## 2026-09-02 (morning) — #58 durability closed on the host, phone memory checks: one leak fixed, one Apple bug filed (#70)
 
 **Soak:** the two-hour preview soak passed (240/240 rounds, 0 bad, 0 WebSocket drops, host RSS 103.7 → 77.4 MB and flat, FDs 58 → 50); table on #58.
