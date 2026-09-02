@@ -249,7 +249,19 @@ final class TaviScreenshotAudit: XCTestCase {
         keep("sc-04-committed")
 
         app.buttons["Pull request"].firstMatch.tap()
+        let pullRequest = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN {'sourceControl.pr.none', 'sourceControl.pr.title', 'sourceControl.pr.ghTrouble', 'sourceControl.pr.failed'}")).firstMatch
+        XCTAssertTrue(pullRequest.waitForExistence(timeout: 30), "The Pull request tab never loaded.")
         keep("sc-05-pull-request")
+
+        // Creating pushes and opens a real pull request on GitHub: only when asked for.
+        if environment["TAVI_AUDIT_PR"] == "1" {
+            let create = app.buttons["sourceControl.pr.create"]
+            XCTAssertTrue(create.waitForExistence(timeout: 5), "No Create action on the Pull request tab.")
+            create.tap()
+            XCTAssertTrue(app.staticTexts["sourceControl.pr.title"].waitForExistence(timeout: 120), "The pull request never appeared.")
+            sleep(2)
+            keep("sc-09-pull-request-created")
+        }
         app.buttons["Commits"].firstMatch.tap()
         let commits = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'sourceControl.commit.' OR identifier == 'sourceControl.commitsEmpty' OR identifier == 'sourceControl.commitsFailed'")).firstMatch
         XCTAssertTrue(commits.waitForExistence(timeout: 20), "Commits never loaded.")
@@ -275,6 +287,68 @@ final class TaviScreenshotAudit: XCTestCase {
             sleep(2)
             keep("sc-07-pushed")
         }
+    }
+
+    // Create worktree — "From a GitHub issue" (#79): opens the New Agent
+    // sheet in worktree mode on the first repository, shows the issue menu,
+    // picks the first issue, and keeps the filled-in branch. Creates nothing.
+    @MainActor
+    func testCaptureBranchFromIssue() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["TAVI_AUDIT"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_AUDIT=1 to capture the design-audit screens.")
+        }
+        guard let host = environment["TAVI_DEV_HOST"], let token = environment["TAVI_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_DEV_HOST/TOKEN to run the audit against a live host.")
+        }
+        let repoName = environment["TAVI_AUDIT_REPO"] ?? "tavi"
+
+        let app = XCUIApplication()
+        app.launchEnvironment["TAVI_DEV_RESET"] = "1"
+        app.launchEnvironment["TAVI_DEV_HOST"] = host
+        app.launchEnvironment["TAVI_DEV_TOKEN"] = token
+        app.launch()
+
+        XCTAssertTrue(app.buttons["sessions.newAgentTab"].waitForExistence(timeout: 20))
+        app.buttons["sessions.newAgentTab"].tap()
+        XCTAssertTrue(
+            app.otherElements["newAgent.folders"].waitForExistence(timeout: 20)
+                || app.collectionViews["newAgent.folders"].waitForExistence(timeout: 1),
+            "The New Agent sheet never listed folders.")
+        let kind = app.buttons["newAgent.agentKind"]
+        XCTAssertTrue(kind.waitForExistence(timeout: 10))
+        kind.tap()
+        let terminal = app.buttons["newAgent.agentKind.shell"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 10))
+        terminal.tap()
+        let worktreeMode = app.buttons["A new worktree"]
+        XCTAssertTrue(worktreeMode.waitForExistence(timeout: 10), "The sheet never offered a new worktree.")
+        var settle = 0
+        while !worktreeMode.isHittable, settle < 10 {
+            sleep(1)
+            settle += 1
+        }
+        worktreeMode.tap()
+        let repoMenu = app.buttons["newAgent.worktree.repo"]
+        XCTAssertTrue(repoMenu.waitForExistence(timeout: 10))
+        repoMenu.tap()
+        let choice = app.buttons[repoName].firstMatch
+        XCTAssertTrue(choice.waitForExistence(timeout: 10), "The repository menu never offered \(repoName).")
+        choice.tap()
+
+        let issueMenu = app.buttons["newAgent.worktree.issue"]
+        XCTAssertTrue(issueMenu.waitForExistence(timeout: 5), "No 'From a GitHub issue' menu.")
+        sleep(3)
+        issueMenu.tap()
+        let firstIssue = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '#'")).firstMatch
+        XCTAssertTrue(firstIssue.waitForExistence(timeout: 20), "The issue menu listed no issue.")
+        keep("wt-issue-00-menu")
+        firstIssue.tap()
+        sleep(1)
+        let field = app.textFields["newAgent.worktree.branch"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertTrue((field.value as? String)?.hasPrefix("issue/") == true, "The branch was not named from the issue: \(String(describing: field.value))")
+        keep("wt-issue-01-named")
     }
 
     @MainActor

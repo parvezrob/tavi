@@ -34,6 +34,14 @@ struct SourceControlSheet: View {
     @State private var pushing = false
     @State private var pulling = false
     @State private var commitsNotice: String?
+    // Pull request (#79).
+    @State private var pullRequest: Loadable<PullRequestStatus> = .loading
+    @State private var creatingPullRequest = false
+    @State private var linking = false
+    @State private var askingForLink = false
+    @State private var linkReference = ""
+    @State private var pullRequestNotice: String?
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         NavigationStack {
@@ -51,7 +59,7 @@ struct SourceControlSheet: View {
 
                 switch tab {
                 case .changes: changesTab
-                case .pullRequest: placeholder("Pull request", "Creating and linking a pull request from here arrives with the next part of #73.")
+                case .pullRequest: pullRequestTab
                 case .commits: commitsTab
                 }
             }
@@ -74,13 +82,27 @@ struct SourceControlSheet: View {
         .task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
-                guard !Task.isCancelled, busy.isEmpty, !committing, !pushing, !pulling else { continue }
+                guard !Task.isCancelled, busy.isEmpty, !committing, !pushing, !pulling, !creatingPullRequest, !linking else { continue }
                 await load(quietly: true)
                 if tab == .commits { await loadLog(quietly: true) }
+                if tab == .pullRequest { await loadPullRequest(quietly: true) }
             }
         }
         .onChange(of: tab) { _, selected in
             if selected == .commits { Task { await loadLog() } }
+            if selected == .pullRequest { Task { await loadPullRequest() } }
+        }
+        .alert("Link a pull request", isPresented: $askingForLink) {
+            TextField("Number or GitHub link", text: $linkReference)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .accessibilityIdentifier("sourceControl.pr.linkField")
+            Button("Link") { Task { await linkPullRequest() } }
+                .disabled(linkReference.trimmingCharacters(in: .whitespaces).isEmpty)
+            Button("Cancel", role: .cancel) { linkReference = "" }
+        } message: {
+            Text("The pull request on GitHub that this branch belongs to.")
         }
         .accessibilityIdentifier("sourceControl.sheet")
     }
@@ -280,6 +302,194 @@ struct SourceControlSheet: View {
         case 1: "Commit 1 file"
         default: "Commit \(status.staged) files"
         }
+    }
+
+    // MARK: - Pull request
+
+    // Per the canvas: no pull request → a title, the sentence that says
+    // creating pushes first, one amber Create, and "Link an existing one".
+    // With one → its title and state, one amber Open in GitHub. Trouble
+    // with gh on the computer is the host's sentence, and no button.
+    @ViewBuilder
+    private var pullRequestTab: some View {
+        switch pullRequest {
+        case .loading:
+            loadingRow("Asking GitHub on \(computerName ?? "the computer")…")
+        case let .failed(reason):
+            messageCard(reason, identifier: "sourceControl.pr.failed")
+        case let .loaded(status):
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if let pr = status.pullRequest {
+                        existingPullRequest(pr)
+                    } else if !status.gh.ok {
+                        Text("Pull requests need GitHub CLI on \(computerName ?? "the computer")")
+                            .font(.headline)
+                            .foregroundStyle(TaviTheme.textPrimary)
+                        Text(status.gh.reason ?? "gh could not answer.")
+                            .font(.subheadline)
+                            .foregroundStyle(TaviTheme.textSecondary)
+                            .padding(.top, 6)
+                            .accessibilityIdentifier("sourceControl.pr.ghTrouble")
+                    } else {
+                        noPullRequest(status)
+                    }
+                    if let pullRequestNotice {
+                        Text(pullRequestNotice)
+                            .font(.footnote)
+                            .foregroundStyle(TaviTheme.textSecondary)
+                            .padding(.top, 20)
+                            .accessibilityIdentifier("sourceControl.pr.notice")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.top, 18)
+            }
+        }
+    }
+
+    private func noPullRequest(_ status: PullRequestStatus) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("No pull request yet")
+                .font(.headline)
+                .foregroundStyle(TaviTheme.textPrimary)
+                .accessibilityIdentifier("sourceControl.pr.none")
+            Text(createSentence(status))
+                .font(.subheadline)
+                .foregroundStyle(TaviTheme.textSecondary)
+                .padding(.top, 6)
+            if status.remote != nil, status.branch != nil {
+                Button(creatingPullRequest ? "Creating…" : "Create pull request") {
+                    Task { await createPullRequest() }
+                }
+                .buttonStyle(.taviProminent)
+                .disabled(creatingPullRequest || linking)
+                .padding(.top, 24)
+                .accessibilityIdentifier("sourceControl.pr.create")
+                Button(linking ? "Linking…" : "Link an existing one") {
+                    linkReference = ""
+                    askingForLink = true
+                }
+                .font(.subheadline)
+                .foregroundStyle(TaviTheme.textSecondary)
+                .disabled(creatingPullRequest || linking)
+                .padding(.top, 16)
+                .padding(.leading, 4)
+                .accessibilityIdentifier("sourceControl.pr.link")
+            }
+        }
+    }
+
+    private func createSentence(_ status: PullRequestStatus) -> String {
+        guard status.branch != nil else { return "This worktree is not on a branch, so there is nothing to open a pull request for." }
+        guard let remote = status.remote else { return "This repository has no remote, so there is nowhere to open a pull request. Add one on the computer first." }
+        switch status.unpushed {
+        case 0: return "Everything on this branch is on \(remote). Creating a pull request opens it against \(worktreeBase)."
+        case 1: return "1 commit on this branch isn't on \(remote). Creating a pull request pushes it first."
+        default: return "\(status.unpushed) commits on this branch aren't on \(remote). Creating a pull request pushes them first."
+        }
+    }
+
+    private var worktreeBase: String {
+        if case let .loaded(status) = status, let base = status.base { return base }
+        return "the base branch"
+    }
+
+    private func existingPullRequest(_ pr: PullRequestInfo) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(pr.title.isEmpty ? "Pull request #\(pr.number)" : pr.title)
+                .font(.headline)
+                .foregroundStyle(TaviTheme.textPrimary)
+                .accessibilityIdentifier("sourceControl.pr.title")
+            Text(pr.stateLine)
+                .font(.footnote)
+                .foregroundStyle(TaviTheme.textSecondary)
+                .padding(.top, 6)
+            if let signals = pr.signalsLine {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(signalColor(pr))
+                        .frame(width: 6, height: 6)
+                    Text(signals)
+                }
+                .font(.footnote)
+                .foregroundStyle(TaviTheme.textSecondary)
+                .padding(.top, 6)
+            }
+            if pr.changedFiles > 0 {
+                HStack(spacing: 6) {
+                    Text(pr.changedFiles == 1 ? "1 file" : "\(pr.changedFiles) files")
+                    Text("+\(pr.additions)").foregroundStyle(TaviTheme.statusDone)
+                    Text("−\(pr.deletions)").foregroundStyle(TaviTheme.diffRemoved)
+                }
+                .font(.footnote)
+                .monospacedDigit()
+                .foregroundStyle(TaviTheme.textSecondary)
+                .padding(.top, 6)
+            }
+            if let url = URL(string: pr.url) {
+                Button("Open in GitHub") { openURL(url) }
+                    .buttonStyle(.taviProminent)
+                    .padding(.top, 24)
+                    .accessibilityIdentifier("sourceControl.pr.open")
+            }
+        }
+    }
+
+    private func signalColor(_ pr: PullRequestInfo) -> Color {
+        switch pr.checks {
+        case "failing": TaviTheme.diffRemoved
+        case "pending": TaviTheme.textSecondary
+        default: pr.review == "changes-requested" ? TaviTheme.diffRemoved : TaviTheme.statusDone
+        }
+    }
+
+    private func loadPullRequest(quietly: Bool = false) async {
+        guard let client else {
+            pullRequest = .failed("Connect a computer first.")
+            return
+        }
+        switch await client.pullRequest(path: worktree.info.path) {
+        case let .value(fresh):
+            if case let .loaded(current) = pullRequest, current == fresh { return }
+            pullRequest = .loaded(fresh)
+        case let .refused(_, reason): if !quietly { pullRequest = .failed(reason) }
+        case let .failure(reason): if !quietly { pullRequest = .failed(reason) }
+        }
+    }
+
+    private func createPullRequest() async {
+        guard let client else { return }
+        creatingPullRequest = true
+        defer { creatingPullRequest = false }
+        switch await client.createPullRequest(path: worktree.info.path, title: nil, body: nil) {
+        case let .value(receipt):
+            let pushed = receipt.pushed ?? 0
+            pullRequestNotice = pushed > 0
+                ? "Pushed \(pushed == 1 ? "1 commit" : "\(pushed) commits") and opened pull request #\(receipt.pullRequest.number)."
+                : "Opened pull request #\(receipt.pullRequest.number)."
+        case let .refused(_, reason), let .failure(reason):
+            pullRequestNotice = reason
+        }
+        await loadPullRequest()
+        await load(quietly: true)
+    }
+
+    private func linkPullRequest() async {
+        guard let client else { return }
+        let reference = linkReference.trimmingCharacters(in: .whitespaces)
+        linkReference = ""
+        guard !reference.isEmpty else { return }
+        linking = true
+        defer { linking = false }
+        switch await client.linkPullRequest(path: worktree.info.path, reference: reference) {
+        case let .value(receipt):
+            pullRequestNotice = "Linked pull request #\(receipt.pullRequest.number)."
+        case let .refused(_, reason), let .failure(reason):
+            pullRequestNotice = reason
+        }
+        await loadPullRequest()
     }
 
     // MARK: - Commits

@@ -67,6 +67,27 @@ struct HostSourceControlClient: Sendable {
         await send("/api/worktrees/pull-base", method: "POST", query: [:], body: ["path": path])
     }
 
+    // Pull request (#79): read, create (the host pushes first), link.
+    func pullRequest(path: String) async -> Outcome<PullRequestStatus> {
+        await send("/api/worktrees/pull-request", method: "GET", query: ["path": path], body: nil)
+    }
+
+    func createPullRequest(path: String, title: String?, body: String?) async -> Outcome<PullRequestReceipt> {
+        var payload: [String: Any] = ["path": path]
+        if let title, !title.isEmpty { payload["title"] = title }
+        if let body, !body.isEmpty { payload["body"] = body }
+        return await send("/api/worktrees/pull-request", method: "POST", query: [:], body: payload)
+    }
+
+    func linkPullRequest(path: String, reference: String) async -> Outcome<PullRequestReceipt> {
+        await send("/api/worktrees/pull-request/link", method: "POST", query: [:], body: ["path": path, "url": reference])
+    }
+
+    // Open issues for naming a branch (#79; the create sheet).
+    func issues(repo: String) async -> Outcome<IssueList> {
+        await send("/api/repos/issues", method: "GET", query: ["repo": repo], body: nil)
+    }
+
     private func send<Value: Decodable & Sendable>(_ route: String, method: String, query: [String: String], body: [String: Any]?) async -> Outcome<Value> {
         guard var components = URLComponents(url: endpoint.baseURL, resolvingAgainstBaseURL: false) else {
             return .failure("The host address is invalid.")
@@ -193,4 +214,96 @@ struct PullReceipt: Decodable, Sendable, Equatable {
     let merged: Int
     let fastForward: Bool
     let sha: String
+}
+
+struct PullRequestInfo: Decodable, Sendable, Equatable {
+    let number: Int
+    let url: String
+    let title: String
+    let state: String
+    let isDraft: Bool
+    let base: String
+    let checks: String
+    let review: String?
+    let additions: Int
+    let deletions: Int
+    let changedFiles: Int
+
+    // "#12 · open · into main", the state in words a person uses.
+    var stateLine: String {
+        var parts = ["#\(number)", isDraft && state == "open" ? "draft" : state]
+        if !base.isEmpty { parts.append("into \(base)") }
+        return parts.joined(separator: " · ")
+    }
+
+    // Checks and review as one line; nothing when GitHub has nothing to say.
+    var signalsLine: String? {
+        var parts: [String] = []
+        switch checks {
+        case "passing": parts.append("Checks passing")
+        case "failing": parts.append("Checks failing")
+        case "pending": parts.append("Checks running")
+        default: break
+        }
+        switch review {
+        case "approved": parts.append("approved")
+        case "changes-requested": parts.append("changes requested")
+        case "review-required": parts.append("review needed")
+        default: break
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+struct GhState: Decodable, Sendable, Equatable {
+    let ok: Bool
+    let reason: String?
+}
+
+struct PullRequestStatus: Decodable, Sendable, Equatable {
+    let path: String
+    let branch: String?
+    let pullRequest: PullRequestInfo?
+    let unpushed: Int
+    let remote: String?
+    let gh: GhState
+}
+
+struct PullRequestReceipt: Decodable, Sendable, Equatable {
+    let pullRequest: PullRequestInfo
+    let pushed: Int?
+}
+
+struct IssueSummary: Decodable, Sendable, Equatable, Identifiable {
+    let number: Int
+    let title: String
+    var id: Int { number }
+
+    // `issue/12-login-redirect-loops`: the number keeps it unique, the
+    // words keep it readable, and git accepts every character in it.
+    var branchName: String {
+        let lowered = title.lowercased()
+        var slug = ""
+        var lastWasDash = true
+        for scalar in lowered.unicodeScalars {
+            if (scalar.value >= 97 && scalar.value <= 122) || (scalar.value >= 48 && scalar.value <= 57) {
+                slug.unicodeScalars.append(scalar)
+                lastWasDash = false
+            } else if !lastWasDash {
+                slug.append("-")
+                lastWasDash = true
+            }
+        }
+        while slug.hasSuffix("-") { slug.removeLast() }
+        if slug.count > 40 {
+            slug = String(slug.prefix(40))
+            while slug.hasSuffix("-") { slug.removeLast() }
+        }
+        return slug.isEmpty ? "issue/\(number)" : "issue/\(number)-\(slug)"
+    }
+}
+
+struct IssueList: Decodable, Sendable {
+    let issues: [IssueSummary]
+    let gh: GhState
 }

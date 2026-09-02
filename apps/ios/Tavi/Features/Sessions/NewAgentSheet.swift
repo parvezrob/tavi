@@ -37,6 +37,8 @@ struct NewAgentSheet: View {
     @State private var worktreeBase: String?
     @State private var worktreeBranch = ""
     @State private var repos: [RepoInfo] = []
+    @State private var issues: [IssueSummary] = []
+    @State private var issuesNote: String?
     // The outside-roots alert serves both modes; this says which one asked.
     @State private var pendingOutsideRootsIsWorktree = false
     private let startingIn: (hostId: String, path: String)?
@@ -493,6 +495,34 @@ struct NewAgentSheet: View {
                 .textInputAutocapitalization(.never)
                 .font(.body.monospaced())
                 .accessibilityIdentifier("newAgent.worktree.branch")
+
+            // "From a GitHub issue" (#79): the repository's open issues,
+            // through the person's gh on that computer; picking one names
+            // the branch `issue/<n>-<slug>`. Trouble with gh is one line.
+            if let repo = worktreeRepo {
+                Menu {
+                    if issues.isEmpty {
+                        Text(issuesNote ?? "Loading issues…")
+                    }
+                    ForEach(issues) { issue in
+                        Button("#\(issue.number) \(issue.title)") {
+                            worktreeBranch = issue.branchName
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "number")
+                            .font(.caption)
+                        Text("From a GitHub issue")
+                            .font(.subheadline)
+                    }
+                    .foregroundStyle(TaviTheme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("newAgent.worktree.issue")
+                .task(id: repo.id) { await loadIssues(for: repo) }
+            }
         } header: {
             Text("New worktree")
         } footer: {
@@ -501,6 +531,22 @@ struct NewAgentSheet: View {
                 .foregroundStyle(TaviTheme.textSecondary)
         }
         .listRowBackground(TaviTheme.card)
+    }
+
+    private func loadIssues(for repo: RepoInfo) async {
+        issues = []
+        issuesNote = nil
+        guard let client = directory?.sourceControlClient else {
+            issuesNote = "Connect a computer first."
+            return
+        }
+        switch await client.issues(repo: repo.root) {
+        case let .value(list):
+            issues = list.issues
+            issuesNote = list.gh.ok ? (list.issues.isEmpty ? "No open issues on \(repo.name)." : nil) : list.gh.reason
+        case let .refused(_, reason), let .failure(reason):
+            issuesNote = reason
+        }
     }
 
     private func pickerRow(_ title: String, value: String) -> some View {
