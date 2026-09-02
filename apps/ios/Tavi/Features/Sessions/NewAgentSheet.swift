@@ -39,6 +39,9 @@ struct NewAgentSheet: View {
     @State private var repos: [RepoInfo] = []
     @State private var issues: [IssueSummary] = []
     @State private var issuesNote: String?
+    // A worktree this sheet already made, so a retry after the agent
+    // failed to start does not hit "branch exists" (#81 review).
+    @State private var createdWorktree: CreatedWorktree?
     // The outside-roots alert serves both modes; this says which one asked.
     @State private var pendingOutsideRootsIsWorktree = false
     private let startingIn: (hostId: String, path: String)?
@@ -695,7 +698,11 @@ struct NewAgentSheet: View {
         defer { inFlight = false }
 
         var cwd: String
-        if whereMode == .worktree, path == nil {
+        if whereMode == .worktree, path == nil, let made = createdWorktree, made.branch == worktreeBranch.trimmingCharacters(in: .whitespaces) {
+            // The worktree exists from a try whose agent failed to start:
+            // go straight to the agent, never a second `worktree add`.
+            cwd = made.path
+        } else if whereMode == .worktree, path == nil {
             // Make the worktree first; its folder is then where the agent
             // starts. The folder the host just made is inside the roots
             // whenever the worktree was, so the second call needs no
@@ -704,6 +711,7 @@ struct NewAgentSheet: View {
             let branch = worktreeBranch.trimmingCharacters(in: .whitespaces)
             switch await directory.createWorktree(repo: repo.root, branch: branch, base: worktreeBase, allowOutsideRoots: allowOutsideRoots) {
             case let .created(worktree):
+                createdWorktree = worktree
                 cwd = worktree.path
             case .needsOutsideRootsConfirmation where allowOutsideRoots:
                 failure = "The host would not create the worktree even after confirmation."
@@ -736,7 +744,9 @@ struct NewAgentSheet: View {
         case .needsOutsideRootsConfirmation:
             pendingOutsideRoots = cwd
         case let .failure(message):
-            failure = message
+            failure = createdWorktree != nil && whereMode == .worktree
+                ? "\(message) The worktree was created at \(cwd); Create again starts the agent there."
+                : message
         }
     }
 }

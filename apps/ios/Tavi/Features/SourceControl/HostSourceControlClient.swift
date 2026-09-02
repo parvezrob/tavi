@@ -79,8 +79,23 @@ struct HostSourceControlClient: Sendable {
         return await send("/api/worktrees/pull-request", method: "POST", query: [:], body: payload)
     }
 
+    // A bare number goes as `number`, anything else as `url` — the two
+    // shapes protocol/README.md documents.
     func linkPullRequest(path: String, reference: String) async -> Outcome<PullRequestReceipt> {
-        await send("/api/worktrees/pull-request/link", method: "POST", query: [:], body: ["path": path, "url": reference])
+        let trimmed = reference.trimmingCharacters(in: .whitespacesAndNewlines)
+        var body: [String: Any] = ["path": path]
+        if let number = Self.pullRequestNumber(in: trimmed) {
+            body["number"] = number
+        } else {
+            body["url"] = trimmed
+        }
+        return await send("/api/worktrees/pull-request/link", method: "POST", query: [:], body: body)
+    }
+
+    static func pullRequestNumber(in text: String) -> Int? {
+        let digits = text.hasPrefix("#") ? String(text.dropFirst()) : text
+        guard !digits.isEmpty, digits.allSatisfy(\.isNumber), let number = Int(digits), number > 0 else { return nil }
+        return number
     }
 
     // Open issues for naming a branch (#79; the create sheet).
@@ -123,22 +138,29 @@ struct HostSourceControlClient: Sendable {
         do {
             let (data, response) = try await Self.session.data(for: request)
             guard let http = response as? HTTPURLResponse else { return .failure("The host did not answer.") }
-            guard (200...299).contains(http.statusCode) else {
-                if let refusal = try? JSONDecoder().decode(HostSentence.self, from: data) {
-                    return .refused(status: http.statusCode, refusal.error)
-                }
-                if http.statusCode == 404 {
-                    return .failure("This computer's Tavi host is too old for Source Control. Update it with `npx tavi-host update`.")
-                }
-                return .failure("The host could not answer (HTTP \(http.statusCode)).")
-            }
-            do {
-                return .value(try JSONDecoder().decode(Value.self, from: data))
-            } catch {
-                return .failure("This host sent an answer Tavi does not understand. Update the Tavi host and the app to matching versions.")
-            }
+            return Self.interpret(status: http.statusCode, data: data)
         } catch {
             return .failure(error.localizedDescription)
+        }
+    }
+
+    // The host's answer as an Outcome. A route the host does not have
+    // answers `404 {"error":"Not found."}` — that is an old host, not a
+    // refusal, and the sentence says what to do about it (#81 review: the
+    // refusal decode used to run first, so this sentence never showed).
+    static func interpret<Value: Decodable>(status: Int, data: Data) -> Outcome<Value> {
+        guard (200...299).contains(status) else {
+            let refusal = try? JSONDecoder().decode(HostSentence.self, from: data)
+            if status == 404, refusal == nil || refusal?.error == "Not found." {
+                return .failure("This computer's Tavi host is too old for Source Control. Update it with `npx tavi-host update`.")
+            }
+            if let refusal { return .refused(status: status, refusal.error) }
+            return .failure("The host could not answer (HTTP \(status)).")
+        }
+        do {
+            return .value(try JSONDecoder().decode(Value.self, from: data))
+        } catch {
+            return .failure("This host sent an answer Tavi does not understand. Update the Tavi host and the app to matching versions.")
         }
     }
 

@@ -225,7 +225,7 @@ final class TaviScreenshotAudit: XCTestCase {
         keep("sc-00-home-worktree")
         header.tap()
 
-        XCTAssertTrue(app.descendants(matching: .any)["sourceControl.sheet"].waitForExistence(timeout: 20), "Source Control did not open.")
+        XCTAssertTrue(app.descendants(matching: .any)["sourceControl.tabs"].waitForExistence(timeout: 20), "Source Control did not open.")
         let firstFile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sourceControl.stage.'")).firstMatch
         XCTAssertTrue(firstFile.waitForExistence(timeout: 20), "No changed file was listed.")
         keep("sc-01-changes")
@@ -319,7 +319,7 @@ final class TaviScreenshotAudit: XCTestCase {
         }
         XCTAssertTrue(header.exists, "The home never showed the worktree \(worktree).")
         header.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["sourceControl.sheet"].waitForExistence(timeout: 20), "Source Control did not open.")
+        XCTAssertTrue(app.descendants(matching: .any)["sourceControl.tabs"].waitForExistence(timeout: 20), "Source Control did not open.")
         let more = app.buttons["sourceControl.more"]
         XCTAssertTrue(more.waitForExistence(timeout: 10), "No ··· menu on the sheet.")
         more.tap()

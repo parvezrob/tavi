@@ -44,6 +44,8 @@ struct SourceControlSheet: View {
     @State private var linkReference = ""
     @State private var pullRequestNotice: String?
     @State private var removing = false
+    @State private var removedReceipt: RemovalReceipt?
+    @State private var tabLoad: Task<Void, Never>?
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -88,11 +90,16 @@ struct SourceControlSheet: View {
                     }
                 }
             }
-            .sheet(isPresented: $removing) {
+            // One presentation transition at a time: the removal sheet
+            // closes itself after the receipt, and only then does this one
+            // go and the home hear about it.
+            .sheet(isPresented: $removing, onDismiss: {
+                guard let receipt = removedReceipt else { return }
+                dismiss()
+                onRemoved?(receipt)
+            }) {
                 RemoveWorktreeSheet(worktree: worktree, client: client, computerName: computerName) { receipt in
-                    removing = false
-                    dismiss()
-                    onRemoved?(receipt)
+                    removedReceipt = receipt
                 }
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
@@ -109,29 +116,54 @@ struct SourceControlSheet: View {
         .task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
-                guard !Task.isCancelled, busy.isEmpty, !committing, !pushing, !pulling, !creatingPullRequest, !linking else { continue }
+                guard !Task.isCancelled, busy.isEmpty, !committing, !pushing, !pulling, !creatingPullRequest, !linking, !removing, removedReceipt == nil else { continue }
                 await load(quietly: true)
                 if tab == .commits { await loadLog(quietly: true) }
                 if tab == .pullRequest { await loadPullRequest(quietly: true) }
             }
         }
         .onChange(of: tab) { _, selected in
-            if selected == .commits { Task { await loadLog() } }
-            if selected == .pullRequest { Task { await loadPullRequest() } }
+            tabLoad?.cancel()
+            tabLoad = Task {
+                if selected == .commits { await loadLog() }
+                if selected == .pullRequest { await loadPullRequest() }
+            }
         }
+        .onDisappear { tabLoad?.cancel() }
         .alert("Link a pull request", isPresented: $askingForLink) {
             TextField("Number or GitHub link", text: $linkReference)
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .accessibilityIdentifier("sourceControl.pr.linkField")
-            Button("Link") { Task { await linkPullRequest() } }
+            Button("Link") { begin($linking) { await linkPullRequest() } }
                 .disabled(linkReference.trimmingCharacters(in: .whitespaces).isEmpty)
             Button("Cancel", role: .cancel) { linkReference = "" }
         } message: {
             Text("The pull request on GitHub that this branch belongs to.")
         }
-        .accessibilityIdentifier("sourceControl.sheet")
+        // No identifier on the root: it would overwrite every child's.
+    }
+
+    // Every action flips its flag on the tap itself, before the Task, so
+    // two taps in one frame cannot commit, push, or create twice (the
+    // NewAgentSheet rule; #81 review).
+    private func begin(_ flag: Binding<Bool>, _ action: @escaping () async -> Void) {
+        guard !flag.wrappedValue else { return }
+        flag.wrappedValue = true
+        Task {
+            await action()
+            flag.wrappedValue = false
+        }
+    }
+
+    private func beginBusy(_ key: String, _ action: @escaping () async -> Void) {
+        guard !busy.contains(key) else { return }
+        busy.insert(key)
+        Task {
+            await action()
+            busy.remove(key)
+        }
     }
 
     // MARK: - Header
@@ -199,7 +231,7 @@ struct SourceControlSheet: View {
                                     .foregroundStyle(TaviTheme.textSecondary)
                                 Spacer()
                                 Button(status.staged == status.files.count ? "Unstage all" : "Stage all") {
-                                    Task { await stageAll(status) }
+                                    beginBusy("*") { await stageAll(status) }
                                 }
                                 .font(.footnote)
                                 .textCase(nil)
@@ -221,7 +253,7 @@ struct SourceControlSheet: View {
     private func changedRow(_ file: ChangedFile) -> some View {
         HStack(spacing: 12) {
             Button {
-                Task { await toggle(file) }
+                beginBusy(file.path) { await toggle(file) }
             } label: {
                 ZStack {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -294,7 +326,7 @@ struct SourceControlSheet: View {
                 .accessibilityIdentifier("sourceControl.message")
             HStack {
                 Button(writing ? "Writing…" : "Let Claude write it") {
-                    Task { await writeMessage() }
+                    begin($writing) { await writeMessage() }
                 }
                 .font(.footnote)
                 .foregroundStyle(TaviTheme.textSecondary)
@@ -302,7 +334,7 @@ struct SourceControlSheet: View {
                 .accessibilityIdentifier("sourceControl.writeMessage")
                 Spacer()
                 Button(committing ? "Committing…" : commitLabel(status)) {
-                    Task { await commit() }
+                    begin($committing) { await commit() }
                 }
                 .buttonStyle(.taviProminent)
                 .disabled(committing || status.staged == 0 || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -388,7 +420,7 @@ struct SourceControlSheet: View {
                 .padding(.top, 6)
             if status.remote != nil, status.branch != nil {
                 Button(creatingPullRequest ? "Creating…" : "Create pull request") {
-                    Task { await createPullRequest() }
+                    begin($creatingPullRequest) { await createPullRequest() }
                 }
                 .buttonStyle(.taviProminent)
                 .disabled(creatingPullRequest || linking)
@@ -488,8 +520,6 @@ struct SourceControlSheet: View {
 
     private func createPullRequest() async {
         guard let client else { return }
-        creatingPullRequest = true
-        defer { creatingPullRequest = false }
         switch await client.createPullRequest(path: worktree.info.path, title: nil, body: nil) {
         case let .value(receipt):
             let pushed = receipt.pushed ?? 0
@@ -508,8 +538,6 @@ struct SourceControlSheet: View {
         let reference = linkReference.trimmingCharacters(in: .whitespaces)
         linkReference = ""
         guard !reference.isEmpty else { return }
-        linking = true
-        defer { linking = false }
         switch await client.linkPullRequest(path: worktree.info.path, reference: reference) {
         case let .value(receipt):
             pullRequestNotice = "Linked pull request #\(receipt.pullRequest.number)."
@@ -546,7 +574,7 @@ struct SourceControlSheet: View {
                                 }
                             } header: {
                                 commitsHeader(log.ahead.count == 1 ? "1 ahead of \(base)" : "\(log.ahead.count) ahead of \(base)") {
-                                    Button(pushLabel(log)) { Task { await push() } }
+                                    Button(pushLabel(log)) { begin($pushing) { await push() } }
                                         .disabled(pushing || pulling || !canPush(log))
                                         .accessibilityIdentifier("sourceControl.push")
                                 }
@@ -562,7 +590,7 @@ struct SourceControlSheet: View {
                                 }
                             } header: {
                                 commitsHeader(log.behind.count == 1 ? "1 behind \(base)" : "\(log.behind.count) behind \(base)") {
-                                    Button(pulling ? "Pulling…" : "Pull \(base) in") { Task { await pullBase() } }
+                                    Button(pulling ? "Pulling…" : "Pull \(base) in") { begin($pulling) { await pullBase() } }
                                         .disabled(pushing || pulling)
                                         .accessibilityIdentifier("sourceControl.pullBase")
                                 }
@@ -609,7 +637,7 @@ struct SourceControlSheet: View {
             HStack(spacing: 0) {
                 Text("\(commit.author) · \(commit.age()) · ")
                 Text(commit.shortSha)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.footnote.monospaced())
             }
             .font(.footnote)
             .foregroundStyle(TaviTheme.textSecondary)
@@ -648,8 +676,6 @@ struct SourceControlSheet: View {
 
     private func push() async {
         guard let client else { return }
-        pushing = true
-        defer { pushing = false }
         switch await client.push(path: worktree.info.path) {
         case let .value(receipt):
             commitsNotice = "Pushed \(receipt.pushed == 1 ? "1 commit" : "\(receipt.pushed) commits") to \(receipt.upstream)."
@@ -662,8 +688,6 @@ struct SourceControlSheet: View {
 
     private func pullBase() async {
         guard let client else { return }
-        pulling = true
-        defer { pulling = false }
         switch await client.pullBase(path: worktree.info.path) {
         case let .value(receipt):
             let base = { if case let .loaded(log) = log { log.base } else { nil } }() ?? "the base"
@@ -695,8 +719,6 @@ struct SourceControlSheet: View {
 
     private func toggle(_ file: ChangedFile) async {
         guard let client else { return }
-        busy.insert(file.path)
-        defer { busy.remove(file.path) }
         let outcome = file.staged
             ? await client.unstage(path: worktree.info.path, files: [file.path])
             : await client.stage(path: worktree.info.path, files: [file.path])
@@ -706,8 +728,6 @@ struct SourceControlSheet: View {
 
     private func stageAll(_ status: WorktreeStatus) async {
         guard let client else { return }
-        busy.insert("*")
-        defer { busy.remove("*") }
         let outcome = status.staged == status.files.count
             ? await client.unstage(path: worktree.info.path, files: status.files.map(\.path))
             : await client.stageAll(path: worktree.info.path)
@@ -717,8 +737,6 @@ struct SourceControlSheet: View {
 
     private func writeMessage() async {
         guard let client else { return }
-        writing = true
-        defer { writing = false }
         switch await client.writeMessage(path: worktree.info.path) {
         case let .value(written):
             message = written.message
@@ -730,8 +748,6 @@ struct SourceControlSheet: View {
 
     private func commit() async {
         guard let client else { return }
-        committing = true
-        defer { committing = false }
         switch await client.commit(path: worktree.info.path, message: message) {
         case let .value(receipt):
             message = ""
@@ -751,15 +767,12 @@ struct SourceControlSheet: View {
 
     // MARK: - Shared
 
-    private func placeholder(_ title: String, _ text: String) -> some View {
-        messageCard(text, identifier: "sourceControl.placeholder.\(title)")
-    }
 
     private func loadingRow(_ text: String) -> some View {
         HStack(spacing: 10) {
             ProgressView()
             Text(text)
-                .font(.callout)
+                .font(.subheadline)
                 .foregroundStyle(TaviTheme.textSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -768,7 +781,7 @@ struct SourceControlSheet: View {
     private func messageCard(_ text: String, identifier: String) -> some View {
         VStack {
             Text(text)
-                .font(.callout)
+                .font(.subheadline)
                 .foregroundStyle(TaviTheme.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(20)
