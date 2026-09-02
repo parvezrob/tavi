@@ -2,7 +2,7 @@
 
 > Every agent starts here. This file holds the live state of the project *right now* and the next piece of work. Update it before ending a session (or at any significant milestone); move the previous state into [`handoffs.md`](./handoffs.md). Keep it short — details belong in the linked docs.
 
-**Last updated:** 2026-09-02 ~23:50 (session closed by the owner; **the source-control epic #73 is closed after every flow was exercised live from the phone on cellular, and the evening's connection drops are explained: the phone's WiFi hop went deaf, the app amplified it, three cold reviews agree — the fix that restores fast reconnects is on the phone (2ac15a8) and the owner called it "very good now on mobile"**; the feature freeze is back on)
+**Last updated:** 2026-09-03 ~00:50 (mid-session; **#86 connection resilience is built and pushed (07a4c67 phone, e66d7e0 host 0.1.17), unit suites green (host 238, iOS 140), the device build is ready and waits for the cable; the Mac's host now runs the 0.1.17 checkout as the service so the phone can show the path in words** — `npx tavi-host@latest pair` puts the managed runtime back once 0.1.17 is published)
 
 ## Next work
 
