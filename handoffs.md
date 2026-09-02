@@ -12,7 +12,7 @@
 
 **Learned:** `leaks` says 0 for reachable garbage — always pair it with `heap` class counts; `leaks --trace=<addr>` names the retainer. `pkill -f <script>` kills any shell whose command line mentions the script (took down a test wrapper; xcodebuild survived as an orphan). `heap`/`leaks` work on simulator apps from the Mac. A `| cut` at the end of a Monitor pipeline block-buffers and swallows events; use `awk … fflush()`. XCUITest env: `-only-testing` order is not the run order.
 
-**Left running at hand-off:** the two one-hour stays (`testPreviewStaysOpen`, then `testTerminalStaysOpen`) — see current-session.md for log paths.
+**Stays (both passed, 12:05):** preview 60 min at 80 MB flat with 30 door edits landed; terminal 60 min at 5 lines/s, 77 → 79 MB; leaks 0, heap single digits. The terminal stay's first two runs failed on the *test's* text check and exposed **#71**: under herdr's screen-diff output the accessible transcript (VoiceOver, Files mentioned, port scan) is only the changed cells — fragments with no line text — while the screen is right; fix = build the transcript from Ghostty's rendered grid. **#58 closed.**
 
 ## 2026-09-02 (dawn) — #58 private dev-server preview: built host + phone, seen working (host 0.1.13, publish pending)
 
