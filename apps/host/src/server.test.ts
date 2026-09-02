@@ -1293,3 +1293,49 @@ test("GET /api/host names the caller's path per the computer's Tailscale, and un
     await close(server);
   }
 });
+
+test("POST /api/files/upload saves an image into the agent's folder and refuses the rest (#88)", async () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "tavi-upload-route-")));
+  const project = path.join(root, "app");
+  mkdirSync(project);
+  const server = await createTaviServer({ config: { ...config, roots: [root] } });
+  await listen(server);
+  try {
+    const address = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${address.port}`;
+    const auth = { Authorization: `Bearer ${config.token}` };
+    const saved = await fetch(`${base}/api/files/upload?cwd=${encodeURIComponent(project)}`, {
+      method: "POST",
+      headers: { ...auth, "Content-Type": "image/jpeg" },
+      body: Buffer.from("jpeg-bytes"),
+    });
+    assert.equal(saved.status, 201);
+    const body = (await saved.json()) as { path: string; bytes: number };
+    assert.ok(body.path.startsWith(path.join(project, ".tavi", "uploads")));
+    assert.ok(existsSync(body.path));
+    assert.equal(body.bytes, 10);
+
+    const text = await fetch(`${base}/api/files/upload?cwd=${encodeURIComponent(project)}`, {
+      method: "POST",
+      headers: { ...auth, "Content-Type": "text/plain" },
+      body: "hello",
+    });
+    assert.equal(text.status, 415);
+
+    const outside = await fetch(`${base}/api/files/upload?cwd=${encodeURIComponent(tmpdir())}`, {
+      method: "POST",
+      headers: { ...auth, "Content-Type": "image/png" },
+      body: Buffer.from("x"),
+    });
+    assert.equal(outside.status, 403);
+
+    const anonymous = await fetch(`${base}/api/files/upload?cwd=${encodeURIComponent(project)}`, {
+      method: "POST",
+      headers: { "Content-Type": "image/png" },
+      body: Buffer.from("x"),
+    });
+    assert.equal(anonymous.status, 401);
+  } finally {
+    await close(server);
+  }
+});

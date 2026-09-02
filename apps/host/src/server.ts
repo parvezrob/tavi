@@ -37,6 +37,7 @@ import { git } from "./git-exec.js";
 import { createWorktree, previewRemoval, removeWorktree } from "./worktrees.js";
 import { configureGh, type GhRunner } from "./gh.js";
 import { configureTailscale, connectionPath, type TailscaleRunner } from "./tailscale.js";
+import { readUploadBody, saveUpload } from "./uploads.js";
 import { createPullRequest, linkPullRequest, listIssues, pullRequestStatus } from "./pull-requests.js";
 import { commitStaged, currentBranch, pullBase, pushBranch, stageFiles, worktreeLog, worktreeStatus, writeCommitMessage } from "./source-control.js";
 import { MAX_RAW_BYTES, listDirectory, readTextContent, resolveWithinRoots, statFile } from "./files.js";
@@ -1036,6 +1037,25 @@ async function routeRequest(
       return;
     }
     sendJson(response, 200, result.diff);
+    return;
+  }
+
+  // An image attached from the composer (#88): raw body, image types
+  // only, into the agent's own folder under .tavi/uploads/. The answer is
+  // the path the phone puts into the message.
+  if (url.pathname === "/api/files/upload" && request.method === "POST") {
+    const cwdParam = url.searchParams.get("cwd") ?? "";
+    const body = await readUploadBody(request);
+    if (!body) {
+      sendJson(response, 413, { error: "Images are limited to 10 MB." });
+      return;
+    }
+    const saved = await saveUpload({ cwd: cwdParam, roots: config.roots, contentType: request.headers["content-type"], body });
+    if (!saved.ok) {
+      sendJson(response, saved.status, { error: saved.error, ...(saved.outsideRoots ? { outsideRoots: true } : {}) });
+      return;
+    }
+    sendJson(response, 201, { path: saved.path, bytes: saved.bytes });
     return;
   }
 

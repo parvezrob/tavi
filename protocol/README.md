@@ -86,6 +86,16 @@ Host-token only: list paired devices (`{ "devices": [{ "id", "name", "pairedAt",
 
 `connection` (host ≥ 0.1.17, #86) is the caller's path per the computer's own Tailscale: `direct` (peer to peer), `relay` with the DERP region (`relay`), or `unknown` (Tailscale not installed or not asked, the caller not a tailnet peer, a direct localhost call). The phone shows it in words — "Live · 40 ms · relay" — instead of blaming the computer for a slow link. It is a fact for a screen, never a guardrail; an older host simply omits it.
 
+### `POST /api/files/upload?cwd=<folder>`
+
+An image attached from the composer (#88; host ≥ 0.1.17). The body is the image itself (`Content-Type: image/jpeg | png | gif | webp | heic`, 10 MB at most); `cwd` is the agent's folder and must be inside the roots. The file lands in `<cwd>/.tavi/uploads/<date>-<time>-<id>.<ext>`, kept out of git through the repository's `.git/info/exclude`, and swept after seven days.
+
+```json
+{ "path": "/Users/me/Projects/app/.tavi/uploads/2026-09-03-004512-k9f2.jpg", "bytes": 183220 }
+```
+
+Refusals: `403` outside the roots (`outsideRoots: true`), `413` too large, `415` not an image, `404` no such folder.
+
 ### `GET /api/projects`
 
 Everything a client needs to choose where a new agent starts.

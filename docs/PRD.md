@@ -194,6 +194,10 @@ The everyday case is a phone on a mobile network: 40–120 ms round trips, a pat
 - **Release check:** WiFi off, cellular only, twenty minutes of real use; no stall longer than a few seconds, no "Offline" while the Mac is up. Never install wirelessly on a test phone.
 - What it will not do: make a dead link work. With no path for a minute the app waits it out with the last state on screen and says "Reconnecting".
 
+### 7.14 Attach an image from the composer (#88, 2026-09-03)
+
+"Show the agent what I mean": a paperclip on the composer opens the photo library; the picked image is shrunk on the phone (longest side 2048 px, JPEG) and uploaded to the agent's own folder under `.tavi/uploads/`, and its path is appended to the message, since Claude Code and friends read an image when the prompt names one. The composer says where it went ("Saved on MacBook Air in the project's .tavi/uploads folder") the first time; the host keeps the folder out of git and sweeps it after a week. Images only, inside the roots, 10 MB at most (§7.9). Camera and paste come later.
+
 ## 8. V1.1 candidate scope
 
 - Push notifications from explicit Herdr/provider events.
