@@ -105,8 +105,8 @@ private final class GhosttyWriteCallback: @unchecked Sendable {
 
 // Ghostty's feed path locks renderer state internally and upstream drives it
 // from a dedicated IO thread, never the UI thread. Feeding from a serial
-// background queue keeps VT parsing (and the accessibility transcript's
-// second pass over every byte) out of the main thread's way, so keyboard and
+// background queue keeps VT parsing (and the grid read behind the
+// accessibility transcript) out of the main thread's way, so keyboard and
 // touch handling stay responsive during agent redraw storms.
 private final class GhosttyOutputPump: @unchecked Sendable {
     // Ghostty's feed path and its render thread share one unfair lock, so
@@ -128,7 +128,8 @@ private final class GhosttyOutputPump: @unchecked Sendable {
     private let queue = DispatchQueue(label: "tavi.terminal.output", qos: .userInitiated)
     private let publishTranscript: @MainActor @Sendable (String) -> Void
     private var surface: ghostty_surface_t?
-    private var transcript = TerminalAccessibleTranscript()
+    // The last screen text handed out; an unchanged screen is not re-published.
+    private var publishedTranscript = ""
     private var transcriptPublishScheduled = false
     private var pendingData = Data()
     private var drainScheduled = false
@@ -182,7 +183,6 @@ private final class GhosttyOutputPump: @unchecked Sendable {
         }
         ghostty_surface_refresh(surface)
         scheduleDrawOnQueue()
-        transcript.append(data)
         schedulePublishOnQueue()
     }
 
@@ -219,13 +219,25 @@ private final class GhosttyOutputPump: @unchecked Sendable {
         }
     }
 
+    // A reflow (resize, font change) changes the screen without new bytes.
+    func requestTranscriptPublish() {
+        queue.async { [self] in
+            guard surface != nil else { return }
+            schedulePublishOnQueue()
+        }
+    }
+
+    // Reads the rendered grid (GhosttyScreenText, #71) at most every 250 ms
+    // of output and publishes it when it changed.
     private func schedulePublishOnQueue() {
         guard !transcriptPublishScheduled else { return }
         transcriptPublishScheduled = true
         queue.asyncAfter(deadline: .now() + Self.transcriptPublishDelay) { [self] in
             transcriptPublishScheduled = false
-            guard surface != nil, !transcript.isEmpty else { return }
-            let value = transcript.value
+            guard let surface else { return }
+            let value = GhosttyScreenText.activeArea(of: surface)
+            guard !value.isEmpty, value != publishedTranscript else { return }
+            publishedTranscript = value
             let publish = publishTranscript
             Task { @MainActor in
                 publish(value)
@@ -697,6 +709,7 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         guard grid.columns > 0, grid.rows > 0, grid != lastGridSize else { return }
         lastGridSize = grid
         onGridSizeChange?(grid)
+        outputPump?.requestTranscriptPublish()
     }
 
     @objc private func sendEscape() {

@@ -132,10 +132,10 @@ final class TaviMemoryChecks: XCTestCase {
         var previous = ""
         while Date() < deadline {
             try await Task.sleep(for: .seconds(60))
-            // Liveness = the accessible transcript keeps changing. It cannot
-            // be asked for the line text: herdr's attach sends screen diffs,
-            // and with every row starting with the same words only the
-            // changing cells reach the transcript (issue filed 2026-09-02).
+            // Liveness = the accessible transcript keeps changing, and it
+            // reads as whole rows: since #71 it comes from Ghostty's grid, so
+            // herdr's screen diffs (only the changed cells of rows that all
+            // start with the same words) no longer leave fragments.
             var now = ""
             for _ in 0 ..< 5 where now.isEmpty || now == previous {
                 now = (app.descendants(matching: .any)["terminal.surface"].value as? String) ?? ""
@@ -146,6 +146,7 @@ final class TaviMemoryChecks: XCTestCase {
             }
             XCTAssertFalse(now.isEmpty, "The terminal's transcript went empty: the stream or the surface is gone.")
             XCTAssertNotEqual(now, previous, "The terminal screen has not changed in a minute: the stream stalled.")
+            XCTAssertTrue(now.contains("streamed output line"), "The transcript no longer reads as whole rows (#71): \(now.prefix(200))")
             previous = now
         }
         try await leaksWindow(live, label: "terminal-stay")
