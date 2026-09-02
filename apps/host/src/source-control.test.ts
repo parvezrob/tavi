@@ -4,7 +4,7 @@ import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { commitStaged, stageFiles, worktreeStatus, writeCommitMessage } from "./source-control.js";
+import { commitStaged, pullBase, pushBranch, stageFiles, worktreeLog, worktreeStatus, writeCommitMessage } from "./source-control.js";
 
 const identity = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
 
@@ -91,6 +91,147 @@ test("stage all takes every changed file", async () => {
   const status = await worktreeStatus(dir);
   assert.ok(status.ok);
   assert.equal(status.status.staged, 2);
+});
+
+// A branch two commits over main while main moved on by one, with a bare
+// "remote" beside it so push works without a network (#78).
+function branched(): { dir: string; remote: string } {
+  const dir = repo();
+  const remote = path.join(path.dirname(dir), "remote.git");
+  git(path.dirname(dir), "init", "-q", "--bare", "remote.git");
+  git(dir, "remote", "add", "origin", remote);
+  git(dir, "push", "-q", "origin", "main");
+  git(dir, "checkout", "-q", "-b", "feat/x");
+  git(dir, "config", "--local", "branch.feat/x.base", "main");
+  writeFileSync(path.join(dir, "b.txt"), "b\n");
+  git(dir, "add", "b.txt");
+  git(dir, "commit", "-q", "-m", "feat: add b");
+  writeFileSync(path.join(dir, "c.txt"), "c\n");
+  git(dir, "add", "c.txt");
+  git(dir, "commit", "-q", "-m", "feat: add c");
+  git(dir, "checkout", "-q", "main");
+  writeFileSync(path.join(dir, "m.txt"), "m\n");
+  git(dir, "add", "m.txt");
+  git(dir, "commit", "-q", "-m", "chore: main moved");
+  git(dir, "checkout", "-q", "feat/x");
+  return { dir, remote };
+}
+
+test("log lists the commits ahead of and behind the base, newest first, with the push remote and no upstream yet", async () => {
+  const { dir } = branched();
+  const result = await worktreeLog(dir);
+  assert.ok(result.ok, JSON.stringify(result));
+  assert.equal(result.log.branch, "feat/x");
+  assert.equal(result.log.base, "main");
+  assert.deepEqual(result.log.ahead.map((c) => c.summary), ["feat: add c", "feat: add b"]);
+  assert.deepEqual(result.log.behind.map((c) => c.summary), ["chore: main moved"]);
+  assert.equal(result.log.ahead[0]?.author, "t");
+  assert.match(result.log.ahead[0]?.sha ?? "", /^[0-9a-f]{40}$/);
+  assert.match(result.log.ahead[0]?.when ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(result.log.upstream, null);
+  assert.equal(result.log.remote, "origin");
+  assert.equal(result.log.truncated, false);
+});
+
+test("push sets the upstream the first time, then says when there is nothing more to push", async () => {
+  const { dir, remote } = branched();
+  const first = await pushBranch(dir);
+  assert.ok(first.ok, JSON.stringify(first));
+  assert.equal(first.pushed, 2);
+  assert.equal(first.upstream, "origin/feat/x");
+  assert.equal(git(dir, "rev-parse", "--abbrev-ref", "feat/x@{upstream}").trim(), "origin/feat/x");
+  assert.equal(git(remote, "rev-parse", "refs/heads/feat/x").trim(), git(dir, "rev-parse", "HEAD").trim());
+
+  const again = await pushBranch(dir);
+  assert.equal(again.ok, false);
+  if (!again.ok) {
+    assert.equal(again.status, 409);
+    assert.match(again.error, /already has everything/);
+  }
+
+  writeFileSync(path.join(dir, "d.txt"), "d\n");
+  git(dir, "add", "d.txt");
+  git(dir, "commit", "-q", "-m", "feat: add d");
+  const log = await worktreeLog(dir);
+  assert.ok(log.ok);
+  assert.deepEqual(log.log.upstream, { name: "origin/feat/x", ahead: 1, behind: 0 });
+  const second = await pushBranch(dir);
+  assert.ok(second.ok, JSON.stringify(second));
+  assert.equal(second.pushed, 1);
+});
+
+test("push refuses in words with no remote, and when the remote moved on", async () => {
+  const lonely = repo();
+  const none = await pushBranch(lonely);
+  assert.equal(none.ok, false);
+  if (!none.ok) {
+    assert.equal(none.status, 409);
+    assert.match(none.error, /no remote/);
+  }
+
+  const { dir, remote } = branched();
+  assert.ok((await pushBranch(dir)).ok);
+  // Someone else pushes to the same branch from another clone.
+  const other = path.join(path.dirname(dir), "other");
+  git(path.dirname(dir), "clone", "-q", remote, "other");
+  git(other, "config", "user.name", "o");
+  git(other, "config", "user.email", "o@o");
+  git(other, "checkout", "-q", "feat/x");
+  writeFileSync(path.join(other, "o.txt"), "o\n");
+  git(other, "add", "o.txt");
+  git(other, "commit", "-q", "-m", "feat: elsewhere");
+  git(other, "push", "-q", "origin", "feat/x");
+  writeFileSync(path.join(dir, "e.txt"), "e\n");
+  git(dir, "add", "e.txt");
+  git(dir, "commit", "-q", "-m", "feat: add e");
+  const rejected = await pushBranch(dir);
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) {
+    assert.equal(rejected.status, 409);
+    assert.match(rejected.error, /has commits this branch does not/);
+  }
+});
+
+test("pull-base merges the base in, reports nothing to do when level, and aborts a conflict with the file named", async () => {
+  const { dir } = branched();
+  const merged = await pullBase(dir);
+  assert.ok(merged.ok, JSON.stringify(merged));
+  assert.equal(merged.merged, 1);
+  assert.equal(merged.fastForward, false);
+  assert.equal(git(dir, "rev-list", "--count", "feat/x..main").trim(), "0");
+  assert.equal(git(dir, "status", "--porcelain").trim(), "");
+
+  const level = await pullBase(dir);
+  assert.ok(level.ok);
+  assert.equal(level.merged, 0);
+
+  // main and the branch now change the same line.
+  git(dir, "checkout", "-q", "main");
+  writeFileSync(path.join(dir, "a.txt"), "main says\n");
+  git(dir, "commit", "-q", "-am", "main: a");
+  git(dir, "checkout", "-q", "feat/x");
+  writeFileSync(path.join(dir, "a.txt"), "branch says\n");
+  git(dir, "commit", "-q", "-am", "branch: a");
+  const head = git(dir, "rev-parse", "HEAD").trim();
+  const conflict = await pullBase(dir);
+  assert.equal(conflict.ok, false);
+  if (!conflict.ok) {
+    assert.equal(conflict.status, 409);
+    assert.match(conflict.error, /conflicts with feat\/x in a\.txt/);
+  }
+  assert.equal(git(dir, "rev-parse", "HEAD").trim(), head);
+  assert.equal(git(dir, "status", "--porcelain").trim(), "");
+
+  // Uncommitted work that the merge would overwrite is refused, untouched.
+  git(dir, "checkout", "-q", "main");
+  writeFileSync(path.join(dir, "m.txt"), "m2\n");
+  git(dir, "commit", "-q", "-am", "main: m2");
+  git(dir, "checkout", "-q", "feat/x");
+  writeFileSync(path.join(dir, "m.txt"), "local edit\n");
+  const dirty = await pullBase(dir);
+  assert.equal(dirty.ok, false);
+  if (!dirty.ok) assert.match(dirty.error, /Uncommitted changes|conflicts/);
+  assert.equal(git(dir, "status", "--porcelain").trimEnd(), " M m.txt");
 });
 
 test("commit message comes from the model with secrets left out of the diff, and says so when nothing is staged", async () => {

@@ -14,13 +14,22 @@ export async function git(
   args: string[],
   maxBuffer = 4 * 1024 * 1024,
   okExitCodes: number[] = [0],
+  // Only network commands (#78 push) need more than the local budget.
+  timeoutMs = GIT_TIMEOUT_MS,
 ): Promise<{ stdout: string }> {
   try {
     const { stdout } = await execFileAsync("git", ["-C", cwd, ...args], {
-      timeout: GIT_TIMEOUT_MS,
+      timeout: timeoutMs,
       maxBuffer,
       encoding: "utf8",
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
+      env: {
+        ...process.env,
+        GIT_OPTIONAL_LOCKS: "0",
+        GIT_TERMINAL_PROMPT: "0",
+        // A push over SSH must fail, never wait on a host-key or passphrase
+        // prompt nobody can see: the service has no terminal.
+        GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes -o ConnectTimeout=15",
+      },
     });
     return { stdout };
   } catch (error) {

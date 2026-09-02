@@ -221,6 +221,14 @@ Every route takes the worktree's own `path` (query on the GET, body on the POSTs
 - `POST /api/worktrees/commit` `{ "path", "message" }` → `201 { "commit": { "sha", "summary", "files" } }` of exactly the staged set. `400` for an empty message; `409` with a sentence when nothing is staged or git has no identity on the computer.
 - `POST /api/worktrees/commit-message` `{ "path" }` → `{ "message" }`: one conventional-commit line for the staged diff, written by the `claude` CLI on the computer (`claude -p`, resolved on the login-shell PATH, 45 s), with secret-looking files left out of the diff by name (they are named, never shown). `409` when nothing is staged; `503` with a sentence when claude is not installed or answered nothing — the phone offers to type one.
 
+### `/api/worktrees/log`, `push`, `pull-base` — Source Control, Commits (#78)
+
+Same `path` rule as above.
+
+- `GET /api/worktrees/log?path=…` → `{ "path", "branch", "base", "ahead": [Commit…], "behind": [Commit…], "upstream": { "name", "ahead", "behind" } | null, "remote": string | null, "truncated" }`. `Commit = { "sha", "summary", "author", "when" }` (`when` is the author date, ISO 8601). `ahead` is `base..branch`, `behind` is `branch..base`, newest first, at most 100 each (`truncated` when cut). `upstream` is the branch's tracking ref with the commits it lacks / has; `null` when the branch has never been pushed. `remote` is where a first push goes — `branch.<b>.pushRemote` → `remote.pushDefault` → `origin` → the only remote — `null` when the repository has none.
+- `POST /api/worktrees/push` `{ "path" }` → `201 { "pushed": n, "upstream": "origin/feat/x" }`. `git push` to the upstream, or `git push --set-upstream <remote> <branch>` the first time. Never `--force`. `409` with a sentence when HEAD is detached, there is no remote, the upstream already has everything, or the remote has commits this branch lacks; `503` with git's first line when the remote refuses (not signed in, unreachable). Prompts are impossible (`GIT_TERMINAL_PROMPT=0`, SSH batch mode); 90 s budget.
+- `POST /api/worktrees/pull-base` `{ "path" }` → `201 { "merged": n, "fastForward", "sha" }` after `git merge --no-edit <base>` of the **local** base branch (as `status` reports it); `200 { "merged": 0 }` when there is nothing to bring in. `409` with a sentence when uncommitted changes would be overwritten (nothing is touched) or the merge conflicts — the merge is aborted first and the files are named; the tree is never left mid-merge.
+
 ### `/api/preview…` — private dev-server preview (#58)
 
 An agent starts something on `localhost:<port>`; the phone shows it in a WebKit view without the server being started any differently, and nobody but the paired phone can open it. Two listeners are involved:

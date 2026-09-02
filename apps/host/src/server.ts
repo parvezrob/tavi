@@ -34,7 +34,7 @@ import { scanWorkspaces } from "./workspaces.js";
 import { diffFile, listChanges } from "./changes.js";
 import { listRepos, type PullRequestLookup } from "./git.js";
 import { createWorktree } from "./worktrees.js";
-import { commitStaged, stageFiles, worktreeStatus, writeCommitMessage } from "./source-control.js";
+import { commitStaged, pullBase, pushBranch, stageFiles, worktreeLog, worktreeStatus, writeCommitMessage } from "./source-control.js";
 import { MAX_RAW_BYTES, listDirectory, readTextContent, resolveWithinRoots, statFile } from "./files.js";
 import { PreviewRegistry, TICKET_COOKIE, defaultDiscoveryDeps, listProjectServers, stopProjectServer, validPort, type DiscoveryDeps } from "./preview.js";
 import { createReadStream } from "node:fs";
@@ -523,9 +523,22 @@ async function routeRequest(
     return;
   }
 
-  const sourceControlWrite = url.pathname.match(/^\/api\/worktrees\/(stage|unstage|commit|commit-message)$/);
+  // Source Control — Commits (#78, #73 part 4): the branch's commits over
+  // and under its base, Push, and Pull main in.
+  if (url.pathname === "/api/worktrees/log" && request.method === "GET") {
+    const target = await resolveWithinRoots(url.searchParams.get("path") ?? "", "/", config.roots);
+    if (!target.ok) {
+      sendJson(response, target.status, { error: target.error, ...(target.outsideRoots ? { outsideRoots: true } : {}) });
+      return;
+    }
+    const result = await worktreeLog(target.path);
+    sendJson(response, result.ok ? 200 : result.status, result.ok ? result.log : { error: result.error });
+    return;
+  }
+
+  const sourceControlWrite = url.pathname.match(/^\/api\/worktrees\/(stage|unstage|commit|commit-message|push|pull-base)$/);
   if (sourceControlWrite && request.method === "POST") {
-    const action = sourceControlWrite[1] as "stage" | "unstage" | "commit" | "commit-message";
+    const action = sourceControlWrite[1] as "stage" | "unstage" | "commit" | "commit-message" | "push" | "pull-base";
     const body = await readJsonBody(request);
     const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
     const target = await resolveWithinRoots(typeof record.path === "string" ? record.path : "", "/", config.roots);
@@ -546,6 +559,20 @@ async function routeRequest(
     if (action === "commit") {
       const result = await commitStaged(target.path, typeof record.message === "string" ? record.message : "");
       sendJson(response, result.ok ? 201 : result.status, result.ok ? { commit: result.commit } : { error: result.error });
+      return;
+    }
+    if (action === "push") {
+      const result = await pushBranch(target.path);
+      sendJson(response, result.ok ? 201 : result.status, result.ok ? { pushed: result.pushed, upstream: result.upstream } : { error: result.error });
+      return;
+    }
+    if (action === "pull-base") {
+      const result = await pullBase(target.path);
+      sendJson(
+        response,
+        result.ok ? (result.merged > 0 ? 201 : 200) : result.status,
+        result.ok ? { merged: result.merged, fastForward: result.fastForward, sha: result.sha } : { error: result.error },
+      );
       return;
     }
     const result = await writeCommitMessage(target.path, { shell: config.shell });
