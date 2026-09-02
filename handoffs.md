@@ -2,6 +2,18 @@
 
 > Append-only log of completed work sessions, newest first. Each entry is what the *next* agent needs to know about that session: what shipped, what was learned, what was left open. The live starting point is always [`current-session.md`](./current-session.md); prune entries older than a few sessions — git history keeps everything.
 
+## 2026-09-02 (morning) — #58 durability closed on the host, phone memory checks: one leak fixed, one Apple bug filed (#70)
+
+**Soak:** the two-hour preview soak passed (240/240 rounds, 0 bad, 0 WebSocket drops, host RSS 103.7 → 77.4 MB and flat, FDs 58 → 50); table on #58.
+
+**Memory checks (new):** `TaviUITests/TaviMemoryChecks` (`TEST_RUNNER_TAVI_MEMORY=1`, live env, `TEST_RUNNER_TAVI_AUDIT_PREVIEW_CWD`; stays need `TEST_RUNNER_TAVI_MEMORY_SOAK_MINUTES`) + `scripts/memsample.sh <log> <syncdir>` (footprint/RSS samples, `leaks` + `heap` class counts when a test drops `leaks-<label>` in the sync dir; pass `TEST_RUNNER_TAVI_MEMORY_SYNC_DIR`). 200 preview open/close cycles: flat (83.9 → 84.6 MB), 0 leaks. 200 terminal trips: **+5.5 MB per 40** → `heap` showed 242 `AgentDirectory` + 483 sockets. Cause: the home's `.task` re-ran `fleet.load()` on every pop (NavigationStack root re-appears) and `AgentDirectory.stop()` never closed the socket, so `receive()` kept each directory alive (and the host served 242 event streams to one phone). Fixed in 4dd2acc (bootstrap once; `stop()` cancels the socket). After: 1 directory, 0 leaks, but still **+1.6 MB per 40 trips = 242 completed `__NSURLSessionWebSocketTask` retained**.
+
+**#70 (filed, health):** reproduced in a 40-line macOS script — every new `URLSessionWebSocketTask` to the same host pins the previous one through a CFNetwork `Tube::preConnectConfiguration` block (`leaks --trace` chain on the issue). Unchanged by TLS off, idle time, session-per-connection + invalidate, proxy dict, hard cancel. **`NWConnection` + `NWProtocolWebSocket` measured clean.** Fix path: a Network.framework `TerminalWebSocketTasking` behind `makeSocket`, then the events stream. Owner's call on when (it is ~40 KB per terminal open/reconnect for the app's life).
+
+**Learned:** `leaks` says 0 for reachable garbage — always pair it with `heap` class counts; `leaks --trace=<addr>` names the retainer. `pkill -f <script>` kills any shell whose command line mentions the script (took down a test wrapper; xcodebuild survived as an orphan). `heap`/`leaks` work on simulator apps from the Mac. A `| cut` at the end of a Monitor pipeline block-buffers and swallows events; use `awk … fflush()`. XCUITest env: `-only-testing` order is not the run order.
+
+**Left running at hand-off:** the two one-hour stays (`testPreviewStaysOpen`, then `testTerminalStaysOpen`) — see current-session.md for log paths.
+
 ## 2026-09-02 (dawn) — #58 private dev-server preview: built host + phone, seen working (host 0.1.13, publish pending)
 
 **Shape (owner's calls):** one ticket-routed **door** — `pair` publishes `https://<name>.ts.net:8443` → the host's loopback preview listener once; the door forwards only for a ticket cookie minted over the bearer API, bound to one device and one loopback port; HTTP and WebSocket piped, `Host`/`Origin`/`Referer` rewritten to `localhost:<port>`, no path prefix. In-app only (no Safari). No duration setting: open = reachable, closed = gone, 2-minute grace after a killed app. Stop server behind a confirm. Discovery by `lsof` only on tap; the phone lights the button from the transcript.
