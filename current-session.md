@@ -8,9 +8,15 @@
 
 **1. #73 is closed** (23:58: the owner exercised worktree-from-issue, PR create/close and remove live from the phone on cellular; #74 #75 #77 #78 #79 #81 closed with it). Still to look at once: Settings → robin-PC (offline) should offer "Forget on this iPhone only" at once. robin-PC: `tavi update` to 0.1.16 plus one `npx tavi-host pair` for the preview door.
 
-**2. Then #86, the connection-resilience epic, first of the health work** (it absorbs #68/#69 where they overlap): one shared `URLSession`, no terminal teardown on `NWPathMonitor` snapshots, one reconnect coordinator per host, single-flight probes, events heartbeat, jitter, cellular-only release check. #84 (the connection in plain words, host reads `tailscale status --json`) and #85 (host gh fan-out cap) are its children. Read the night entry in `handoffs.md` and the three reviews' items in #86 before designing; design in the repo first (§7.12 precedent).
+**The road to TestFlight (owner, 2026-09-03 00:05: close issues, don't pile up). Four issues, in this order, then ship:**
 
-**3. Then:** #82, #83 (absorbs #76), #72.
+**2. #86 connection resilience** (with #84 inside it): one shared `URLSession`, no terminal teardown on `NWPathMonitor` snapshots, one reconnect coordinator per host, single-flight probes, events heartbeat, jitter, the connection in plain words, cellular-only release check. Read the night entry in `handoffs.md` and the three reviews' items in #86 before designing; design in the repo first (§7.12 precedent).
+
+**3. #83 git leftovers**, one pass (now holds #72 #76 #82 #85 too).
+
+**4. #54 design pass** (absorb #52), then **#37 App Store readiness** (the paid developer account ends the 7-day profile; privacy strings; the TestFlight build itself).
+
+**Parked until after TestFlight:** #68 #69 (health), #39, #49, #27–#29.
 
 **Rules for anyone touching the phone:** cable only (`xcrun devicectl device info details --device 9B6F918E-EED4-59EA-8BF3-0ED972C01B93 | grep transportType` must say `wired`), then quit Xcode and `pkill -f remotepairingd; pkill -f CoreDeviceService` — every `devicectl` call and a running Xcode re-open the wireless tunnel that put the phone's radio in tonight's state. Nothing heavy on the Mac while the owner is on the phone. When the owner reports a connection problem: `second-opinion` + Opus cold seats *before* arguing; measure the phone's side (Safari to `/api/host`, `tailscale ping` loop with Tavi force-quit, `tailscaled.log` at `/opt/homebrew/var/log/`) or say you cannot.
 
@@ -30,4 +36,4 @@
 - **Phone ↔ host health:** `AgentDirectory.health` connecting/live/stale/offline/revoked; "Connecting…" bounded to 5 s then a probe (5 s, two misses 1.5 s apart) → Offline, which a live snapshot clears; on a stream drop the redial starts at once (backoff 2 → 30 s) and the probe runs beside it, never in front (2ac15a8); `/api/repos` polled every ~30 s (±20 % jitter) only while the computer is not offline and the stream is not stale (Equatable-gated; kept across restarts). The events socket has no keepalive of its own (#86).
 - **Home (#74):** folder → worktrees → agents; a repository the host knows is one card, worktrees as glass groups (`TaviTheme.groupFill/groupHighlight`), agents beneath; a worktree with no agent still shows; "New worktree" last row → the New Agent sheet in worktree mode; a worktree header → `SourceControlSheet` (Changes / Pull request / Commits; `···` → Start an agent here, Remove worktree).
 - **Files (#25 #57 #61, PRD §7.10)**, **Preview (#58, §7.11)** unchanged; **Source Control (§7.12)** complete.
-- Open issues: #27–#29 (parked), #37 epic, #39 test seam, #49 WSL2 doc, #52 polish, #54 P3, **#86 epic (connection resilience; children #84 #85)**, #82, #83 (absorbs #76), #72; epics #68 #69 (health, largely absorbed by #86).
+- Open issues, in closing order: **#86** (+#84) → **#83** (holds #72 #76 #82 #85) → **#54** (+#52) → **#37** → TestFlight. Parked: #68 #69 #39 #49 #27–#29.
