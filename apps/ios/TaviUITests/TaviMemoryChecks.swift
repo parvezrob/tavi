@@ -132,8 +132,19 @@ final class TaviMemoryChecks: XCTestCase {
         var previous = ""
         while Date() < deadline {
             try await Task.sleep(for: .seconds(60))
-            let now = (surface.value as? String) ?? ""
-            XCTAssertTrue(now.contains("streamed output line"), "The terminal stopped showing the stream.")
+            // Liveness = the accessible transcript keeps changing. It cannot
+            // be asked for the line text: herdr's attach sends screen diffs,
+            // and with every row starting with the same words only the
+            // changing cells reach the transcript (issue filed 2026-09-02).
+            var now = ""
+            for _ in 0 ..< 5 where now.isEmpty || now == previous {
+                now = (app.descendants(matching: .any)["terminal.surface"].value as? String) ?? ""
+                if now.isEmpty || now == previous { sleep(2) }
+            }
+            if now.isEmpty || now == previous, let dir = live.syncDir {
+                try? now.write(to: URL(fileURLWithPath: dir).appendingPathComponent("transcript-dump.txt"), atomically: true, encoding: .utf8)
+            }
+            XCTAssertFalse(now.isEmpty, "The terminal's transcript went empty: the stream or the surface is gone.")
             XCTAssertNotEqual(now, previous, "The terminal screen has not changed in a minute: the stream stalled.")
             previous = now
         }
