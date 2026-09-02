@@ -27,11 +27,11 @@ export interface WorktreeStatus {
 
 export type StatusResult =
   | { ok: true; status: WorktreeStatus }
-  | { ok: false; status: 400 | 404 | 503; error: string };
+  | { ok: false; status: 400 | 404 | 503; error: string; notRepository?: true };
 
 export async function worktreeStatus(worktreePath: string): Promise<StatusResult> {
   const changes = await listChanges(worktreePath);
-  if (!changes.ok) return { ok: false, status: changes.status, error: changes.error };
+  if (!changes.ok) return { ok: false, status: changes.status, error: changes.error, ...(changes.notRepository ? { notRepository: true as const } : {}) };
   const branch = changes.branch ?? null;
   const base = await baseBranch(worktreePath, branch);
   const [ahead, behind] = await aheadBehind(worktreePath, branch, base);
@@ -71,10 +71,13 @@ export async function stageFiles(worktreePath: string, files: string[] | "all", 
   }
   if (targets.length === 0) return { ok: true, staged: 0 };
   try {
+    // Paths are repository-relative (as `status` lists them), so git runs
+    // at the top level even when the phone named a subfolder.
+    const top = (await git(worktreePath, ["rev-parse", "--show-toplevel"])).stdout.trim() || worktreePath;
     if (direction === "stage") {
-      await git(worktreePath, ["add", "--", ...targets]);
+      await git(top, ["add", "--", ...targets]);
     } else {
-      await git(worktreePath, ["restore", "--staged", "--", ...targets]);
+      await git(top, ["restore", "--staged", "--", ...targets]);
     }
     return { ok: true, staged: targets.length };
   } catch (error) {
@@ -297,7 +300,7 @@ const PUSH_TIMEOUT_MS = 90_000;
 export async function pushBranch(worktreePath: string): Promise<PushResult> {
   let branch: string | null;
   try {
-    branch = (await git(worktreePath, ["symbolic-ref", "--quiet", "--short", "HEAD"], undefined, [0, 1])).stdout.trim() || null;
+    branch = await currentBranch(worktreePath);
   } catch (error) {
     return { ok: false, status: 503, error: `git could not read that worktree: ${describeGitError(error)}` };
   }
@@ -313,7 +316,13 @@ export async function pushBranch(worktreePath: string): Promise<PushResult> {
   // What goes up: the commits the upstream lacks, or on a first push every
   // commit the branch has over its base.
   const pushed = upstream ? upstream.ahead : (await aheadBehind(worktreePath, branch, await baseBranch(worktreePath, branch)))[0];
-  const args = upstream ? ["push", "--quiet", "--porcelain"] : ["push", "--quiet", "--porcelain", "--set-upstream", remote as string, branch];
+  // Always name the remote and the refspec: a bare `git push` obeys
+  // `push.default`, and `matching` would publish every branch that has a
+  // namesake on the remote (#81 review).
+  const target = upstream ? await upstreamRemote(worktreePath, branch, remote) : (remote as string);
+  const args = upstream
+    ? ["push", "--quiet", "--porcelain", target, `HEAD:refs/heads/${upstreamBranch(upstream.name, target)}`]
+    : ["push", "--quiet", "--porcelain", "--set-upstream", target, `${branch}:refs/heads/${branch}`];
   try {
     await git(worktreePath, args, undefined, [0], PUSH_TIMEOUT_MS);
   } catch (error) {
@@ -333,6 +342,22 @@ export async function pushBranch(worktreePath: string): Promise<PushResult> {
   return { ok: true, pushed, upstream: after?.name ?? `${remote}/${branch}` };
 }
 
+// The remote the branch's upstream lives on (`branch.<b>.remote`), else the
+// push remote; and the upstream's branch name without the remote prefix.
+async function upstreamRemote(worktreePath: string, branch: string, fallback: string | null): Promise<string> {
+  try {
+    const configured = (await git(worktreePath, ["config", "--get", `branch.${branch}.remote`])).stdout.trim();
+    if (configured && configured !== ".") return configured;
+  } catch {
+    // Not configured.
+  }
+  return fallback ?? "origin";
+}
+
+function upstreamBranch(upstreamName: string, remote: string): string {
+  return upstreamName.startsWith(`${remote}/`) ? upstreamName.slice(remote.length + 1) : upstreamName;
+}
+
 export type PullBaseResult =
   | { ok: true; merged: number; fastForward: boolean; sha: string }
   | { ok: false; status: 409 | 503; error: string };
@@ -342,7 +367,7 @@ export type PullBaseResult =
 export async function pullBase(worktreePath: string): Promise<PullBaseResult> {
   let branch: string | null;
   try {
-    branch = (await git(worktreePath, ["symbolic-ref", "--quiet", "--short", "HEAD"], undefined, [0, 1])).stdout.trim() || null;
+    branch = await currentBranch(worktreePath);
   } catch (error) {
     return { ok: false, status: 503, error: `git could not read that worktree: ${describeGitError(error)}` };
   }
@@ -362,16 +387,22 @@ export async function pullBase(worktreePath: string): Promise<PullBaseResult> {
       return { ok: false, status: 409, error: `Uncommitted changes on ${branch} would be overwritten by ${base}. Commit or stash them first.` };
     }
     const conflicts = await conflictedFiles(worktreePath);
-    if (conflicts.length > 0 || /CONFLICT|Automatic merge failed/i.test(reason)) {
-      try {
-        await git(worktreePath, ["merge", "--abort"]);
-      } catch {
-        // Nothing to abort: git refused before starting.
-      }
-      const named = conflicts.slice(0, 5).join(", ") + (conflicts.length > 5 ? ` and ${conflicts.length - 5} more` : "");
-      return { ok: false, status: 409, error: `${base} conflicts with ${branch}${named ? ` in ${named}` : ""}. Resolve that on the computer; nothing was changed here.` };
+    // Whatever stopped the merge — a conflict, a killed merge driver, the
+    // budget — the tree is put back before anyone hears about it.
+    let aborted = true;
+    try {
+      await git(worktreePath, ["merge", "--abort"]);
+    } catch {
+      aborted = !(await mergeInProgress(worktreePath));
     }
-    return { ok: false, status: 503, error: `git could not merge ${base}: ${firstLine(reason)}` };
+    const restored = aborted ? "nothing was changed here" : "the merge is still half-done there — finish or abort it on the computer";
+    if (conflicts.length > 0 || /CONFLICT|Automatic merge failed/i.test(reason)) {
+      const named = conflicts.slice(0, 5).join(", ") + (conflicts.length > 5 ? ` and ${conflicts.length - 5} more` : "");
+      return { ok: false, status: 409, error: `${base} conflicts with ${branch}${named ? ` in ${named}` : ""}. Resolve that on the computer; ${restored}.` };
+    }
+    const killed = /SIGTERM|ETIMEDOUT/i.test(error instanceof Error ? error.message : "") && !/fatal:|error:/i.test(reason);
+    if (killed) return { ok: false, status: 503, error: `Merging ${base} took too long and was stopped; ${restored}.` };
+    return { ok: false, status: 503, error: `git could not merge ${base}: ${firstLine(reason)}; ${restored}.` };
   }
   const sha = await headSha(worktreePath);
   let fastForward = false;
@@ -382,6 +413,15 @@ export async function pullBase(worktreePath: string): Promise<PullBaseResult> {
     // Reported as a merge; the count is what matters.
   }
   return { ok: true, merged: behind, fastForward, sha };
+}
+
+async function mergeInProgress(worktreePath: string): Promise<boolean> {
+  try {
+    await git(worktreePath, ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function conflictedFiles(worktreePath: string): Promise<string[]> {
@@ -435,6 +475,9 @@ async function runClaudeCli(shell: string, prompt: string, input: string): Promi
 }
 
 function resolveOnLoginPath(shell: string, name: string): Promise<string | null> {
+  // The name is ours, never the phone's — and it is still checked before
+  // it goes anywhere near a shell line.
+  if (!/^[a-z][a-z0-9-]*$/.test(name)) return Promise.resolve(null);
   return new Promise((resolve) => {
     execFile(shell, ["-lc", `command -v ${name}`], { timeout: 10_000 }, (error, stdout) => {
       const found = String(stdout ?? "").trim().split("\n").pop()?.trim() ?? "";
@@ -462,7 +505,7 @@ export async function baseBranch(worktreePath: string, branch: string | null): P
     }
   }
   const fallback = await findDefaultBranch(worktreePath);
-  return fallback && fallback !== branch ? fallback : fallback;
+  return fallback;
 }
 
 export async function aheadBehind(worktreePath: string, branch: string | null, base: string | null): Promise<[number, number]> {

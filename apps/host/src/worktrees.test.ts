@@ -124,10 +124,83 @@ test("removal preview names the uncommitted files, the unpushed commits, the age
   assert.deepEqual(preview.preview.unpushed, { commits: 1, upstream: null, remote: "origin" });
   assert.deepEqual(preview.preview.agents.map((a) => a.tabId), ["t1"]);
   assert.equal(preview.preview.branchMerged, false);
+  assert.equal(preview.preview.locked, false);
 
   const main = await previewRemoval(dir);
   assert.ok(main.ok);
   assert.equal(main.preview.isMain, true);
+});
+
+test("removal counts a detached worktree's orphan commits, refuses a locked worktree, and refuses rather than guessing when git cannot count", async () => {
+  const { dir, parent } = repo();
+  const detached = path.join(parent, "detached");
+  git(dir, "worktree", "add", "-q", "--detach", detached);
+  writeFileSync(path.join(detached, "d.txt"), "d\n");
+  git(detached, "add", "d.txt");
+  git(detached, "commit", "-q", "-m", "important work");
+  const preview = await previewRemoval(detached);
+  assert.ok(preview.ok, JSON.stringify(preview));
+  assert.equal(preview.preview.branch, null);
+  assert.equal(preview.preview.unpushed.commits, 1);
+  const wrong = await removeWorktree(detached, { confirm: { uncommitted: 0, unpushed: 0 } });
+  assert.equal(wrong.ok, false);
+  assert.ok(existsSync(detached));
+
+  const locked = await removable();
+  git(locked.dir, "worktree", "lock", locked.wt);
+  const lockedPreview = await previewRemoval(locked.wt);
+  assert.ok(lockedPreview.ok);
+  assert.equal(lockedPreview.preview.locked, true);
+  const refused = await removeWorktree(locked.wt, { confirm: { uncommitted: 1, unpushed: 1 }, deleteBranch: true });
+  assert.equal(refused.ok, false);
+  if (!refused.ok) {
+    assert.equal(refused.status, 409);
+    assert.match(refused.error, /locked/);
+  }
+  assert.ok(existsSync(locked.wt));
+  assert.equal(git(locked.dir, "worktree", "list").split("\n").filter(Boolean).length, 2);
+
+  // An unreadable index: the preview must refuse, never say "clean".
+  const broken = await removable();
+  const index = git(broken.wt, "rev-parse", "--git-path", "index").trim();
+  writeFileSync(path.isAbsolute(index) ? index : path.join(broken.wt, index), "garbage");
+  const unknown = await previewRemoval(broken.wt);
+  assert.equal(unknown.ok, false);
+  if (!unknown.ok) assert.match(unknown.error, /nothing was removed/);
+  const blocked = await removeWorktree(broken.wt, { confirm: { uncommitted: 0, unpushed: 0 } });
+  assert.equal(blocked.ok, false);
+  assert.ok(existsSync(broken.wt));
+});
+
+test("a branch fully on a stale upstream is kept, not deleted, when its worktree goes", async () => {
+  const { dir, wt } = await removable();
+  git(wt, "push", "-q", "--set-upstream", "origin", "feat/gone");
+  git(wt, "checkout", "-q", "--", "README.md");
+  const preview = await previewRemoval(wt);
+  assert.ok(preview.ok);
+  assert.equal(preview.preview.unpushed.commits, 0);
+  assert.equal(preview.preview.unpushed.upstream, "origin/feat/gone");
+  const result = await removeWorktree(wt, { confirm: { uncommitted: 0, unpushed: 0 } });
+  assert.ok(result.ok, JSON.stringify(result));
+  assert.equal(result.removed.branchDeleted, false);
+  assert.equal(result.removed.branchKept, "feat/gone");
+  assert.match(result.removed.branchNote ?? "", /on origin\/feat\/gone too/);
+  await awaitPendingDeletes();
+  assert.equal(git(dir, "branch", "--list", "feat/gone").trim(), "feat/gone");
+});
+
+test("a worktree add that fails part-way is rolled back: no branch, no folder, nothing registered", async () => {
+  const { dir, parent } = repo();
+  // A post-checkout hook that fails makes `worktree add` exit non-zero
+  // after the branch and folder exist.
+  const hooks = path.join(dir, ".git", "hooks");
+  writeFileSync(path.join(hooks, "post-checkout"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const result = await createWorktree({ repo: dir, branch: "feat/hooked" }, [parent], { allowOutsideRoots: false });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.status, 503);
+  assert.equal(git(dir, "branch", "--list", "feat/hooked").trim(), "");
+  assert.equal(existsSync(path.join(parent, "repo-worktrees", "feat-hooked")), false);
+  assert.equal(git(dir, "worktree", "list").split("\n").filter(Boolean).length, 1);
 });
 
 test("removal refuses the main checkout, stale counts, and a folder that is not a worktree — touching nothing", async () => {
@@ -161,7 +234,8 @@ test("push-then-remove pushes, closes the agents, moves the folder aside, deregi
   );
   assert.ok(result.ok, JSON.stringify(result));
   assert.equal(result.removed.pushed, 1);
-  assert.equal(result.removed.closedAgents, 2);
+  // Three agents inside, two tabs: every agent counts, each tab closes once.
+  assert.equal(result.removed.closedAgents, 3);
   assert.deepEqual(closed.sort(), ["t1", "t3"]);
   assert.equal(result.removed.branchDeleted, true);
   assert.equal(git(path.join(parent, "remote.git"), "rev-parse", "refs/heads/feat/gone").trim().length, 40);

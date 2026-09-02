@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Server } from "node:http";
@@ -1210,5 +1210,62 @@ test("preview: door status, candidates, open/keepalive/close scoped to the devic
     assert.deepEqual(killed, [42]);
   } finally {
     await close(server);
+  }
+});
+
+// The worktree routes over HTTP (#81 review): the roots check and the
+// confirm shape are the whole guardrail, so they are asserted here, not
+// only in the modules.
+test("worktree routes: 401 without a credential, 403 outside the roots, 400 without confirm, 409 for the main checkout", async () => {
+  const base = realpathSync(mkdtempSync(path.join(tmpdir(), "tavi-wt-route-")));
+  const repoDir = path.join(base, "app");
+  const gitEnv = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+  execFileSync("git", ["init", "-q", "-b", "main", repoDir]);
+  writeFileSync(path.join(repoDir, "README.md"), "# app\n");
+  execFileSync("git", ["-C", repoDir, "add", "."]);
+  execFileSync("git", ["-C", repoDir, "commit", "-q", "-m", "init"], { env: gitEnv });
+  const outside = realpathSync(mkdtempSync(path.join(tmpdir(), "tavi-wt-outside-")));
+  execFileSync("git", ["init", "-q", "-b", "main", outside]);
+
+  const server = await createTaviServer({ config: { ...config, roots: [base] }, pullRequests: async () => null, gh: async () => ({ stdout: "[]" }) });
+  await listen(server);
+  try {
+    const address = server.address() as AddressInfo;
+    const origin = `http://127.0.0.1:${address.port}`;
+    const headers = { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" };
+    const del = (body: unknown, auth = true) => fetch(`${origin}/api/worktrees`, { method: "DELETE", headers: auth ? headers : { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+    for (const route of ["/api/worktrees/status", "/api/worktrees/log", "/api/worktrees/removal", "/api/worktrees/pull-request"]) {
+      assert.equal((await fetch(`${origin}${route}?path=${encodeURIComponent(repoDir)}`)).status, 401, route);
+    }
+    assert.equal((await del({ path: repoDir, confirm: { uncommitted: 0, unpushed: 0 } }, false)).status, 401);
+
+    const outsideRemoval = await fetch(`${origin}/api/worktrees/removal?path=${encodeURIComponent(outside)}`, { headers });
+    assert.equal(outsideRemoval.status, 403);
+    assert.equal(((await outsideRemoval.json()) as { outsideRoots?: boolean }).outsideRoots, true);
+    const outsideDelete = await del({ path: outside, confirm: { uncommitted: 0, unpushed: 0 } });
+    assert.equal(outsideDelete.status, 403);
+    assert.ok(existsSync(path.join(outside, ".git")));
+
+    const noConfirm = await del({ path: repoDir });
+    assert.equal(noConfirm.status, 400);
+    const badConfirm = await del({ path: repoDir, confirm: { uncommitted: "0", unpushed: 0 } });
+    assert.equal(badConfirm.status, 400);
+
+    const removal = await fetch(`${origin}/api/worktrees/removal?path=${encodeURIComponent(repoDir)}`, { headers });
+    assert.equal(removal.status, 200);
+    assert.equal(((await removal.json()) as { isMain: boolean }).isMain, true);
+    const main = await del({ path: repoDir, confirm: { uncommitted: 0, unpushed: 0 } });
+    assert.equal(main.status, 409);
+    assert.match(((await main.json()) as { error: string }).error, /main checkout/);
+    assert.ok(existsSync(path.join(repoDir, "README.md")));
+
+    const status = await fetch(`${origin}/api/worktrees/status?path=${encodeURIComponent(repoDir)}`, { headers });
+    assert.equal(status.status, 200);
+    const notRepo = await fetch(`${origin}/api/worktrees/status?path=${encodeURIComponent(base)}`, { headers });
+    assert.equal(notRepo.status, 404);
+    assert.equal(((await notRepo.json()) as { notRepository?: boolean }).notRepository, true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
   }
 });

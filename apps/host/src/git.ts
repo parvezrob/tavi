@@ -227,6 +227,12 @@ export function cachedPullRequestLookup(repository: string, branch: string): Pro
   return entry.value;
 }
 
+// The host's own writes (#79 create/link) make the cached answer stale
+// at once; the next card poll asks gh again.
+export function forgetPullRequest(repository: string, branch: string): void {
+  pullRequestCache.delete(`${repository}\0${branch}`);
+}
+
 function monotonicNow(): number {
   return Number(process.hrtime.bigint() / 1_000_000n);
 }

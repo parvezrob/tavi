@@ -32,11 +32,12 @@ import type { AttachCommand, HostInfo, ServerTerminalMessage, WorkspaceInfo } fr
 import { InputError, safeSessionId } from "./validation.js";
 import { scanWorkspaces } from "./workspaces.js";
 import { diffFile, listChanges } from "./changes.js";
-import { listRepos, type PullRequestLookup } from "./git.js";
+import { forgetPullRequest, listRepos, type PullRequestLookup } from "./git.js";
+import { git } from "./git-exec.js";
 import { createWorktree, previewRemoval, removeWorktree } from "./worktrees.js";
 import { configureGh, type GhRunner } from "./gh.js";
 import { createPullRequest, linkPullRequest, listIssues, pullRequestStatus } from "./pull-requests.js";
-import { commitStaged, pullBase, pushBranch, stageFiles, worktreeLog, worktreeStatus, writeCommitMessage } from "./source-control.js";
+import { commitStaged, currentBranch, pullBase, pushBranch, stageFiles, worktreeLog, worktreeStatus, writeCommitMessage } from "./source-control.js";
 import { MAX_RAW_BYTES, listDirectory, readTextContent, resolveWithinRoots, statFile } from "./files.js";
 import { PreviewRegistry, TICKET_COOKIE, defaultDiscoveryDeps, listProjectServers, stopProjectServer, validPort, type DiscoveryDeps } from "./preview.js";
 import { createReadStream } from "node:fs";
@@ -526,7 +527,7 @@ async function routeRequest(
     }
     const result = await worktreeStatus(target.path);
     if (!result.ok) {
-      sendJson(response, result.status, { error: result.error });
+      sendJson(response, result.status, { error: result.error, ...(result.notRepository ? { notRepository: true } : {}) });
       return;
     }
     sendJson(response, 200, result.status);
@@ -624,6 +625,7 @@ async function routeRequest(
     }
     if (pullRequestWrite[1]) {
       const result = await linkPullRequest(target.path, { number: record.number, url: record.url }, ghDeps);
+      if (result.ok) await forgetPullRequestBadge(target.path);
       sendJson(response, result.ok ? 200 : result.status, result.ok ? { pullRequest: result.pullRequest } : { error: result.error });
       return;
     }
@@ -636,6 +638,7 @@ async function routeRequest(
       },
       ghDeps,
     );
+    if (result.ok) await forgetPullRequestBadge(target.path);
     sendJson(response, result.ok ? 201 : result.status, result.ok ? { pullRequest: result.pullRequest, pushed: result.pushed } : { error: result.error });
     return;
   }
@@ -1481,6 +1484,18 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
     throw new InputError("Request body must be valid JSON.");
+  }
+}
+
+// The home card's PR badge is cached per repo+branch (git.ts); a pull
+// request this host just made or linked must show on the next poll.
+async function forgetPullRequestBadge(worktreePath: string): Promise<void> {
+  try {
+    const branch = await currentBranch(worktreePath);
+    const main = (await git(worktreePath, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).stdout.trim();
+    if (branch) forgetPullRequest(path.dirname(main), branch);
+  } catch {
+    // The badge simply refreshes on its own minute.
   }
 }
 
