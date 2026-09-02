@@ -137,6 +137,14 @@ export class ProjectHistory {
     this.write(recent);
   }
 
+  // A folder that no longer exists (a removed worktree, #81) leaves the
+  // recent list rather than offering a dead choice.
+  forget(directory: string): void {
+    const key = comparisonKey(path.resolve(directory));
+    const kept = this.list().filter((entry) => comparisonKey(entry.path) !== key);
+    if (kept.length !== this.list().length) this.write(kept);
+  }
+
   private get file(): string {
     return path.join(this.stateDir, HISTORY_FILE_NAME);
   }

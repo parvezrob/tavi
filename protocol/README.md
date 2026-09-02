@@ -238,6 +238,13 @@ Everything here runs the person's own `gh` on that computer (found on the login-
 - `POST /api/worktrees/pull-request/link` `{ "path", "number" | "url" }` → `200 { "pullRequest" }` after `gh pr view` confirms it exists on this repository; remembered as `branch.<b>.tavi-pull-request` in the repository's config. `400` for neither a number nor a link; `404` when there is no such pull request.
 - `GET /api/repos/issues?repo=…` → `{ "issues": [{ "number", "title" }…], "gh" }` — open issues, newest first, at most 30, for naming a branch from one.
 
+### `/api/worktrees/removal`, `DELETE /api/worktrees` — Source Control, Remove (#81)
+
+Two steps, so what the person confirms is what goes. The main checkout is always refused (`409`); `path` follows the roots rule above.
+
+- `GET /api/worktrees/removal?path=…` → `{ "path", "branch", "isMain", "repoRoot", "base", "uncommitted": { "files", "additions", "deletions" }, "unpushed": { "commits", "upstream": string | null, "remote": string | null }, "agents": [{ "paneId", "tabId", "kind", "status" }…], "branchMerged" }` — what removing would lose. `agents` are herdr's agents whose cwd is inside the worktree; `branchMerged` is whether every commit on the branch is reachable from `base`.
+- `DELETE /api/worktrees` `{ "path", "confirm": { "uncommitted", "unpushed" }, "pushFirst"?, "deleteBranch"? }` → `200 { "removed": { "path", "branch", "branchDeleted", "branchKept", "branchNote", "closedAgents", "pushed" } }`. `confirm` must equal the counts the host sees now, else `409` with `preview` (the fresh counts) and nothing touched. `pushFirst: true` pushes the branch before removing (the `push` route's rules; a failed push removes nothing). Then: the agents' herdr tabs are closed, the checkout is renamed aside, `git worktree remove --force` deregisters it (`worktree prune` as fallback), and the folder is deleted in the background. The branch is deleted only when it is provably merged into its base, was just pushed, or was already fully on its upstream (`git branch -d`); `deleteBranch: true` deletes it even when unmerged (`-D`) — the person has confirmed the exact commit count — and `deleteBranch: false` keeps it. A kept branch is named in `branchKept` with `branchNote` saying why.
+
 ### `/api/preview…` — private dev-server preview (#58)
 
 An agent starts something on `localhost:<port>`; the phone shows it in a WebKit view without the server being started any differently, and nobody but the paired phone can open it. Two listeners are involved:

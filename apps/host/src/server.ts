@@ -33,7 +33,7 @@ import { InputError, safeSessionId } from "./validation.js";
 import { scanWorkspaces } from "./workspaces.js";
 import { diffFile, listChanges } from "./changes.js";
 import { listRepos, type PullRequestLookup } from "./git.js";
-import { createWorktree } from "./worktrees.js";
+import { createWorktree, previewRemoval, removeWorktree } from "./worktrees.js";
 import { configureGh, type GhRunner } from "./gh.js";
 import { createPullRequest, linkPullRequest, listIssues, pullRequestStatus } from "./pull-requests.js";
 import { commitStaged, pullBase, pushBranch, stageFiles, worktreeLog, worktreeStatus, writeCommitMessage } from "./source-control.js";
@@ -530,6 +530,61 @@ async function routeRequest(
       return;
     }
     sendJson(response, 200, result.status);
+    return;
+  }
+
+  // Remove a worktree (#81, #73 part 6): a preview that names what would be
+  // lost, then a removal that must repeat those counts back. The agents
+  // herdr runs inside it are closed first.
+  const removalDeps = {
+    agents: async () => {
+      if (!herdr) return [];
+      const result = await herdr.listAgents();
+      return result.available ? result.agents : [];
+    },
+    closeTab: async (tabId: string) => {
+      if (!herdr) return false;
+      return (await herdr.closeTab(tabId)).closed;
+    },
+  };
+  if (url.pathname === "/api/worktrees/removal" && request.method === "GET") {
+    const target = await resolveWithinRoots(url.searchParams.get("path") ?? "", "/", config.roots);
+    if (!target.ok) {
+      sendJson(response, target.status, { error: target.error, ...(target.outsideRoots ? { outsideRoots: true } : {}) });
+      return;
+    }
+    const result = await previewRemoval(target.path, removalDeps);
+    sendJson(response, result.ok ? 200 : result.status, result.ok ? result.preview : { error: result.error });
+    return;
+  }
+  if (url.pathname === "/api/worktrees" && request.method === "DELETE") {
+    const body = await readJsonBody(request);
+    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const target = await resolveWithinRoots(typeof record.path === "string" ? record.path : "", "/", config.roots);
+    if (!target.ok) {
+      sendJson(response, target.status, { error: target.error, ...(target.outsideRoots ? { outsideRoots: true } : {}) });
+      return;
+    }
+    const confirm = typeof record.confirm === "object" && record.confirm !== null ? (record.confirm as Record<string, unknown>) : null;
+    if (!confirm || typeof confirm.uncommitted !== "number" || typeof confirm.unpushed !== "number") {
+      sendJson(response, 400, { error: "confirm must carry the uncommitted and unpushed counts you were shown." });
+      return;
+    }
+    const result = await removeWorktree(
+      target.path,
+      {
+        confirm: { uncommitted: confirm.uncommitted, unpushed: confirm.unpushed },
+        pushFirst: record.pushFirst === true,
+        deleteBranch: typeof record.deleteBranch === "boolean" ? record.deleteBranch : undefined,
+      },
+      removalDeps,
+    );
+    if (!result.ok) {
+      sendJson(response, result.status, { error: result.error, ...(result.preview ? { preview: result.preview } : {}) });
+      return;
+    }
+    projects.forget(result.removed.path);
+    sendJson(response, 200, { removed: result.removed });
     return;
   }
 
