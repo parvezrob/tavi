@@ -125,7 +125,6 @@ enum TerminalTransportError: Error, LocalizedError, Sendable, Equatable {
     case alreadyConnected
     case authenticationRejected
     case deliveryUncertain
-    case handshakeRejected(status: Int)
     case invalidFrame
     case missingCredential
     case notConnected
@@ -142,8 +141,6 @@ enum TerminalTransportError: Error, LocalizedError, Sendable, Equatable {
             "The host rejected this access token. Reconnect with the current token."
         case .deliveryUncertain:
             "Input delivery is uncertain. Tavi did not replay it."
-        case let .handshakeRejected(status):
-            "The host rejected the terminal connection (HTTP \(status))."
         case .invalidFrame:
             "The host sent an invalid terminal message."
         case .missingCredential:
@@ -159,7 +156,7 @@ enum TerminalTransportError: Error, LocalizedError, Sendable, Equatable {
 
     var isPermanentConnectionFailure: Bool {
         switch self {
-        case .agentNotFound, .authenticationRejected, .handshakeRejected,
+        case .agentNotFound, .authenticationRejected,
              .invalidFrame, .oversizedFrame, .protocolMismatch:
             true
         case .alreadyConnected, .deliveryUncertain, .missingCredential, .notConnected:

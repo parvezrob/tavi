@@ -3,22 +3,37 @@ import Testing
 @testable import Tavi
 
 struct TerminalWebSocketClientTests {
+    // Network.framework reports a rejected upgrade without its HTTP status
+    // (#70), so the client asks the host which permanent failure it was — and
+    // only then. A transport error that is not a rejection never probes.
     @Test
-    func classifiesPermanentHandshakeFailuresAndCancelsEachSocket() async throws {
-        let unauthorized = FakeTerminalWebSocketTask(response: response(status: 401))
-        unauthorized.enqueueFailure(StubSocketError.failed)
-        let missing = FakeTerminalWebSocketTask(response: response(status: 404))
-        missing.enqueueFailure(StubSocketError.failed)
-        let factory = FakeTerminalWebSocketFactory(tasks: [unauthorized, missing])
-        let client = TerminalWebSocketClient(makeSocket: factory.makeTask)
+    func classifiesRejectedHandshakesThroughTheProbeAndCancelsEachSocket() async throws {
+        let unauthorized = FakeTerminalWebSocketTask(negotiatedProtocol: nil)
+        unauthorized.enqueueFailure(NetworkWebSocketTask.Failure.handshakeRejected)
+        let missing = FakeTerminalWebSocketTask(negotiatedProtocol: nil)
+        missing.enqueueFailure(NetworkWebSocketTask.Failure.handshakeRejected)
+        let transient = FakeTerminalWebSocketTask(negotiatedProtocol: nil)
+        transient.enqueueFailure(NetworkWebSocketTask.Failure.handshakeRejected)
+        let dropped = FakeTerminalWebSocketTask(negotiatedProtocol: nil)
+        dropped.enqueueFailure(NetworkWebSocketTask.Failure.connectionFailed("path down"))
+        let factory = FakeTerminalWebSocketFactory(tasks: [unauthorized, missing, transient, dropped])
+        let probe = FakeHandshakeProbe(answers: [.authenticationRejected, .agentNotFound, nil])
+        let client = TerminalWebSocketClient(makeSocket: factory.makeTask, handshakeProbe: probe)
 
         try await client.connect(configuration: connectionConfiguration(), resume: nil)
         #expect(await client.receive() == .failed(.authenticationRejected))
         try await client.connect(configuration: connectionConfiguration(), resume: nil)
         #expect(await client.receive() == .failed(.agentNotFound))
+        try await client.connect(configuration: connectionConfiguration(), resume: nil)
+        #expect(await client.receive() == .disconnected)
+        try await client.connect(configuration: connectionConfiguration(), resume: nil)
+        #expect(await client.receive() == .disconnected)
 
         #expect(unauthorized.cancelCodes == [.goingAway])
         #expect(missing.cancelCodes == [.goingAway])
+        #expect(transient.cancelCodes == [.goingAway])
+        #expect(dropped.cancelCodes == [.goingAway])
+        #expect(probe.probedPanes == ["fixture", "fixture", "fixture"])
         #expect(factory.requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
         #expect(
             factory.requests.first?.value(forHTTPHeaderField: "Sec-WebSocket-Protocol")
@@ -28,7 +43,7 @@ struct TerminalWebSocketClientTests {
 
     @Test
     func decodesBinaryOutputFramesAndSendsResumeQuery() async throws {
-        let task = FakeTerminalWebSocketTask(response: acceptedResponse())
+        let task = FakeTerminalWebSocketTask(negotiatedProtocol: TerminalWireProtocol.name)
         var frame = Data([TerminalWireProtocol.outputFrameType])
         let offset: UInt64 = 258
         for shift in stride(from: 56, through: 0, by: -8) {
@@ -55,13 +70,11 @@ struct TerminalWebSocketClientTests {
 
     @Test
     func rejectsProtocolMismatchBinaryAndOversizedFramesWithTeardown() async throws {
-        let mismatch = FakeTerminalWebSocketTask(
-            response: response(status: 101, protocolName: "other.v1")
-        )
+        let mismatch = FakeTerminalWebSocketTask(negotiatedProtocol: "other.v1")
         mismatch.enqueueFrame(.string(#"{"type":"ready"}"#))
-        let binary = FakeTerminalWebSocketTask(response: acceptedResponse())
+        let binary = FakeTerminalWebSocketTask(negotiatedProtocol: TerminalWireProtocol.name)
         binary.enqueueFrame(.data(Data(#"{"type":"ready"}"#.utf8)))
-        let oversized = FakeTerminalWebSocketTask(response: acceptedResponse())
+        let oversized = FakeTerminalWebSocketTask(negotiatedProtocol: TerminalWireProtocol.name)
         oversized.enqueueFrame(
             .string(
                 String(repeating: "x", count: TerminalWireProtocol.maximumFrameBytes + 1)
@@ -85,10 +98,10 @@ struct TerminalWebSocketClientTests {
     @Test
     func staleSocketCannotPublishIntoTheReplacementConnection() async throws {
         let stale = FakeTerminalWebSocketTask(
-            response: acceptedResponse(),
+            negotiatedProtocol: TerminalWireProtocol.name,
             resumesReceiveOnCancel: false
         )
-        let replacement = FakeTerminalWebSocketTask(response: acceptedResponse())
+        let replacement = FakeTerminalWebSocketTask(negotiatedProtocol: TerminalWireProtocol.name)
         replacement.enqueueFrame(.string(#"{"type":"ready"}"#))
         let factory = FakeTerminalWebSocketFactory(tasks: [stale, replacement])
         let client = TerminalWebSocketClient(makeSocket: factory.makeTask)
@@ -116,23 +129,6 @@ struct TerminalWebSocketClientTests {
         )
     }
 
-    private func acceptedResponse() -> HTTPURLResponse {
-        response(status: 101, protocolName: TerminalWireProtocol.name)
-    }
-
-    private func response(status: Int, protocolName: String? = nil) -> HTTPURLResponse {
-        var headers: [String: String] = [:]
-        if let protocolName {
-            headers["Sec-WebSocket-Protocol"] = protocolName
-        }
-        return HTTPURLResponse(
-            url: URL(string: "https://mac.tailnet.ts.net")!,
-            statusCode: status,
-            httpVersion: "HTTP/1.1",
-            headerFields: headers
-        )!
-    }
-
     private func waitUntil(_ condition: () -> Bool) async throws {
         for _ in 0..<10_000 {
             if condition() { return }
@@ -145,6 +141,27 @@ struct TerminalWebSocketClientTests {
 private enum StubSocketError: Error {
     case failed
     case timedOut
+}
+
+private final class FakeHandshakeProbe: TerminalHandshakeProbing, @unchecked Sendable {
+    private let lock = NSLock()
+    private var answers: [TerminalTransportError?]
+    private var panes: [String] = []
+
+    init(answers: [TerminalTransportError?]) {
+        self.answers = answers
+    }
+
+    var probedPanes: [String] {
+        lock.withLock { panes }
+    }
+
+    func classify(_ configuration: TerminalConnectionConfiguration) async -> TerminalTransportError? {
+        lock.withLock {
+            panes.append(configuration.paneID)
+            return answers.isEmpty ? nil : answers.removeFirst()
+        }
+    }
 }
 
 private final class FakeTerminalWebSocketFactory: @unchecked Sendable {
@@ -174,7 +191,7 @@ private final class FakeTerminalWebSocketTask: TerminalWebSocketTasking, @unchec
         case frame(URLSessionWebSocketTask.Message)
     }
 
-    let response: URLResponse?
+    let negotiatedProtocol: String?
 
     private let lock = NSLock()
     private let resumesReceiveOnCancel: Bool
@@ -184,8 +201,8 @@ private final class FakeTerminalWebSocketTask: TerminalWebSocketTasking, @unchec
     private var resumed = false
     private var sentMessages: [URLSessionWebSocketTask.Message] = []
 
-    init(response: URLResponse?, resumesReceiveOnCancel: Bool = true) {
-        self.response = response
+    init(negotiatedProtocol: String?, resumesReceiveOnCancel: Bool = true) {
+        self.negotiatedProtocol = negotiatedProtocol
         self.resumesReceiveOnCancel = resumesReceiveOnCancel
     }
 

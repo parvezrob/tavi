@@ -30,10 +30,12 @@ while true; do
       log "leaks label=$label $summary"
       # Retained-object counts that a leak of ours would show up in (leaks
       # itself only sees unreachable blocks). Directory count must be one
-      # per paired computer; sockets one per directory.
+      # per paired computer; sockets one per directory (+1 while a terminal
+      # is open). Network.framework since #70: nw_connection is the socket,
+      # __NSURLSessionWebSocketTask must stay 0.
       heapfile="${LOG:r}.heap-${label}.txt"
       heap "$pid" > "$heapfile" 2>&1
-      counts=$(grep -E '\s(AgentDirectory|__NSURLSessionWebSocketTask|TerminalSessionController|GhosttyTerminalSurfaceView|SecCertificate)\s' "$heapfile" | awk '{print $4"="$1}' | tr '\n' ' ')
+      counts=$(grep -E '\s(AgentDirectory|__NSURLSessionWebSocketTask|NetworkWebSocketTask|NWConcrete_nw_connection|TerminalSessionController|GhosttyTerminalSurfaceView|SecCertificate)\s' "$heapfile" | awk '{print $4"="$1}' | tr '\n' ' ')
       log "heap label=$label $counts"
       rm -f "$marker"
     done

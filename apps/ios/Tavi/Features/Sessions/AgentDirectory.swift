@@ -252,7 +252,8 @@ final class AgentDirectory {
     // quiet host never sends one — the directory, its socket and its buffers
     // then live on (measured 2026-09-02: 242 directories after 200
     // home → terminal → home trips, ~140 KB and one host stream each).
-    private var socket: URLSessionWebSocketTask?
+    // Network.framework, not URLSession: see NetworkWebSocketTask (#70).
+    private var socket: NetworkWebSocketTask?
     private var previewTask: Task<Void, Never>?
     private let smoother = AgentStatusSmoother()
     // Raw agents from the latest snapshot, re-presented when a pending
@@ -754,7 +755,7 @@ final class AgentDirectory {
         // the system's minute-long default: the deadline below decides what
         // the home says, this decides when the attempt is abandoned.
         request.timeoutInterval = 15
-        let socket = Self.session.webSocketTask(with: request)
+        let socket = NetworkWebSocketTask(request: request)
         self.socket = socket
         socket.resume()
         defer {
