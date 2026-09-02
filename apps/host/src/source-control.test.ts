@@ -16,6 +16,10 @@ function repo(): string {
   const parent = realpathSync(mkdtempSync(path.join(tmpdir(), "tavi-sc-")));
   const dir = path.join(parent, "repo");
   git(parent, "init", "-q", "-b", "main", "repo");
+  // The module commits as the repository's user, not with this file's env
+  // — on a machine with no global identity (CI) that must still work.
+  git(dir, "config", "user.name", "t");
+  git(dir, "config", "user.email", "t@t");
   writeFileSync(path.join(dir, "a.txt"), "one\n");
   git(dir, "add", ".");
   git(dir, "commit", "-q", "-m", "init");
