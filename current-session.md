@@ -12,7 +12,9 @@
 
 **3. Then the freeze is back on:** #68/#69 health epics, with #82 (sweep stranded `*.removing-*` folders) and #83 (the #73 review leftovers; absorbs #76) first; #72.
 
-**Owner to do:** reboot the phone and report; publish decisions are done (0.1.16 is live); robin-PC update + pair.
+**22:50, owner:** the rollback build is performant again — but it had still shown "Mac offline" at 22:2x right after it was installed, and turned smooth only once the wireless install tunnel had died and the Mac was left alone. Consistent with the environment story; not proof. The USB reinstall of the epic build is the deciding test.
+
+**Owner to do:** reboot the phone (if not yet) and report; publish decisions are done (0.1.16 is live); robin-PC update + pair.
 
 **Rules relearned tonight:** the Mac *is* the host — nothing heavy on it while the owner tests, and phone installs over USB only; when the owner says "it worked this morning", A/B the old build first; look at every screen (the removal sheet's amber, the container-identifier trap, the menu row's hit area were all caught by looking); design before code and keep the design in the repo (§7.12).
 
