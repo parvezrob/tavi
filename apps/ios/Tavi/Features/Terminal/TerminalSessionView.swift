@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 import UIKit
 
@@ -24,6 +25,11 @@ struct TerminalSessionView: View {
     @State private var renameError: String?
     @State private var composerText = ""
     @State private var composerError: String?
+    // An image attached from the composer (#88): picked, shrunk, uploaded,
+    // its path appended to the text. The note says where it went.
+    @State private var pickedImage: PhotosPickerItem?
+    @State private var attachingImage = false
+    @State private var composerNote: String?
     @State private var composerSending = false
     // Voice lands in compose mode only (#56): the session lives inside the
     // composer and edits its draft, nothing else. Live mode has no mic.
@@ -462,6 +468,8 @@ struct TerminalSessionView: View {
                 )
                 .accessibilityIdentifier("terminal.composer")
 
+                attachButton
+
                 dictationButton
 
                 Button {
@@ -483,6 +491,11 @@ struct TerminalSessionView: View {
                 Text(composerError)
                     .font(.caption)
                     .foregroundStyle(TaviTheme.statusBlocked)
+            } else if let composerNote {
+                Text(composerNote)
+                    .font(.caption)
+                    .foregroundStyle(TaviTheme.textSecondary)
+                    .accessibilityIdentifier("terminal.composerNote")
             } else if let caption = dictationCaption {
                 HStack(spacing: 6) {
                     if dictation.state == .listening {
@@ -516,6 +529,52 @@ struct TerminalSessionView: View {
             default:
                 break
             }
+        }
+    }
+
+    // The paperclip (#88): the photo library, then the image goes to the
+    // agent's own folder and its path lands in the message, since the
+    // agent reads an image when the prompt names one. Only for an agent
+    // pane in a folder the host knows; a plain shell has nowhere to put it.
+    private var attachButton: some View {
+        let busy = attachingImage
+        return PhotosPicker(selection: $pickedImage, matching: .images, photoLibrary: .shared()) {
+            if busy {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: "paperclip")
+                    .font(.title3)
+            }
+        }
+        .disabled(attachingImage || activeAgent == nil || agentDirectory?.filesClient == nil || !controller.connectionState.canSubmitInput)
+        .accessibilityLabel("Attach an image")
+        .accessibilityIdentifier("terminal.composerAttach")
+        .onChange(of: pickedImage) { _, item in
+            guard let item else { return }
+            pickedImage = nil
+            Task { await attach(item) }
+        }
+    }
+
+    private func attach(_ item: PhotosPickerItem) async {
+        guard let agent = activeAgent, let client = agentDirectory?.filesClient else { return }
+        attachingImage = true
+        composerError = nil
+        defer { attachingImage = false }
+        guard let original = try? await item.loadTransferable(type: Data.self),
+              let jpeg = ComposerImage.jpegData(from: original) else {
+            composerError = "That image could not be read."
+            return
+        }
+        switch await client.upload(cwd: agent.cwd, data: jpeg, mime: ComposerImage.mime) {
+        case let .value(receipt):
+            let separator = composerText.isEmpty || composerText.hasSuffix(" ") || composerText.hasSuffix("\n") ? "" : " "
+            composerText += "\(separator)\(receipt.path) "
+            composerNote = ComposerImage.savedNote(computer: computerName ?? "the computer")
+        case let .refused(_, refusal):
+            composerError = refusal.error
+        case let .failure(reason):
+            composerError = reason
         }
     }
 
@@ -709,6 +768,7 @@ struct TerminalSessionView: View {
                 composerError = failure
                 if failure == nil {
                     composerText = ""
+                    composerNote = nil
                 }
             }
         } else {

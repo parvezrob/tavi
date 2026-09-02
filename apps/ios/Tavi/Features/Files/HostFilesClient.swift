@@ -63,6 +63,28 @@ struct HostFilesClient: Sendable {
         }
     }
 
+    // An image attached from the composer (#88): the body is the image,
+    // the answer is where it landed on the computer.
+    func upload(cwd: String, data: Data, mime: String) async -> Outcome<UploadReceipt> {
+        guard var request = request("/api/files/upload", query: ["cwd": cwd]) else { return .failure("The host address is invalid.") }
+        request.httpMethod = "POST"
+        request.timeoutInterval = 90
+        request.setValue(mime, forHTTPHeaderField: "Content-Type")
+        request.httpBody = data
+        do {
+            let (body, response) = try await Self.session.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return .failure("The host did not answer.") }
+            guard http.statusCode == 201 else { return Self.refusal(status: http.statusCode, data: body) }
+            do {
+                return .value(try JSONDecoder().decode(UploadReceipt.self, from: body))
+            } catch {
+                return .failure("This host sent an upload answer Tavi does not understand. Update the Tavi host and the app to matching versions.")
+            }
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+    }
+
     private func get<Value: Decodable & Sendable>(_ path: String, query: [String: String]) async -> Outcome<Value> {
         guard let request = request(path, query: query) else { return .failure("The host address is invalid.") }
         do {
