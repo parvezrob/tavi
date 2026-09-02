@@ -283,8 +283,12 @@ struct FilesSheet: View {
         let candidates = MentionedPathScanner.scan(transcript)
         // One stat per candidate, concurrently; the host answers a miss
         // cheaply, so only real files (and named refusals) survive.
+        // At most four in flight (#86): forty at once was the one place the
+        // app opened a double-digit burst of requests.
         let results: [(Int, MentionedFile?)] = await withTaskGroup(of: (Int, MentionedFile?).self) { group in
-            for (index, mention) in candidates.enumerated() {
+            var pending = candidates.enumerated().makeIterator()
+            func enqueue() -> Bool {
+                guard let (index, mention) = pending.next() else { return false }
                 group.addTask {
                     switch await client.stat(cwd: agent.cwd, path: mention.path) {
                     case let .value(stat):
@@ -296,9 +300,14 @@ struct FilesSheet: View {
                         return (index, nil)
                     }
                 }
+                return true
             }
+            for _ in 0..<4 { _ = enqueue() }
             var collected: [(Int, MentionedFile?)] = []
-            for await result in group { collected.append(result) }
+            for await result in group {
+                collected.append(result)
+                _ = enqueue()
+            }
             return collected
         }
         let files = results.sorted { $0.0 < $1.0 }.compactMap(\.1)

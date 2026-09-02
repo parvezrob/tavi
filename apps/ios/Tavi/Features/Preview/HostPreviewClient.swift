@@ -15,14 +15,8 @@ struct HostPreviewClient: Sendable {
     }
 
     // Same no-disk-trace policy as the directory's requests (#36).
-    private static let session: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.waitsForConnectivity = false
-        configuration.urlCache = nil
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.timeoutIntervalForRequest = 20
-        return URLSession(configuration: configuration)
-    }()
+    // One pool for the whole app (#86); this client's budget rides on each request.
+    private static var session: URLSession { HostSession.shared }
 
     enum Outcome<Value: Sendable>: Sendable {
         case value(Value)

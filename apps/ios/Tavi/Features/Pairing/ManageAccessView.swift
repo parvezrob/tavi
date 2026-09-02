@@ -52,6 +52,12 @@ struct ManageAccessView: View {
                         row("Fingerprint", fingerprint, monospaced: true)
                     }
                     row("Right now", summary)
+                    if let sentence = directory.connection.sentence {
+                        Text(sentence)
+                            .font(.footnote)
+                            .foregroundStyle(TaviTheme.textSecondary)
+                            .accessibilityIdentifier("manageAccess.connectionPath")
+                    }
                 }
                 .listRowBackground(TaviTheme.card)
 
@@ -132,7 +138,7 @@ struct ManageAccessView: View {
 
     // "Live · 40 ms · 8 agents · 5 waiting" — the line the owner liked.
     private var summary: String {
-        var parts = [directory.health.label(latencyMilliseconds: directory.latencyMilliseconds)]
+        var parts = [directory.health.label(latencyMilliseconds: directory.latencyMilliseconds, connection: directory.connection)]
         if directory.hasLoaded, directory.health == .live || directory.health == .stale {
             let agents = directory.agents.count
             parts.append(agents == 1 ? "1 agent" : "\(agents) agents")

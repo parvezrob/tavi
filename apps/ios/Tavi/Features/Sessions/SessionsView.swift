@@ -512,7 +512,8 @@ struct SessionsView: View {
                 hasLoaded: entry.directory.hasLoaded,
                 available: entry.directory.available,
                 reason: entry.directory.reason,
-                repos: entry.directory.repos
+                repos: entry.directory.repos,
+                connection: entry.directory.connection
             )
         })
     }

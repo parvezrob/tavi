@@ -493,14 +493,28 @@ final class TerminalSessionController {
         // startup connection would add latency for nothing.
         guard let previous else { return }
         Self.logger.info(
-            "network path restored or changed (\(previous.interfaceIdentity) -> \(snapshot.interfaceIdentity)); reconnecting now"
+            "network path restored or changed (\(previous.interfaceIdentity) -> \(snapshot.interfaceIdentity))"
         )
-        // A socket opened on the previous path is dead or stale even when it
-        // still looks connected, so cycle immediately instead of waiting for
-        // a heartbeat timeout or a scheduled backoff retry.
-        reconnectAttempt = 0
-        reconnectTask?.cancel()
-        reconnectTask = nil
+        // A socket is judged by its own heartbeat (#86, PRD §7.13): on
+        // cellular the interface list changes at every handover and most
+        // of those leave a working socket working. Ask it now; the 5 s
+        // heartbeat timeout decides. A dial still in progress is cycled,
+        // since its packets may be on the old path — without resetting
+        // the backoff, so a flapping path cannot defeat it.
+        if connectionState == .connected {
+            startHeartbeat(immediately: true)
+            return
+        }
+        // A network that comes back after being lost is a real signal, not
+        // a flap: dial now rather than waiting out the scheduled retry —
+        // the attempt count stays, so the next failure backs off further.
+        if !previous.isSatisfied {
+            reconnectTask?.cancel()
+            reconnectTask = nil
+            beginConnection()
+            return
+        }
+        guard reconnectTask == nil else { return }
         beginConnection()
     }
 
@@ -522,15 +536,20 @@ final class TerminalSessionController {
         }
     }
 
-    private func startHeartbeat() {
+    private func startHeartbeat(immediately: Bool = false) {
         heartbeatTask?.cancel()
         heartbeatDeadlineTask?.cancel()
         let generation = connectionGeneration
+        var skipFirstWait = immediately
         heartbeatTask = Task { [weak self] in
             while !Task.isCancelled {
                 do {
                     guard let self else { return }
-                    try await timing.sleep(heartbeatPolicy.interval)
+                    if skipFirstWait {
+                        skipFirstWait = false
+                    } else {
+                        try await timing.sleep(heartbeatPolicy.interval)
+                    }
                 } catch {
                     return
                 }

@@ -26,6 +26,39 @@ struct AgentSummary: Identifiable, Equatable, Sendable, Decodable {
     }
 }
 
+// How the phone's packets reach the computer, per the computer's own
+// Tailscale (#86 / #84): said in words, never coloured as a problem — a
+// relay is slower and still private.
+enum ConnectionPath: Equatable, Sendable {
+    case direct
+    case relay(String?)
+    case unknown
+
+    init(path: String?, relay: String?) {
+        switch path {
+        case "direct": self = .direct
+        case "relay": self = .relay(relay.flatMap { $0.isEmpty ? nil : $0 })
+        default: self = .unknown
+        }
+    }
+
+    // The word that joins "Live · 7 ms" on the header; nothing for direct,
+    // which is the ordinary case and needs no comment.
+    var headerSuffix: String? {
+        if case .relay = self { return "relay" }
+        return nil
+    }
+
+    // The sentence on the computer sheet's "Right now" footer.
+    var sentence: String? {
+        switch self {
+        case .direct: "Direct to this computer — the fastest path there is."
+        case let .relay(region): "Through a Tailscale relay\(region.map { " (\($0))" } ?? "") — slower, still private. Usual on mobile networks; at home it means the two devices cannot see each other directly on the WiFi."
+        case .unknown: nil
+        }
+    }
+}
+
 // How the phone is doing against one paired computer right now (#50).
 // Reported per host so one computer being asleep never hides another.
 enum HostHealth: Equatable {
@@ -309,13 +342,7 @@ final class AgentDirectory {
     // Every request here carries the bearer token, so it uses the same
     // no-disk-trace policy as the terminal transport (#36): ephemeral
     // storage, no cache, and no silent parking on a dead network path.
-    private static let session: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.waitsForConnectivity = false
-        configuration.urlCache = nil
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        return URLSession(configuration: configuration)
-    }()
+    private static var session: URLSession { HostSession.shared }
 
     private(set) var agents: [AgentSummary] = []
     private(set) var available = false
@@ -373,6 +400,16 @@ final class AgentDirectory {
     private var latencyTask: Task<Void, Never>?
     private static let latencyInterval: Duration = .seconds(30)
     private var reposTask: Task<Void, Never>?
+    // Reconnect coordination (#86, PRD §7.13): one probe in flight however
+    // many askers; Offline only after two dials in a row produced no frame;
+    // the backoff resets only once the stream has been up for a while.
+    private var probeInFlight: Task<HostProbe, Never>?
+    private var consecutiveFailedDials = 0
+    private var streamConnectedAt: Date?
+    private static let stableStreamInterval: TimeInterval = 30
+    // How this phone reaches the computer, per the computer's own Tailscale
+    // (`GET /api/host` → `connection`); `.unknown` from an older host.
+    private(set) var connection: ConnectionPath = .unknown
     // Dirty state changes at typing speed but nobody needs it that fresh;
     // this matches the latency probe's cadence rather than inventing a new
     // rhythm to reason about.
@@ -453,7 +490,7 @@ final class AgentDirectory {
                 try? await Task.sleep(for: Self.latencyInterval)
                 guard !Task.isCancelled, let self else { return }
                 guard self.hasLoaded, !self.isStale else { continue }
-                if case let .reachable(latency) = await self.probeHost() {
+                if case let .reachable(latency) = await self.probeHostShared() {
                     self.latencyMilliseconds = latency
                 }
             }
@@ -1020,12 +1057,43 @@ final class AgentDirectory {
             guard !Task.isCancelled, let self else { return }
             let probe = await self.probeHostTwice()
             guard !Task.isCancelled else { return }
-            if probe == .unreachable { self.isOffline = true }
+            // Earned, not guessed (#86): the first dial that fails is
+            // "Connecting…" or "Reconnecting"; Offline waits for the next.
+            if probe == .unreachable, self.consecutiveFailedDials >= 1 { self.isOffline = true }
         }
         defer { deadline.cancel() }
 
+        // Snapshots arrive on change only, so a dead socket looks exactly
+        // like a quiet evening: ping after 30 s of silence, cycle at 45 s
+        // (#86). The host's WebSocket server answers pings on its own.
+        let watchdog = Task { [weak socket] in
+            var pinged = false
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled, let socket else { return }
+                let idle = Date().timeIntervalSince(socket.lastActivity)
+                if idle >= 45 {
+                    socket.cancel(with: .goingAway, reason: nil)
+                    return
+                }
+                if idle >= 30, !pinged {
+                    pinged = true
+                    try? await socket.ping()
+                } else if idle < 30 {
+                    pinged = false
+                }
+            }
+        }
+        defer { watchdog.cancel() }
+
+        var measured = false
+        defer {
+            // A dial that never produced a frame counts against the
+            // computer; one that did resets the count.
+            if measured { consecutiveFailedDials = 0 } else { consecutiveFailedDials += 1 }
+            streamConnectedAt = nil
+        }
         do {
-            var measured = false
             while !Task.isCancelled {
                 let frame = try await socket.receive()
                 deadline.cancel()
@@ -1033,13 +1101,17 @@ final class AgentDirectory {
                 let snapshot = try JSONDecoder().decode(AgentsSnapshotMessage.self, from: Data(text.utf8))
                 guard snapshot.type == "agents" else { continue }
                 apply(snapshot)
-                reconnectAttempt = 0
+                if streamConnectedAt == nil { streamConnectedAt = Date() }
+                // The backoff forgets only once the stream has held for a
+                // while; a link that works for one frame and dies stays on
+                // the slow end of the schedule (#86).
+                if let since = streamConnectedAt, Date().timeIntervalSince(since) >= Self.stableStreamInterval { reconnectAttempt = 0 }
                 if !measured {
                     // The first snapshot proves the stream; the round trip
                     // the header shows is measured right behind it.
                     measured = true
                     Task { [weak self] in
-                        guard let self, case let .reachable(latency) = await self.probeHost() else { return }
+                        guard let self, case let .reachable(latency) = await self.probeHostShared() else { return }
                         self.latencyMilliseconds = latency
                     }
                 }
@@ -1080,7 +1152,7 @@ final class AgentDirectory {
                     self.isOffline = false
                     self.latencyMilliseconds = latency
                 case .unreachable:
-                    if self.isStale { self.isOffline = true }
+                    if self.isStale, self.consecutiveFailedDials >= 2 { self.isOffline = true }
                 }
             }
         }
@@ -1090,11 +1162,11 @@ final class AgentDirectory {
     // round trip on a jittery WiFi hop must not flip a live computer to
     // "isn't answering" (owner-felt, 2026-09-02 evening).
     private func probeHostTwice() async -> HostProbe {
-        let first = await probeHost()
+        let first = await probeHostShared()
         guard first == .unreachable, !Task.isCancelled else { return first }
         try? await Task.sleep(for: .seconds(1.5))
         guard !Task.isCancelled else { return first }
-        return await probeHost()
+        return await probeHostShared()
     }
 
     enum HostProbe: Equatable {
@@ -1121,9 +1193,34 @@ final class AgentDirectory {
         request.timeoutInterval = 5
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
         let started = Date()
-        guard let (_, response) = try? await Self.session.data(for: request),
+        guard let (data, response) = try? await Self.session.data(for: request),
               let status = (response as? HTTPURLResponse)?.statusCode else { return .unreachable }
         if status == 401 { return .rejected }
+        if status == 200, let answer = try? JSONDecoder().decode(HostAnswer.self, from: data) {
+            let path = ConnectionPath(path: answer.connection?.path, relay: answer.connection?.relay)
+            if path != connection { connection = path }
+        }
         return .reachable(latencyMilliseconds: Int(Date().timeIntervalSince(started) * 1000))
+    }
+
+    // Single-flight: the connect deadline, the drop path and the latency
+    // poll all ask the same question; on a bad link they used to ask it
+    // four times at once (#86).
+    private func probeHostShared() async -> HostProbe {
+        if let probeInFlight { return await probeInFlight.value }
+        let task = Task { [weak self] in
+            await self?.probeHost() ?? .unreachable
+        }
+        probeInFlight = task
+        defer { if probeInFlight == task { probeInFlight = nil } }
+        return await task.value
+    }
+
+    private struct HostAnswer: Decodable {
+        struct Connection: Decodable {
+            let path: String
+            let relay: String?
+        }
+        let connection: Connection?
     }
 }

@@ -30,14 +30,8 @@ struct TerminalHandshakeProbe: TerminalHandshakeProbing {
         let agents: [Agent]?
     }
 
-    private static let session: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.waitsForConnectivity = false
-        configuration.urlCache = nil
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.timeoutIntervalForRequest = 5
-        return URLSession(configuration: configuration)
-    }()
+    // One pool for the whole app (#86); this client's budget rides on each request.
+    private static var session: URLSession { HostSession.shared }
 
     func classify(_ configuration: TerminalConnectionConfiguration) async -> TerminalTransportError? {
         guard var components = URLComponents(url: configuration.endpoint, resolvingAgainstBaseURL: false) else {
@@ -48,6 +42,7 @@ struct TerminalHandshakeProbe: TerminalHandshakeProbing {
         components.queryItems = nil
         guard let url = components.url else { return nil }
         var request = URLRequest(url: url)
+        request.timeoutInterval = 5
         request.setValue("Bearer \(configuration.credential)", forHTTPHeaderField: "Authorization")
         guard let (data, response) = try? await Self.session.data(for: request),
               let status = (response as? HTTPURLResponse)?.statusCode else { return nil }

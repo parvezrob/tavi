@@ -14,14 +14,8 @@ struct HostSourceControlClient: Sendable {
         self.credential = credential
     }
 
-    private static let session: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.waitsForConnectivity = false
-        configuration.urlCache = nil
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.timeoutIntervalForRequest = 60
-        return URLSession(configuration: configuration)
-    }()
+    // One pool for the whole app (#86); this client's budget rides on each request.
+    private static var session: URLSession { HostSession.shared }
 
     enum Outcome<Value: Sendable>: Sendable {
         case value(Value)
@@ -132,6 +126,9 @@ struct HostSourceControlClient: Sendable {
         guard let url = components.url else { return .failure("The host address is invalid.") }
         var request = URLRequest(url: url)
         request.httpMethod = method
+        // Reads answer in well under 20 s or the link is gone; writes (push,
+        // pull, PR create, removal) may legitimately take a minute.
+        request.timeoutInterval = method == "GET" ? 20 : 90
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")

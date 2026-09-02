@@ -520,7 +520,7 @@ struct ComputerChip: View {
                     .font(.footnote.weight(isSelected ? .semibold : .medium))
                     .lineLimit(1)
                 if computer.health != .live {
-                    Text("· \(computer.health.label(latencyMilliseconds: nil))")
+                    Text("· \(computer.health.label(latencyMilliseconds: nil, connection: computer.connection))")
                         .font(.footnote)
                         .foregroundStyle(HostHealthLabel.color(for: computer.health))
                         .lineLimit(1)
@@ -579,6 +579,7 @@ struct AllComputersChip: View {
 struct HostHealthLabel: View {
     let health: HostHealth
     let latencyMilliseconds: Int?
+    var connection: ConnectionPath = .unknown
 
     var body: some View {
         HStack(spacing: 5) {
@@ -590,7 +591,7 @@ struct HostHealthLabel: View {
                     .fill(Self.color(for: health))
                     .frame(width: 6, height: 6)
             }
-            Text(health.label(latencyMilliseconds: latencyMilliseconds))
+            Text(health.label(latencyMilliseconds: latencyMilliseconds, connection: connection))
                 .font(.caption2)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -664,10 +665,10 @@ extension View {
 
 extension HostHealth {
     // The word on the header; the round trip joins it only while live.
-    func label(latencyMilliseconds: Int?) -> String {
+    func label(latencyMilliseconds: Int?, connection: ConnectionPath = .unknown) -> String {
         switch self {
         case .connecting: "Connecting…"
-        case .live: latencyMilliseconds.map { "Live · \($0) ms" } ?? "Live"
+        case .live: ["Live", latencyMilliseconds.map { "\($0) ms" }, connection.headerSuffix].compactMap { $0 }.joined(separator: " · ")
         case .stale: "Reconnecting"
         case .offline: "Offline"
         case .revoked: "Unpaired"

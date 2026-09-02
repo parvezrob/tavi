@@ -83,7 +83,7 @@ struct TerminalConnectionTests {
 
     @Test
     @MainActor
-    func interfaceFlipWhileConnectedCyclesTheConnection() async throws {
+    func interfaceFlipWhileConnectedAsksTheHeartbeatInsteadOfCycling() async throws {
         let paths = ScriptedPathObserver()
         let transport = ScriptedTerminalTransport()
         let controller = TerminalSessionController(
@@ -109,10 +109,14 @@ struct TerminalConnectionTests {
         await yieldExecution()
         #expect(await transport.connectCount == 1)
 
+        // A path *change* while connected (#86, PRD §7.13): on cellular the
+        // interface list changes at every handover and most leave a working
+        // socket working. The socket is asked, not torn down; its heartbeat
+        // timeout decides.
         paths.emit(NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "pdp_ip0"))
-        try await waitUntil { await transport.connectCount >= 2 }
-        try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
-        try await waitUntil { controller.connectionState == .connected }
+        try await waitUntil { await transport.latestPingIdentifier != nil }
+        #expect(await transport.connectCount == 1)
+        #expect(controller.connectionState == .connected)
         controller.stop()
     }
 

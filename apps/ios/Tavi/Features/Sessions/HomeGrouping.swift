@@ -77,6 +77,7 @@ struct HomeComputer: Identifiable, Equatable {
     let available: Bool
     let reason: String?
     let projects: [HomeProject]
+    var connection: ConnectionPath = .unknown
 
     var agentCount: Int { projects.reduce(0) { $0 + $1.agentCount } }
     // Reachable, feed usable, still paired — nothing to explain.
@@ -86,7 +87,7 @@ struct HomeComputer: Identifiable, Equatable {
     // "Live · 40 ms · 8 agents · 5 waiting" — the computer in one line,
     // for its chip's spoken value, the Computers menu, and its sheet.
     var summary: String {
-        var parts = [health.label(latencyMilliseconds: latencyMilliseconds)]
+        var parts = [health.label(latencyMilliseconds: latencyMilliseconds, connection: connection)]
         // Counts only for what is being reported now; an offline or
         // unpaired computer's numbers are history, not a summary.
         if hasLoaded, health == .live || health == .stale {
@@ -110,6 +111,8 @@ struct HomeHostInput: Equatable {
     let reason: String?
     // Every repository this host's GET /api/repos reported (#59a, #74).
     let repos: [RepoInfo]
+    // How the phone reaches this computer, per its own Tailscale (#86).
+    let connection: ConnectionPath
 
     init(
         id: String,
@@ -120,7 +123,8 @@ struct HomeHostInput: Equatable {
         hasLoaded: Bool = true,
         available: Bool = true,
         reason: String? = nil,
-        repos: [RepoInfo] = []
+        repos: [RepoInfo] = [],
+        connection: ConnectionPath = .unknown
     ) {
         self.id = id
         self.name = name
@@ -131,6 +135,7 @@ struct HomeHostInput: Equatable {
         self.available = available
         self.reason = reason
         self.repos = repos
+        self.connection = connection
     }
 }
 
@@ -175,7 +180,8 @@ enum HomeGrouping {
                 hasLoaded: host.hasLoaded,
                 available: host.available,
                 reason: host.reason,
-                projects: group(host.agents, repos: host.repos)
+                projects: group(host.agents, repos: host.repos),
+                connection: host.connection
             )
         }
         return HomeLayout(needsYou: needsYou, computers: computers)

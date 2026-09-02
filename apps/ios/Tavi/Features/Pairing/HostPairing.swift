@@ -30,14 +30,8 @@ enum HostPairing {
 
     // Same no-disk-trace posture as every other request that carries a
     // credential (#36).
-    private static let session: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.waitsForConnectivity = false
-        configuration.urlCache = nil
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.timeoutIntervalForRequest = 15
-        return URLSession(configuration: configuration)
-    }()
+    // One pool for the whole app (#86); this client's budget rides on each request.
+    private static var session: URLSession { HostSession.shared }
 
     private struct GrantResponse: Decodable {
         struct Device: Decodable { let id: String; let name: String }
@@ -58,6 +52,8 @@ enum HostPairing {
         guard let url = components.url else { throw Failure.unreachable("The host address is invalid.") }
 
         var request = URLRequest(url: url)
+
+        request.timeoutInterval = 15
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: [
@@ -110,6 +106,7 @@ enum HostPairing {
         components.path = "/api/agents"
         guard let url = components.url else { throw Failure.unreachable("The host address is invalid.") }
         var request = URLRequest(url: url)
+        request.timeoutInterval = 15
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
 
         let started = Date()

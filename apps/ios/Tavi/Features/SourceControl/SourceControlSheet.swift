@@ -125,12 +125,16 @@ struct SourceControlSheet: View {
         // Status keeps up while the sheet is open — the thing Orca's phone
         // does not do — on the same cadence as the home's repo poll.
         .task {
+            // 5 s while answers come; 15 s after a failure, so a bad link
+            // is not asked three times as often as a good one (#86).
+            var interval: Duration = .seconds(5)
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: interval)
                 guard !Task.isCancelled, busy.isEmpty, !committing, !pushing, !pulling, !creatingPullRequest, !linking, !removing, removedReceipt == nil else { continue }
                 await load(quietly: true)
                 if tab == .commits { await loadLog(quietly: true) }
                 if tab == .pullRequest { await loadPullRequest(quietly: true) }
+                if case .failed = status { interval = .seconds(15) } else { interval = .seconds(5) }
             }
         }
         .onChange(of: tab) { _, selected in

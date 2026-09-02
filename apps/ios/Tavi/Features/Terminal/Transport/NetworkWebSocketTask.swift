@@ -50,6 +50,10 @@ final class NetworkWebSocketTask: TerminalWebSocketTasking, @unchecked Sendable 
     private var readyWaiters: [CheckedContinuation<Void, Error>] = []
     private var pendingReceive: OnceContinuation<URLSessionWebSocketTask.Message>?
     private var cancelRequested = false
+    // When the last frame of any kind (data, ping, pong, close) arrived —
+    // the idle clock a caller's heartbeat runs on (#86).
+    private var lastActivityStorage = Date()
+    var lastActivity: Date { lock.withLock { lastActivityStorage } }
 
     init(request: URLRequest) {
         let url = request.url ?? URL(string: "wss://invalid.invalid")!
@@ -128,7 +132,10 @@ final class NetworkWebSocketTask: TerminalWebSocketTasking, @unchecked Sendable 
                         once.resume(throwing: Failure.cancelled)
                         return
                     }
-                    self.lock.withLock { if self.pendingReceive === once { self.pendingReceive = nil } }
+                    self.lock.withLock {
+                        if self.pendingReceive === once { self.pendingReceive = nil }
+                        self.lastActivityStorage = Date()
+                    }
                     if let error {
                         once.resume(throwing: self.fail(with: .connectionFailed(error.localizedDescription)))
                         return
@@ -155,6 +162,29 @@ final class NetworkWebSocketTask: TerminalWebSocketTasking, @unchecked Sendable 
                 }
             }
             if let message { return message }
+        }
+    }
+
+    // A WebSocket ping; the peer's stack answers with a pong, which lands
+    // on `lastActivity`. Silence past that is the socket's own verdict.
+    func ping() async throws {
+        let ready: Bool = lock.withLock {
+            if case .ready = phase { return true }
+            return false
+        }
+        guard ready else { throw Failure.notConnected }
+        let context = NWConnection.ContentContext(
+            identifier: "ping",
+            metadata: [NWProtocolWebSocket.Metadata(opcode: .ping)]
+        )
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            connection.send(content: Data(), contentContext: context, isComplete: true, completion: .contentProcessed { error in
+                if let error {
+                    continuation.resume(throwing: Failure.connectionFailed(error.localizedDescription))
+                } else {
+                    continuation.resume()
+                }
+            })
         }
     }
 
