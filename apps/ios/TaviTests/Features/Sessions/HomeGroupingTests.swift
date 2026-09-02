@@ -253,9 +253,41 @@ struct HomeGroupingTests {
         #expect(layout.computers[0].projects[0].worktrees[0].needsYou.map(\.id) == ["b"])
     }
 
+    // A repository card whose only agent is waiting above still renders —
+    // its worktree groups are content in their own right (review,
+    // 2026-09-02); a plain folder in the same state does not.
+    @Test
+    func aRepositoryCardStaysWhileItsOnlyAgentWaits() {
+        let projects = HomeGrouping.group(
+            [agent("b", status: "blocked", cwd: "/p/tavi"), agent("c", status: "blocked", cwd: "/p/plain")],
+            repos: [repo("/p/tavi", [worktree("/p/tavi"), worktree("/p/tavi-x", branch: "x", isMain: false)])]
+        )
+        #expect(projects.first { $0.name == "tavi" }?.hasRows == true)
+        #expect(projects.first { $0.name == "plain" }?.hasRows == false)
+    }
+
+    // The host compares paths case- and Unicode-normalisation-insensitively
+    // (macOS APFS); so must the phone, or a folder typed as ~/projects/Tavi
+    // sits beside the ~/Projects/tavi card it belongs in.
+    @Test
+    func containmentIgnoresCaseAndUnicodeForm() {
+        let decomposed = "/Users/dev/Caf\u{0065}\u{0301}/apps"
+        let projects = HomeGrouping.group(
+            [agent("1", status: "working", cwd: "/users/DEV/tavi/apps/ios"), agent("2", status: "idle", cwd: decomposed)],
+            repos: [
+                repo("/Users/dev/tavi", [worktree("/Users/dev/tavi")]),
+                repo("/Users/dev/Caf\u{00E9}", [worktree("/Users/dev/Caf\u{00E9}")]),
+            ]
+        )
+        #expect(projects.map(\.name).sorted() == ["Caf\u{00E9}", "tavi"])
+        #expect(projects.first { $0.name == "tavi" }?.worktrees[0].active.map(\.id) == ["1"])
+        #expect(projects.first { $0.name == "Caf\u{00E9}" }?.worktrees[0].recent.map(\.id) == ["2"])
+    }
+
     @Test
     func worktreeSummaryCoversEveryState() {
-        #expect(worktree("/w", branch: "main").summary == "Up to date")
+        #expect(worktree("/w", branch: "main").summary == "")
+        #expect(WorktreeInfo(path: "/w", branch: "gone", head: "a", isMain: false, dirty: 0, ahead: 0, behind: 0, locked: false, prunable: true, pullRequest: nil).summary == "Folder missing")
         #expect(worktree("/w", branch: nil).title == "detached")
         #expect(worktree("/w", branch: "fix", dirty: 2, ahead: 3, behind: 1).summary == "↑3 ↓1 · 2 uncommitted")
         #expect(worktree("/w", branch: "fix", ahead: 2).summary == "↑2")

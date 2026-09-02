@@ -697,6 +697,87 @@ final class TaviUITests: XCTestCase {
         XCTAssertTrue(remembered.contains(project), "The picker did not remember \(project).")
     }
 
+    // #75: the third answer to "where" — a worktree the sheet creates first.
+    // Picks Terminal (nothing to trust), a repository the host lists, types
+    // a branch, and lands in a terminal whose cwd is the new worktree beside
+    // the repository. Leaves that worktree on the host: there is no remove
+    // route yet (#73 part 6) — clean it up with `git worktree remove` after
+    // a run; the branch is named `ui-test/wt-…` so it is easy to spot.
+    @MainActor
+    func testCreateWorktreeFromPicker() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["TAVI_DEV_HOST"],
+              let token = environment["TAVI_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_DEV_HOST/TOKEN to run the live picker test.")
+        }
+        let repo = try await knownRepo(host: host, token: token)
+        let branch = "ui-test/wt-\(UUID().uuidString.prefix(6).lowercased())"
+        let expectedPath = (repo.root as NSString).deletingLastPathComponent + "/\(repo.name)-worktrees/" + branch.replacingOccurrences(of: "/", with: "-")
+        let before = Set(try await agentPaneIds(host: host, token: token))
+
+        let app = XCUIApplication()
+        app.launchEnvironment["TAVI_DEV_RESET"] = "1"
+        app.launchEnvironment["TAVI_DEV_HOST"] = host
+        app.launchEnvironment["TAVI_DEV_TOKEN"] = token
+        app.launch()
+
+        app.buttons["sessions.newAgentTab"].tap()
+        XCTAssertTrue(
+            app.otherElements["newAgent.folders"].waitForExistence(timeout: 20)
+                || app.collectionViews["newAgent.folders"].waitForExistence(timeout: 1),
+            "The project picker never listed any folders."
+        )
+        app.buttons["newAgent.agentKind"].tap()
+        let terminal = app.buttons["newAgent.agentKind.shell"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 10), "The agent menu never offered Terminal.")
+        terminal.tap()
+
+        let worktreeMode = app.buttons["A new worktree"]
+        XCTAssertTrue(worktreeMode.waitForExistence(timeout: 10), "The sheet never offered a new worktree — does the host list any repository?")
+        worktreeMode.tap()
+        keepScreenshot(named: "new-agent-worktree-mode")
+
+        let create = app.buttons["newAgent.create"]
+        XCTAssertFalse(create.isEnabled, "Create was enabled before a repository and branch were given.")
+
+        app.buttons["newAgent.worktree.repo"].tap()
+        let choice = app.buttons[repo.name].firstMatch
+        XCTAssertTrue(choice.waitForExistence(timeout: 10), "The repository menu never offered \(repo.name).")
+        choice.tap()
+
+        let field = app.textFields["newAgent.worktree.branch"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText(branch)
+        XCTAssertTrue(create.waitForExistence(timeout: 2) && create.isEnabled, "Create stayed disabled with a repository and branch.")
+        keepScreenshot(named: "new-agent-worktree-filled")
+        create.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["terminal.identity"].waitForExistence(timeout: 60),
+            "Create and start did not open the new agent's terminal."
+        )
+        var created: String?
+        let deadline = Date().addingTimeInterval(60)
+        while Date() < deadline, created == nil {
+            let now = try await agentPaneIds(host: host, token: token)
+            created = now.first { !before.contains($0) }
+            if created == nil { try await Task.sleep(for: .seconds(2)) }
+        }
+        guard let paneId = created else {
+            throw XCTSkip("The host never reported a new agent; cannot verify the worktree end to end.")
+        }
+        addTeardownBlock {
+            if let tabId = try? await Self.tabId(host: host, token: token, paneId: paneId) {
+                try? await Self.closeAgentTab(host: host, token: token, tabId: tabId)
+            }
+        }
+        XCTAssertTrue(waitForLiveTerminal(app, timeout: 30), "The terminal opened on the new pane did not connect.")
+        let cwd = try await agentCwd(host: host, token: token, paneId: paneId)
+        XCTAssertEqual(cwd, expectedPath, "The agent did not start in the worktree the sheet said it would create.")
+        keepScreenshot(named: "new-agent-worktree-terminal")
+    }
+
     // Empty terminal: pick "Terminal" in the agent menu and the host reports
     // a plain shell pane to herdr so it lists and opens like an agent.
     @MainActor
@@ -811,9 +892,13 @@ final class TaviUITests: XCTestCase {
         // which need not be byte-identical to the catalog path we asked for.
         let firstReported = try await agentCwd(host: host, token: token, paneId: one.paneId)
         let secondReported = try await agentCwd(host: host, token: token, paneId: two.paneId)
-        let firstPath = trimmed(try XCTUnwrap(firstReported))
-        let secondPath = trimmed(try XCTUnwrap(secondReported))
-        XCTAssertNotEqual(firstPath, secondPath)
+        // Since #74 a repository is one card keyed by its main worktree, so
+        // an agent below a repo root files under the root, not its own cwd.
+        let firstPath = try await cardKey(host: host, token: token, cwd: trimmed(try XCTUnwrap(firstReported)))
+        let secondPath = try await cardKey(host: host, token: token, cwd: trimmed(try XCTUnwrap(secondReported)))
+        if firstPath == secondPath {
+            throw XCTSkip("Both folders belong to the same repository; the grouping needs two cards.")
+        }
 
         let app = XCUIApplication()
         app.launchEnvironment["TAVI_DEV_RESET"] = "1"
@@ -1398,6 +1483,40 @@ final class TaviUITests: XCTestCase {
             throw XCTSkip("This host has no project folder inside its roots to start a disposable agent in.")
         }
         return path
+    }
+
+    private struct RepoRecord: Decodable {
+        struct Worktree: Decodable { let path: String }
+        let root: String
+        let name: String
+        let worktrees: [Worktree]
+    }
+
+    private func repos(host: String, token: String) async throws -> [RepoRecord] {
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/repos")))
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, _) = try await URLSession.shared.data(for: request)
+        struct Body: Decodable { let repos: [RepoRecord] }
+        return (try? JSONDecoder().decode(Body.self, from: data))?.repos ?? []
+    }
+
+    // A repository the host can make a worktree in (#75): the one holding
+    // the known project folder when it is a repo, else the first listed.
+    private func knownRepo(host: String, token: String) async throws -> (root: String, name: String) {
+        let list = try await repos(host: host, token: token)
+        let project = try await knownProjectPath(host: host, token: token)
+        let match = list.first { repo in repo.worktrees.contains { project == $0.path || project.hasPrefix($0.path + "/") } } ?? list.first
+        guard let match else { throw XCTSkip("This host lists no git repository to create a worktree in.") }
+        return (match.root, match.name)
+    }
+
+    // The home card an agent files under (#74): its repository's root when
+    // one of the repo's worktrees contains the cwd, else the cwd itself.
+    private func cardKey(host: String, token: String, cwd: String) async throws -> String {
+        for repo in try await repos(host: host, token: token) {
+            if repo.worktrees.contains(where: { cwd == $0.path || cwd.hasPrefix($0.path + "/") }) { return repo.root }
+        }
+        return cwd
     }
 
     // A real folder deliberately *outside* the roots, to exercise the

@@ -51,11 +51,13 @@ struct HomeProject: Identifiable, Equatable {
         needsYou.count + active.count + recent.count + worktrees.reduce(0) { $0 + $1.agentCount }
     }
     var needsYouCount: Int { needsYou.count + worktrees.reduce(0) { $0 + $1.needsYou.count } }
-    // Something to draw under the header: an agent row at the top level or
-    // inside a worktree. Needs-you alone does not count — it is rendered
-    // above the cards, and a card with nothing under its header is noise.
+    // Something to draw under the header. A repository always has its
+    // worktree groups — the card must not blink out while its one agent
+    // asks a question (review, 2026-09-02). A plain folder shows only for
+    // agent rows: needs-you is rendered above the cards, and a plain card
+    // with nothing under its header is noise.
     var hasRows: Bool {
-        !active.isEmpty || !recent.isEmpty || worktrees.contains { !$0.active.isEmpty || !$0.recent.isEmpty }
+        isRepository || !active.isEmpty || !recent.isEmpty
     }
 }
 
@@ -224,7 +226,7 @@ enum HomeGrouping {
                     order.append(key)
                     repoOf[key] = repo
                 }
-                worktreeAgents[projectPath(of: worktree.path), default: []].append(agent)
+                worktreeAgents[comparisonKey(worktree.path), default: []].append(agent)
             } else {
                 if folderAgents[path] == nil { order.append(path) }
                 folderAgents[path, default: []].append(agent)
@@ -241,7 +243,7 @@ enum HomeGrouping {
                         active: [],
                         recent: [],
                         worktrees: repo.worktrees.map { info in
-                            let members = worktreeAgents[projectPath(of: info.path)] ?? []
+                            let members = worktreeAgents[comparisonKey(info.path)] ?? []
                             return HomeWorktree(
                                 info: info,
                                 needsYou: members.filter { $0.homeSection == .needsYou },
@@ -272,12 +274,13 @@ enum HomeGrouping {
     // containing worktree path wins, so a nested worktree beats the one it
     // was born from whenever both are candidates.
     static func repoAndWorktree(containing path: String, in repos: [RepoInfo]) -> (RepoInfo, WorktreeInfo)? {
+        let candidate = comparisonKey(path)
         var best: (RepoInfo, WorktreeInfo)?
         var bestLength = -1
         for repo in repos {
             for worktree in repo.worktrees {
-                let root = projectPath(of: worktree.path)
-                guard path == root || path.hasPrefix(root + "/") else { continue }
+                let root = comparisonKey(worktree.path)
+                guard candidate == root || candidate.hasPrefix(root + "/") else { continue }
                 if root.count > bestLength {
                     best = (repo, worktree)
                     bestLength = root.count
@@ -285,6 +288,15 @@ enum HomeGrouping {
             }
         }
         return best
+    }
+
+    // Paths are only ever *compared* through this key, never displayed from
+    // it: the host's rule (`projects.ts`) — macOS filesystems are normally
+    // case-insensitive and store names in a different Unicode form than a
+    // keyboard emits, so `~/projects/Tavi` typed into the picker and
+    // `~/Projects/tavi` from `git worktree list` are one folder.
+    static func comparisonKey(_ path: String) -> String {
+        projectPath(of: path).precomposedStringWithCanonicalMapping.lowercased()
     }
 
     static func projectPath(of cwd: String) -> String {

@@ -354,10 +354,12 @@ struct WorktreeGroup: View {
                         .foregroundStyle(TaviTheme.textPrimary)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Text(worktree.info.summary)
-                        .font(.footnote)
-                        .foregroundStyle(TaviTheme.textSecondary)
-                        .lineLimit(1)
+                    if !worktree.info.summary.isEmpty {
+                        Text(worktree.info.summary)
+                            .font(.footnote)
+                            .foregroundStyle(TaviTheme.textSecondary)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 8)
             }

@@ -29,6 +29,23 @@ struct NewAgentSheet: View {
     @State private var inFlight = false
     @State private var failure: String?
     @State private var pendingOutsideRoots: String?
+    // Where the agent starts (#75): an existing folder, or a worktree this
+    // sheet creates first. Worktree mode needs a repository (pre-filled
+    // when opened from a card's "New worktree" row), a base, and a branch.
+    @State private var whereMode: WhereMode = .folder
+    @State private var worktreeRepo: RepoInfo?
+    @State private var worktreeBase: String?
+    @State private var worktreeBranch = ""
+    @State private var repos: [RepoInfo] = []
+    // The outside-roots alert serves both modes; this says which one asked.
+    @State private var pendingOutsideRootsIsWorktree = false
+    private let startingIn: (hostId: String, path: String)?
+
+    enum WhereMode: String, CaseIterable, Identifiable {
+        case folder, worktree
+        var id: String { rawValue }
+        var label: String { self == .folder ? "A folder" : "A new worktree" }
+    }
 
     private enum Phase: Equatable {
         case chooseComputer
@@ -48,10 +65,22 @@ struct NewAgentSheet: View {
     ) {
         self.computers = computers
         self.onCreated = onCreated
+        self.startingIn = startingIn
         let hostId = startingIn?.hostId ?? (computers.count == 1 ? computers[0].id : nil)
         _chosenHostId = State(initialValue: hostId)
         _phase = State(initialValue: hostId == nil ? .chooseComputer : .loading)
         _selectedPath = State(initialValue: startingIn?.path)
+        // A card's "New worktree" row means a worktree; `load()` finds the
+        // repository for the folder once the host has answered.
+        _whereMode = State(initialValue: startingIn == nil ? .folder : .worktree)
+    }
+
+    private var canCreate: Bool {
+        guard !inFlight, agentKind != nil, directory != nil else { return false }
+        switch whereMode {
+        case .folder: return selectedPath != nil
+        case .worktree: return worktreeRepo != nil && !worktreeBranch.trimmingCharacters(in: .whitespaces).isEmpty
+        }
     }
 
     private var chosen: HostFleet.Entry? {
@@ -75,14 +104,14 @@ struct NewAgentSheet: View {
                         Button("Cancel") { dismiss() }
                     }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Create") {
+                        Button(whereMode == .worktree ? "Create and start" : "Create") {
                             // Disable before the task starts: two taps inside
                             // one frame would otherwise create two agents.
-                            guard !inFlight, selectedPath != nil, agentKind != nil, directory != nil else { return }
+                            guard canCreate else { return }
                             inFlight = true
                             Task { await create(allowOutsideRoots: false) }
                         }
-                        .disabled(selectedPath == nil || agentKind == nil || inFlight || directory == nil)
+                        .disabled(!canCreate)
                         .accessibilityIdentifier("newAgent.create")
                     }
                 }
@@ -108,14 +137,23 @@ struct NewAgentSheet: View {
         ) { path in
             Button("Cancel", role: .cancel) { pendingOutsideRoots = nil }
                 .accessibilityIdentifier("newAgent.outsideRoots.cancel")
-            Button("Start here", role: .destructive) {
+            Button(pendingOutsideRootsIsWorktree ? "Create there" : "Start here", role: .destructive) {
                 pendingOutsideRoots = nil
                 inFlight = true
-                Task { await create(allowOutsideRoots: true, path: path) }
+                if pendingOutsideRootsIsWorktree {
+                    Task { await create(allowOutsideRoots: true) }
+                } else {
+                    Task { await create(allowOutsideRoots: true, path: path) }
+                }
             }
             .accessibilityIdentifier("newAgent.outsideRoots.confirm")
         } message: { path in
-            Text("\(path) is not inside the project folders configured on \(computerName). The agent will be able to read and change files there.")
+            if pendingOutsideRootsIsWorktree {
+                // The host's own sentence names where the worktree would go.
+                Text(path)
+            } else {
+                Text("\(path) is not inside the project folders configured on \(computerName). The agent will be able to read and change files there.")
+            }
         }
     }
 
@@ -304,7 +342,29 @@ struct NewAgentSheet: View {
             }
             .listRowBackground(TaviTheme.card)
 
-            if !sections.recent.isEmpty {
+            // Where (#75): an existing folder, or a worktree made first.
+            // Only offered when the host reported a repository to make it in.
+            if !repos.isEmpty {
+                Section {
+                    Picker("Where", selection: $whereMode) {
+                        ForEach(WhereMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                    .accessibilityIdentifier("newAgent.whereMode")
+                } header: {
+                    Text("Where")
+                }
+                .listRowBackground(TaviTheme.card)
+            }
+
+            if whereMode == .worktree {
+                worktreeSections(catalog)
+            }
+
+            if whereMode == .folder, !sections.recent.isEmpty {
                 Section("Recent") {
                     ForEach(sections.recent) { folder in
                         folderRow(
@@ -318,7 +378,7 @@ struct NewAgentSheet: View {
                 .listRowBackground(TaviTheme.card)
             }
 
-            if !sections.projects.isEmpty {
+            if whereMode == .folder, !sections.projects.isEmpty {
                 Section("Projects") {
                     ForEach(sections.projects) { workspace in
                         folderRow(
@@ -332,7 +392,7 @@ struct NewAgentSheet: View {
                 .listRowBackground(TaviTheme.card)
             }
 
-            if sections.isEmpty {
+            if whereMode == .folder, sections.isEmpty {
                 Section {
                     Text(emptyMessage(for: catalog))
                         .font(.footnote)
@@ -344,6 +404,7 @@ struct NewAgentSheet: View {
 
             // Last, not first (#54): Recent is the common path; the custom
             // field led the sheet visually while serving the rare case.
+            if whereMode == .folder {
             Section {
                 TextField("/Users/you/Projects/thing", text: $customPath)
                     .autocorrectionDisabled()
@@ -369,6 +430,7 @@ struct NewAgentSheet: View {
                 }
             }
             .listRowBackground(TaviTheme.card)
+            }
         }
         .scrollContentBackground(.hidden)
         // Keep the search field in the navigation bar drawer; left to the
@@ -383,6 +445,85 @@ struct NewAgentSheet: View {
         // this inset it covers the last rows at rest (#54).
         .contentMargins(.bottom, 76, for: .scrollContent)
         .accessibilityIdentifier("newAgent.folders")
+    }
+
+    // Worktree mode (#75, approved design): Repository, Start from, Branch,
+    // and a sentence that says exactly what will happen before it happens.
+    @ViewBuilder
+    private func worktreeSections(_ catalog: ProjectCatalog) -> some View {
+        Section {
+            Menu {
+                ForEach(repos) { repo in
+                    Button {
+                        worktreeRepo = repo
+                        worktreeBase = repo.defaultBranch ?? repo.branches.first
+                    } label: {
+                        if worktreeRepo?.id == repo.id {
+                            Label(repo.name, systemImage: "checkmark")
+                        } else {
+                            Text(repo.name)
+                        }
+                    }
+                }
+            } label: {
+                pickerRow("Repository", value: worktreeRepo?.name ?? "Choose")
+            }
+            .accessibilityIdentifier("newAgent.worktree.repo")
+
+            Menu {
+                ForEach(worktreeRepo?.branches ?? [], id: \.self) { branch in
+                    Button {
+                        worktreeBase = branch
+                    } label: {
+                        if worktreeBase == branch {
+                            Label(branch, systemImage: "checkmark")
+                        } else {
+                            Text(branch)
+                        }
+                    }
+                }
+            } label: {
+                pickerRow("Start from", value: worktreeBase ?? "—")
+            }
+            .disabled(worktreeRepo == nil)
+            .accessibilityIdentifier("newAgent.worktree.base")
+
+            TextField("fix/what-it-does", text: $worktreeBranch)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .font(.body.monospaced())
+                .accessibilityIdentifier("newAgent.worktree.branch")
+        } header: {
+            Text("New worktree")
+        } footer: {
+            Text(worktreeSentence(catalog))
+                .font(.footnote)
+                .foregroundStyle(TaviTheme.textSecondary)
+        }
+        .listRowBackground(TaviTheme.card)
+    }
+
+    private func pickerRow(_ title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+                .foregroundStyle(TaviTheme.textPrimary)
+            Spacer()
+            Text(value)
+                .foregroundStyle(TaviTheme.textSecondary)
+                .lineLimit(1)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.caption)
+                .foregroundStyle(TaviTheme.textSecondary)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func worktreeSentence(_ catalog: ProjectCatalog) -> String {
+        guard let repo = worktreeRepo else { return "Pick the repository to make the worktree in." }
+        let branch = worktreeBranch.trimmingCharacters(in: .whitespaces)
+        guard !branch.isEmpty else { return "Name the branch. The worktree is created beside \(repo.name), off \(worktreeBase ?? "its default branch")." }
+        let kind = agentKind.map { label(for: $0, in: catalog) } ?? "the agent"
+        return "Creates a worktree beside \(repo.name) on a new branch \(branch) off \(worktreeBase ?? "its default branch"), copies its ignored setup files such as .env, then starts \(kind) there."
     }
 
     private func label(for kind: String, in catalog: ProjectCatalog) -> String {
@@ -470,8 +611,26 @@ struct NewAgentSheet: View {
         switch await directory.fetchProjects() {
         case let .catalog(catalog):
             agentKind = ProjectPicker.defaultAgentKind(in: catalog.agents, preferring: rememberedKind)
+            await loadRepos(from: directory)
             phase = .catalog(catalog)
         case let .failure(message): phase = .failed(message)
+        }
+    }
+
+    // The repositories worktree mode can make one in: the directory's last
+    // poll, or one fetch when it has none yet. Opened from a card, the
+    // repository containing that folder is chosen up front.
+    private func loadRepos(from directory: AgentDirectory) async {
+        var list = directory.repos
+        if list.isEmpty, case let .repos(fetched) = await directory.fetchRepos() { list = fetched }
+        repos = list
+        if worktreeRepo == nil, let startingIn, let (repo, _) = HomeGrouping.repoAndWorktree(containing: HomeGrouping.projectPath(of: startingIn.path), in: list) {
+            worktreeRepo = repo
+            worktreeBase = repo.defaultBranch ?? repo.branches.first
+        } else if worktreeRepo == nil, whereMode == .worktree {
+            // Asked for a worktree from a folder no repo claims: fall back
+            // to a plain folder rather than a mode with nothing to pick.
+            whereMode = list.isEmpty ? .folder : .worktree
         }
     }
 
@@ -481,7 +640,7 @@ struct NewAgentSheet: View {
     }
 
     private func create(allowOutsideRoots: Bool, path: String? = nil) async {
-        guard let cwd = path ?? selectedPath, let agentKind, let directory else {
+        guard let agentKind, let directory else {
             inFlight = false
             return
         }
@@ -489,7 +648,35 @@ struct NewAgentSheet: View {
         inFlight = true
         defer { inFlight = false }
 
-        switch await directory.createTab(agent: agentKind, cwd: cwd, allowOutsideRoots: allowOutsideRoots) {
+        var cwd: String
+        if whereMode == .worktree, path == nil {
+            // Make the worktree first; its folder is then where the agent
+            // starts. The folder the host just made is inside the roots
+            // whenever the worktree was, so the second call needs no
+            // confirmation of its own.
+            guard let repo = worktreeRepo else { return }
+            let branch = worktreeBranch.trimmingCharacters(in: .whitespaces)
+            switch await directory.createWorktree(repo: repo.root, branch: branch, base: worktreeBase, allowOutsideRoots: allowOutsideRoots) {
+            case let .created(worktree):
+                cwd = worktree.path
+            case .needsOutsideRootsConfirmation where allowOutsideRoots:
+                failure = "The host would not create the worktree even after confirmation."
+                return
+            case let .needsOutsideRootsConfirmation(message):
+                pendingOutsideRootsIsWorktree = true
+                pendingOutsideRoots = message
+                return
+            case let .failure(message):
+                failure = message
+                return
+            }
+        } else {
+            guard let chosen = path ?? selectedPath else { return }
+            cwd = chosen
+            pendingOutsideRootsIsWorktree = false
+        }
+
+        switch await directory.createTab(agent: agentKind, cwd: cwd, allowOutsideRoots: allowOutsideRoots || whereMode == .worktree) {
         case let .created(paneId, _):
             // The row arrives on the live snapshot feed like any other; the
             // terminal opens right away on the pane the host named.

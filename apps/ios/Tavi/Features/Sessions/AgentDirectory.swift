@@ -121,8 +121,11 @@ struct WorktreeInfo: Identifiable, Equatable, Decodable {
     // approved design, PRD §7.12). "Uncommitted" over git's own "dirty":
     // more familiar to someone who doesn't speak git jargon (owner call,
     // 2026-09-02). Silent about anything that is zero: a clean worktree on
-    // the default branch says "Up to date" so the row is never bare.
+    // the default branch has no second line at all, as the locked design
+    // draws it. A worktree whose folder is gone says so instead of posing
+    // as live work.
     var summary: String {
+        if prunable { return "Folder missing" }
         var parts: [String] = []
         if let pullRequest { parts.append("PR #\(pullRequest.number)") }
         var sync: [String] = []
@@ -131,7 +134,7 @@ struct WorktreeInfo: Identifiable, Equatable, Decodable {
         if !sync.isEmpty { parts.append(sync.joined(separator: " ")) }
         if dirty > 0 { parts.append(dirty == 1 ? "1 uncommitted" : "\(dirty) uncommitted") }
         if locked { parts.append("locked") }
-        return parts.isEmpty ? "Up to date" : parts.joined(separator: " · ")
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -144,9 +147,46 @@ struct RepoInfo: Identifiable, Equatable, Decodable {
     let root: String
     let name: String
     let defaultBranch: String?
+    // Local branches, default first — the "start from" choices when
+    // creating a worktree (#75). Absent from an older host: empty.
+    var branches: [String] = []
     let worktrees: [WorktreeInfo]
 
     var id: String { root }
+
+    private enum CodingKeys: String, CodingKey { case root, name, defaultBranch, branches, worktrees }
+
+    init(root: String, name: String, defaultBranch: String?, branches: [String] = [], worktrees: [WorktreeInfo]) {
+        self.root = root
+        self.name = name
+        self.defaultBranch = defaultBranch
+        self.branches = branches
+        self.worktrees = worktrees
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        root = try container.decode(String.self, forKey: .root)
+        name = try container.decode(String.self, forKey: .name)
+        defaultBranch = try container.decodeIfPresent(String.self, forKey: .defaultBranch)
+        branches = try container.decodeIfPresent([String].self, forKey: .branches) ?? []
+        worktrees = try container.decode([WorktreeInfo].self, forKey: .worktrees)
+    }
+}
+
+// What the host made when asked for a new worktree (#75).
+struct CreatedWorktree: Equatable, Decodable {
+    let path: String
+    let branch: String
+    let base: String
+    let repoRoot: String
+    let copiedSetupFiles: Int
+}
+
+enum CreateWorktreeOutcome: Equatable {
+    case created(CreatedWorktree)
+    case needsOutsideRootsConfirmation(String)
+    case failure(String)
 }
 
 private struct RepoCatalog: Decodable {
@@ -531,6 +571,50 @@ final class AgentDirectory {
         } catch {
             return .failure(error.localizedDescription)
         }
+    }
+
+    // Creates a git worktree for a new branch (#75) — the host makes the
+    // folder, the caller then starts an agent in it with `createTab`.
+    // `allowOutsideRoots` as for `createTab`: only after the person confirmed.
+    func createWorktree(repo: String, branch: String, base: String?, allowOutsideRoots: Bool = false) async -> CreateWorktreeOutcome {
+        guard let host, !credential.isEmpty else { return .failure("Connect a host first.") }
+        guard var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else {
+            return .failure("The host address is invalid.")
+        }
+        components.path = "/api/worktrees"
+        guard let url = components.url else { return .failure("The host address is invalid.") }
+
+        var body: [String: Any] = ["repo": repo, "branch": branch]
+        if let base { body["base"] = base }
+        if allowOutsideRoots { body["allowOutsideRoots"] = true }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        do {
+            let (data, response) = try await Self.session.data(for: request)
+            guard let status = (response as? HTTPURLResponse)?.statusCode else {
+                return .failure("The host did not answer.")
+            }
+            if status == 201 {
+                guard let created = try? JSONDecoder().decode(CreatedWorktreeResponse.self, from: data) else {
+                    return .failure("The host created the worktree but did not say where.")
+                }
+                return .created(created.worktree)
+            }
+            let failure = try? JSONDecoder().decode(CreateTabFailure.self, from: data)
+            if failure?.outsideRoots == true { return .needsOutsideRootsConfirmation(failure?.error ?? "The new worktree would be outside your project folders.") }
+            return .failure(failure?.error ?? "The host could not create the worktree (HTTP \(status)).")
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+    }
+
+    private struct CreatedWorktreeResponse: Decodable {
+        let worktree: CreatedWorktree
     }
 
     // Creates a Herdr tab in a chosen project folder and launches the agent
