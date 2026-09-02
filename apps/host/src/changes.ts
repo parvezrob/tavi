@@ -1,15 +1,12 @@
-import { execFile } from "node:child_process";
 import path from "node:path";
-import { promisify } from "node:util";
 import { looksLikeASecret } from "./files.js";
+import { describeGitError, git } from "./git-exec.js";
 
 // "What did it change" (#25): an agent's uncommitted work as git sees it,
 // read-only. Three fixed git invocations — status, numstat, and one diff —
 // run with execFile (no shell), a timeout, and an output cap. No mutating
 // git operation exists on this path, by construction.
 
-const execFileAsync = promisify(execFile);
-const GIT_TIMEOUT_MS = 8_000;
 // One file's diff over this is cut and marked; the phone says so.
 export const MAX_DIFF_BYTES = 256 * 1024;
 const MAX_CHANGED_FILES = 500;
@@ -43,7 +40,7 @@ export async function listChanges(cwd: string): Promise<ChangesResult> {
   try {
     statusOut = (await git(repository.path, ["status", "--porcelain=v1", "-z", "--untracked-files=all"])).stdout;
   } catch (error) {
-    return { ok: false, status: 503, error: `git status failed: ${describe(error)}` };
+    return { ok: false, status: 503, error: `git status failed: ${describeGitError(error)}` };
   }
   const files = parsePorcelain(statusOut);
   const numstat = await numstats(repository.path);
@@ -95,8 +92,8 @@ export async function diffFile(cwd: string, relativePath: string): Promise<FileD
     if (tracked.stdout.length > 0) return { ok: true, diff: shape(normalized, tracked.stdout) };
   } catch (error) {
     // A fresh repository has no HEAD yet; fall through to the untracked view.
-    if (!/bad revision|unknown revision|ambiguous argument 'HEAD'/i.test(describe(error))) {
-      return { ok: false, status: 503, error: `git diff failed: ${describe(error)}` };
+    if (!/bad revision|unknown revision|ambiguous argument 'HEAD'/i.test(describeGitError(error))) {
+      return { ok: false, status: 503, error: `git diff failed: ${describeGitError(error)}` };
     }
   }
   try {
@@ -109,10 +106,10 @@ export async function diffFile(cwd: string, relativePath: string): Promise<FileD
     );
     if (untracked.stdout.length > 0) return { ok: true, diff: shape(normalized, untracked.stdout) };
   } catch (error) {
-    if (/No such file|does not exist|cannot stat/i.test(describe(error))) {
+    if (/No such file|does not exist|cannot stat/i.test(describeGitError(error))) {
       return { ok: false, status: 404, error: "No such file in the repository." };
     }
-    return { ok: false, status: 503, error: `git diff failed: ${describe(error)}` };
+    return { ok: false, status: 503, error: `git diff failed: ${describeGitError(error)}` };
   }
   return { ok: true, diff: { path: normalized, diff: "", truncated: false, binary: false } };
 }
@@ -134,7 +131,7 @@ async function repositoryRoot(cwd: string): Promise<RootResult> {
     if (!root) return { ok: false, status: 404, error: "This folder is not inside a git repository.", notRepository: true };
     return { ok: true, path: root };
   } catch (error) {
-    const message = describe(error);
+    const message = describeGitError(error);
     if (/not a git repository/i.test(message)) {
       return { ok: false, status: 404, error: "This folder is not inside a git repository.", notRepository: true };
     }
@@ -219,34 +216,3 @@ async function numstats(repository: string): Promise<Map<string, { additions: nu
   return result;
 }
 
-async function git(
-  cwd: string,
-  args: string[],
-  maxBuffer = 4 * 1024 * 1024,
-  okExitCodes: number[] = [0],
-): Promise<{ stdout: string }> {
-  try {
-    const { stdout } = await execFileAsync("git", ["-C", cwd, ...args], {
-      timeout: GIT_TIMEOUT_MS,
-      maxBuffer,
-      encoding: "utf8",
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
-    });
-    return { stdout };
-  } catch (error) {
-    const code = (error as { code?: unknown }).code;
-    const stdout = (error as { stdout?: string }).stdout;
-    // `git diff` exits 1 when there is a difference; that is an answer.
-    if (typeof code === "number" && okExitCodes.includes(code) && typeof stdout === "string") return { stdout };
-    // Output beyond maxBuffer: what git managed to print is still the
-    // start of the diff, and the caller marks it truncated.
-    if (code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" && typeof stdout === "string") return { stdout };
-    throw error;
-  }
-}
-
-function describe(error: unknown): string {
-  const stderr = (error as { stderr?: string }).stderr;
-  if (typeof stderr === "string" && stderr.trim()) return stderr.trim();
-  return error instanceof Error ? error.message : String(error);
-}

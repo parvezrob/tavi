@@ -32,6 +32,7 @@ import type { AttachCommand, HostInfo, ServerTerminalMessage, WorkspaceInfo } fr
 import { InputError, safeSessionId } from "./validation.js";
 import { scanWorkspaces } from "./workspaces.js";
 import { diffFile, listChanges } from "./changes.js";
+import { listRepos } from "./git.js";
 import { MAX_RAW_BYTES, listDirectory, readTextContent, resolveWithinRoots, statFile } from "./files.js";
 import { PreviewRegistry, TICKET_COOKIE, defaultDiscoveryDeps, listProjectServers, stopProjectServer, validPort, type DiscoveryDeps } from "./preview.js";
 import { createReadStream } from "node:fs";
@@ -460,6 +461,15 @@ async function routeRequest(
       roots: config.roots,
       agents: kinds,
     });
+    return;
+  }
+
+  // Read-only worktree and branch visibility (#59a): every git repository
+  // reachable from the configured roots, with every worktree git itself
+  // knows about — "where is my work happening" in one call.
+  if (url.pathname === "/api/repos" && request.method === "GET") {
+    const repos = await listRepos(config.roots);
+    sendJson(response, 200, { repos });
     return;
   }
 

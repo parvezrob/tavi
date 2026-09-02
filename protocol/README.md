@@ -178,6 +178,24 @@ All four routes take `cwd` (absolute) and `path` (absolute, or relative to `cwd`
 
 Nothing under `/api/files` or `/api/changes` writes, renames, deletes, or runs anything but the fixed git reads above.
 
+### `GET /api/repos` — worktree and branch visibility (#59a)
+
+Every git repository reachable from the configured roots, with every worktree git itself knows about (a linked worktree may live outside the roots — git found it, so this route does not hide it; the roots guardrail governs where a *new* worktree is created, not what an existing one shows). Read-only: `worktree list`, `status`, `rev-list`, nothing else.
+
+```json
+{ "repos": [{
+  "root": "/Users/me/Projects/app",
+  "name": "app",
+  "defaultBranch": "main",
+  "worktrees": [
+    { "path": "/Users/me/Projects/app", "branch": "main", "head": "a1b2c3d", "isMain": true, "dirty": 0, "ahead": 0, "behind": 0, "locked": false, "prunable": false },
+    { "path": "/Users/me/Projects/app-fix-foo", "branch": "fix/foo", "head": "e4f5a6b", "isMain": false, "dirty": 2, "ahead": 3, "behind": 1, "locked": false, "prunable": false }
+  ]
+}] }
+```
+
+`branch` is `null` for a detached `HEAD`. `dirty` is a count of changed-or-untracked entries (`status --porcelain=v2`), not the files themselves — see `/api/changes` for those. `ahead`/`behind` are commits relative to `defaultBranch` (the remote's default branch, else a local `main` or `master`, else `null` and both `0`); a worktree already on the default branch also reports `0`/`0`. `defaultBranch` is `null` when none of those resolve.
+
 ### `/api/preview…` — private dev-server preview (#58)
 
 An agent starts something on `localhost:<port>`; the phone shows it in a WebKit view without the server being started any differently, and nobody but the paired phone can open it. Two listeners are involved:

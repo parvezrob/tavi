@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1098,6 +1099,35 @@ test("read-only file routes: auth required, roots enforced after realpath, conte
     assert.equal(((await changes.json()) as { notRepository?: true }).notRepository, true);
     const changesOutside = await fetch(`${origin}/api/changes?cwd=${encodeURIComponent(outside)}`, { headers });
     assert.equal(changesOutside.status, 403);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("repos endpoint reports worktrees with branch and dirty state (#59a)", async () => {
+  const base = realpathSync(mkdtempSync(path.join(tmpdir(), "tavi-repos-route-")));
+  const repoDir = path.join(base, "app");
+  execFileSync("git", ["init", "-q", "-b", "main", repoDir]);
+  writeFileSync(path.join(repoDir, "README.md"), "# app\n");
+  execFileSync("git", ["-C", repoDir, "add", "."]);
+  execFileSync("git", ["-C", repoDir, "commit", "-q", "-m", "init"], {
+    env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+  });
+
+  const server = await createTaviServer({ config: { ...config, roots: [base] } });
+  await listen(server);
+  try {
+    const address = server.address() as AddressInfo;
+    const origin = `http://127.0.0.1:${address.port}`;
+
+    assert.equal((await fetch(`${origin}/api/repos`)).status, 401);
+
+    const response = await fetch(`${origin}/api/repos`, { headers: { Authorization: `Bearer ${config.token}` } });
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { repos: { root: string; worktrees: { branch: string | null; isMain: boolean }[] }[] };
+    const repo = body.repos.find((entry) => entry.root === repoDir);
+    assert.ok(repo, "expected the repository to be reported");
+    assert.deepEqual(repo?.worktrees.map((w) => [w.branch, w.isMain]), [["main", true]]);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
