@@ -1,6 +1,6 @@
 {
   "name": "tavi-host",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "Tavi host — pairs your iPhone with the coding agents already running on this computer, over your own Tailscale network. Terminal Agent Vantage and Intervention, by Farfield.",
   "license": "Apache-2.0",
   "repository": {
