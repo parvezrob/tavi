@@ -265,6 +265,12 @@ struct ProjectCard: View {
                     .foregroundStyle(TaviTheme.textSecondary.opacity(0.7))
                     .lineLimit(1)
                     .truncationMode(.head)
+                if let worktree = project.worktree {
+                    Text(worktree.summary)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(TaviTheme.textSecondary.opacity(0.7))
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 8)
             if let computerName {

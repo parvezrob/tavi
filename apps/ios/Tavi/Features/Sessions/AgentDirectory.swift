@@ -94,6 +94,55 @@ enum ProjectsFetch: Equatable {
     case failure(String)
 }
 
+// One git worktree, from GET /api/repos (#59a): "where is my work
+// happening" for the folder a HomeProject already groups by. `path` is the
+// worktree's own folder — the same string a project's `cwd` would be when
+// an agent runs there.
+struct WorktreeInfo: Identifiable, Equatable, Decodable {
+    let path: String
+    let branch: String?
+    let head: String
+    let isMain: Bool
+    let dirty: Int
+    let ahead: Int
+    let behind: Int
+    let locked: Bool
+    let prunable: Bool
+
+    var id: String { path }
+
+    // "fix/foo · +3/−1 · 2 uncommitted" — the row's one line for "where is
+    // my work happening" (#59a). "Uncommitted" over git's own "dirty": more
+    // familiar to someone who doesn't speak git jargon, for the same count
+    // (owner call, 2026-09-02). Silent about anything that is zero or
+    // false: a clean worktree on the default branch says only its name.
+    var summary: String {
+        var parts = [branch ?? "detached"]
+        if ahead > 0 || behind > 0 { parts.append("+\(ahead)/−\(behind)") }
+        if dirty > 0 { parts.append(dirty == 1 ? "1 uncommitted" : "\(dirty) uncommitted") }
+        if locked { parts.append("locked") }
+        return parts.joined(separator: " · ")
+    }
+}
+
+struct RepoInfo: Identifiable, Equatable, Decodable {
+    let root: String
+    let name: String
+    let defaultBranch: String?
+    let worktrees: [WorktreeInfo]
+
+    var id: String { root }
+}
+
+private struct RepoCatalog: Decodable {
+    let repos: [RepoInfo]
+}
+
+enum ReposFetch: Equatable {
+    case repos([RepoInfo])
+    case failure(String)
+}
+
 // Creating an agent always names a folder. The host owns the rule about
 // which folders are ordinary and which need a second look, so a location
 // outside its configured roots comes back as a confirmation request rather
@@ -245,6 +294,10 @@ final class AgentDirectory {
     // freshness: after a reconnect the clock restarts at the replayed
     // snapshot, so it never claims more history than the phone witnessed.
     private(set) var statusObservedAt: [String: Date] = [:]
+    // Every worktree GET /api/repos reported (#59a), flattened for
+    // HomeGrouping. Empty until the first poll answers; a project with no
+    // matching entry just renders as an ordinary folder.
+    private(set) var worktrees: [WorktreeInfo] = []
 
     private var credential = ""
     private var host: HostEndpoint?
@@ -264,6 +317,11 @@ final class AgentDirectory {
     private var reviewTask: Task<Void, Never>?
     private var latencyTask: Task<Void, Never>?
     private static let latencyInterval: Duration = .seconds(30)
+    private var reposTask: Task<Void, Never>?
+    // Dirty state changes at typing speed but nobody needs it that fresh;
+    // this matches the latency probe's cadence rather than inventing a new
+    // rhythm to reason about.
+    private static let reposInterval: Duration = .seconds(30)
 
     var health: HostHealth {
         if isRevoked { return .revoked }
@@ -287,6 +345,7 @@ final class AgentDirectory {
         isRevoked = false
         isOffline = false
         latencyMilliseconds = nil
+        worktrees = []
         lastRawAgents = []
         smoother.reset()
         guard let url = URL(string: hostText),
@@ -340,6 +399,28 @@ final class AgentDirectory {
                 }
             }
         }
+        reposTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                // Not gated on `hasLoaded`/`isStale` the way the latency
+                // probe is: those flip only once the events *stream* has
+                // delivered a snapshot, which a fresh launch has not done
+                // yet, and gating on them here left the first poll waiting
+                // out a full interval before trying at all. This is a
+                // separate authenticated GET that fails cheaply on its own
+                // (`fetchRepos` guards on host/credential) when there is
+                // nothing to answer it — `isRevoked` is the one state worth
+                // skipping, a dead credential that redialing cannot fix.
+                if !self.isRevoked, case let .repos(repos) = await self.fetchRepos() {
+                    let flattened = repos.flatMap(\.worktrees)
+                    // Equatable, so an unchanged answer never triggers the
+                    // @Observable re-render every poll would otherwise cost
+                    // the whole home for state that rarely moves.
+                    if flattened != self.worktrees { self.worktrees = flattened }
+                }
+                try? await Task.sleep(for: Self.reposInterval)
+            }
+        }
     }
 
     func stop() {
@@ -353,6 +434,8 @@ final class AgentDirectory {
         reviewTask = nil
         latencyTask?.cancel()
         latencyTask = nil
+        reposTask?.cancel()
+        reposTask = nil
         isRunning = false
         // Whatever we show next launch/foreground is last-known until the
         // stream confirms otherwise.
@@ -406,6 +489,31 @@ final class AgentDirectory {
                 // a network problem — say which, since retrying never helps.
                 return .failure("This host sent a project list Tavi does not understand. Update the Tavi host and the app to matching versions.")
             }
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+    }
+
+    // Worktree and branch visibility (#59a): every repository this host can
+    // see, with every worktree git knows about. Polled on its own cadence
+    // (dirty state has no push feed) rather than carried on the agents
+    // snapshot, so a quiet folder never blocks on it.
+    func fetchRepos() async -> ReposFetch {
+        guard let host, !credential.isEmpty else { return .failure("Connect a host first.") }
+        guard var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else {
+            return .failure("The host address is invalid.")
+        }
+        components.path = "/api/repos"
+        guard let url = components.url else { return .failure("The host address is invalid.") }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, response) = try await Self.session.data(for: request)
+            guard let status = (response as? HTTPURLResponse)?.statusCode, status == 200 else {
+                return .failure("The host did not answer.")
+            }
+            return .repos(try JSONDecoder().decode(RepoCatalog.self, from: data).repos)
         } catch {
             return .failure(error.localizedDescription)
         }

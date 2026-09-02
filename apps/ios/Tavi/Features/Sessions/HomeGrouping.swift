@@ -21,6 +21,10 @@ struct HomeProject: Identifiable, Equatable {
     let needsYou: [AgentSummary]
     let active: [AgentSummary]
     let recent: [AgentSummary]
+    // Set when this project's folder is a git worktree (#59a) — the same
+    // host's GET /api/repos, matched by path. nil for an ordinary folder,
+    // or one the host hasn't reported worktree state for yet.
+    let worktree: WorktreeInfo?
 
     var id: String { path }
     var abbreviatedPath: String { path.abbreviatingHomeDirectory }
@@ -74,6 +78,10 @@ struct HomeHostInput: Equatable {
     let hasLoaded: Bool
     let available: Bool
     let reason: String?
+    // Every worktree this host's GET /api/repos reported (#59a), flattened
+    // across repos — grouping only needs to match one against a project's
+    // path, not which repo it belongs to.
+    let worktrees: [WorktreeInfo]
 
     init(
         id: String,
@@ -83,7 +91,8 @@ struct HomeHostInput: Equatable {
         latencyMilliseconds: Int? = nil,
         hasLoaded: Bool = true,
         available: Bool = true,
-        reason: String? = nil
+        reason: String? = nil,
+        worktrees: [WorktreeInfo] = []
     ) {
         self.id = id
         self.name = name
@@ -93,6 +102,7 @@ struct HomeHostInput: Equatable {
         self.hasLoaded = hasLoaded
         self.available = available
         self.reason = reason
+        self.worktrees = worktrees
     }
 }
 
@@ -137,7 +147,7 @@ enum HomeGrouping {
                 hasLoaded: host.hasLoaded,
                 available: host.available,
                 reason: host.reason,
-                projects: group(host.agents)
+                projects: group(host.agents, worktrees: host.worktrees)
             )
         }
         return HomeLayout(needsYou: needsYou, computers: computers)
@@ -166,7 +176,7 @@ enum HomeGrouping {
     // order is deterministic and does not depend on status, so a project
     // never jumps around the screen as its agents start and finish — the
     // header's count says what is running.
-    static func group(_ agents: [AgentSummary]) -> [HomeProject] {
+    static func group(_ agents: [AgentSummary], worktrees: [WorktreeInfo] = []) -> [HomeProject] {
         var order: [String] = []
         var members: [String: [AgentSummary]] = [:]
 
@@ -175,7 +185,6 @@ enum HomeGrouping {
             if members[path] == nil { order.append(path) }
             members[path, default: []].append(agent)
         }
-
         return order
             .map { path in
                 let agents = members[path] ?? []
@@ -184,7 +193,8 @@ enum HomeGrouping {
                     name: projectName(of: path),
                     needsYou: agents.filter { $0.homeSection == .needsYou },
                     active: agents.filter { $0.homeSection == .active },
-                    recent: agents.filter { $0.homeSection == .recent }
+                    recent: agents.filter { $0.homeSection == .recent },
+                    worktree: worktree(containing: path, in: worktrees)
                 )
             }
             .sorted { lhs, rhs in
@@ -192,6 +202,22 @@ enum HomeGrouping {
                 if byName != .orderedSame { return byName == .orderedAscending }
                 return lhs.path < rhs.path
             }
+    }
+
+    // The worktree a project's folder lives under, or nil. An agent's cwd is
+    // routinely *inside* a worktree rather than at its root — this repo's
+    // own layout, host and iOS agents each in their own subfolder, is the
+    // ordinary case — so containment, not equality, is the match; the
+    // longest (most specific) containing worktree wins when more than one
+    // qualifies, so a linked worktree beats the main one it was born from
+    // whenever both are somehow candidates.
+    static func worktree(containing path: String, in worktrees: [WorktreeInfo]) -> WorktreeInfo? {
+        worktrees
+            .filter { worktree in
+                let root = projectPath(of: worktree.path)
+                return path == root || path.hasPrefix(root + "/")
+            }
+            .max { projectPath(of: $0.path).count < projectPath(of: $1.path).count }
     }
 
     static func projectPath(of cwd: String) -> String {

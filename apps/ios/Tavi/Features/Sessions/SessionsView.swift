@@ -458,7 +458,8 @@ struct SessionsView: View {
                 latencyMilliseconds: entry.directory.latencyMilliseconds,
                 hasLoaded: entry.directory.hasLoaded,
                 available: entry.directory.available,
-                reason: entry.directory.reason
+                reason: entry.directory.reason,
+                worktrees: entry.directory.worktrees
             )
         })
     }

@@ -21,8 +21,20 @@ struct HomeGroupingTests {
         )
     }
 
-    private func host(_ id: String, name: String, agents: [AgentSummary], health: HostHealth = .live) -> HomeHostInput {
-        HomeHostInput(id: id, name: name, agents: agents.map { var a = $0; a.hostId = id; return a }, health: health)
+    private func host(_ id: String, name: String, agents: [AgentSummary], health: HostHealth = .live, worktrees: [WorktreeInfo] = []) -> HomeHostInput {
+        HomeHostInput(id: id, name: name, agents: agents.map { var a = $0; a.hostId = id; return a }, health: health, worktrees: worktrees)
+    }
+
+    private func worktree(
+        _ path: String,
+        branch: String? = "main",
+        isMain: Bool = true,
+        dirty: Int = 0,
+        ahead: Int = 0,
+        behind: Int = 0,
+        locked: Bool = false
+    ) -> WorktreeInfo {
+        WorktreeInfo(path: path, branch: branch, head: "abc1234", isMain: isMain, dirty: dirty, ahead: ahead, behind: behind, locked: locked, prunable: false)
     }
 
     @Test
@@ -155,6 +167,77 @@ struct HomeGroupingTests {
         #expect(layout.computers[2].projects.isEmpty)
         #expect(layout.computers[2].agentCount == 0)
         #expect(!layout.isEmpty)
+    }
+
+    // #59a: a project's folder carries its worktree state when the host
+    // reported one for that path; an ordinary folder (no matching path in
+    // GET /api/repos) renders exactly as before.
+    @Test
+    func projectsCarryWorktreeStateWhenTheHostReportsOne() {
+        let layout = HomeGrouping.layout(hosts: [
+            host("mac", name: "MacBook", agents: [
+                agent("1", status: "working", cwd: "/Users/dev/Projects/app-fix-foo"),
+                agent("2", status: "idle", cwd: "/Users/dev/Projects/plain"),
+            ], worktrees: [
+                worktree("/Users/dev/Projects/app-fix-foo", branch: "fix/foo", isMain: false, dirty: 2, ahead: 3, behind: 1),
+                worktree("/Users/dev/Projects/app"),
+            ]),
+        ])
+
+        let projects = layout.computers[0].projects
+        let withWorktree = projects.first { $0.path == "/Users/dev/Projects/app-fix-foo" }
+        #expect(withWorktree?.worktree?.branch == "fix/foo")
+        #expect(withWorktree?.worktree?.summary == "fix/foo · +3/−1 · 2 uncommitted")
+
+        let plain = projects.first { $0.path == "/Users/dev/Projects/plain" }
+        #expect(plain?.worktree == nil)
+    }
+
+    // An agent's cwd is routinely *inside* a worktree, not at its root —
+    // this repo's own layout (apps/ios, apps/host as separate agent
+    // folders under one worktree) is the ordinary case. Containment, not
+    // equality, must find the worktree.
+    @Test
+    func aProjectBelowAWorktreeRootStillFindsIt() {
+        let projects = HomeGrouping.group(
+            [agent("1", status: "working", cwd: "/Users/dev/tavi/apps/ios")],
+            worktrees: [worktree("/Users/dev/tavi", branch: "main")]
+        )
+        #expect(projects[0].worktree?.branch == "main")
+    }
+
+    // A folder that merely shares a prefix with a worktree path is not
+    // inside it: "/Users/dev/tavi-docs" must not match the worktree at
+    // "/Users/dev/tavi".
+    @Test
+    func aFolderThatOnlySharesAPathPrefixDoesNotMatch() {
+        let projects = HomeGrouping.group(
+            [agent("1", status: "working", cwd: "/Users/dev/tavi-docs")],
+            worktrees: [worktree("/Users/dev/tavi", branch: "main")]
+        )
+        #expect(projects[0].worktree == nil)
+    }
+
+    // Two candidate worktrees, one nested under the other: the more
+    // specific (longest) containing path wins.
+    @Test
+    func theMostSpecificContainingWorktreeWins() {
+        let projects = HomeGrouping.group(
+            [agent("1", status: "working", cwd: "/Users/dev/tavi/nested/deep")],
+            worktrees: [
+                worktree("/Users/dev/tavi", branch: "main"),
+                worktree("/Users/dev/tavi/nested", branch: "fix/foo"),
+            ]
+        )
+        #expect(projects[0].worktree?.branch == "fix/foo")
+    }
+
+    @Test
+    func worktreeSummaryCoversCleanDetachedAndLockedStates() {
+        #expect(worktree("/w", branch: "main").summary == "main")
+        #expect(worktree("/w", branch: nil).summary == "detached")
+        #expect(worktree("/w", branch: "fix", ahead: 2, behind: 0).summary == "fix · +2/−0")
+        #expect(worktree("/w", branch: "fix", locked: true).summary == "fix · locked")
     }
 
     @Test
