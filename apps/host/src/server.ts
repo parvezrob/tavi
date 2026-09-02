@@ -36,6 +36,7 @@ import { forgetPullRequest, invalidateRepos, listReposCached, type PullRequestLo
 import { git } from "./git-exec.js";
 import { createWorktree, previewRemoval, removeWorktree } from "./worktrees.js";
 import { configureGh, type GhRunner } from "./gh.js";
+import { configureTailscale, connectionPath, type TailscaleRunner } from "./tailscale.js";
 import { createPullRequest, linkPullRequest, listIssues, pullRequestStatus } from "./pull-requests.js";
 import { commitStaged, currentBranch, pullBase, pushBranch, stageFiles, worktreeLog, worktreeStatus, writeCommitMessage } from "./source-control.js";
 import { MAX_RAW_BYTES, listDirectory, readTextContent, resolveWithinRoots, statFile } from "./files.js";
@@ -70,6 +71,9 @@ export interface TaviServerOptions {
   // The `gh` runner behind the pull-request routes (#79); injectable for
   // the same reason. The default finds gh on the login-shell PATH.
   gh?: GhRunner;
+  // `tailscale status --json` behind the caller's path on /api/host (#86);
+  // injectable so tests never ask the developer's tailnet.
+  tailscale?: TailscaleRunner;
   pairing?: PairingSessions;
   spawnTerminal?: typeof pty.spawn;
   /** Checks npm for a newer host and applies it (the managed runtime's self-update). */
@@ -116,8 +120,10 @@ export async function createTaviServer(options: TaviServerOptions) {
     discovery,
     pullRequests,
     gh,
+    tailscale,
   } = options;
   configureGh(config.shell);
+  configureTailscale(config.shell);
   previews.start();
   const eventsWss = new WebSocketServer({
     noServer: true,
@@ -176,6 +182,7 @@ export async function createTaviServer(options: TaviServerOptions) {
         discovery,
         pullRequests,
         gh,
+        tailscale,
       });
     } catch (error) {
       const status = error instanceof InputError ? 400 : 500;
@@ -355,6 +362,7 @@ interface RouteContext {
   discovery?: (DiscoveryDeps & { kill?: (pid: number) => void }) | undefined;
   pullRequests?: PullRequestLookup | undefined;
   gh?: GhRunner | undefined;
+  tailscale?: TailscaleRunner | undefined;
 }
 
 async function routeRequest(
@@ -362,7 +370,7 @@ async function routeRequest(
   response: ServerResponse,
   context: RouteContext,
 ): Promise<void> {
-  const { config, herdr, listWorkspaces, attention, projects, agentKinds, devices, pairing, authorized, update, previews, doorReady, discovery, pullRequests, gh } = context;
+  const { config, herdr, listWorkspaces, attention, projects, agentKinds, devices, pairing, authorized, update, previews, doorReady, discovery, pullRequests, gh, tailscale } = context;
   const ghDeps = gh ? { gh } : {};
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
@@ -458,7 +466,11 @@ async function routeRequest(
       arch: arch(),
       version: VERSION,
     };
-    sendJson(response, 200, { ...host, fingerprint: devices.identity().fingerprint });
+    // The caller's path per this computer's Tailscale (#86): the phone
+    // says "relay" in words instead of blaming the computer for a slow
+    // link. Never slower than the cached status; "unknown" on any doubt.
+    const connection = await connectionPath(request, ...(tailscale ? [tailscale] : []));
+    sendJson(response, 200, { ...host, fingerprint: devices.identity().fingerprint, connection });
     return;
   }
 

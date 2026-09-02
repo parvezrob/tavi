@@ -79,9 +79,12 @@ Host-token only: list paired devices (`{ "devices": [{ "id", "name", "pairedAt",
   "platform": "darwin",
   "arch": "arm64",
   "version": "0.1.0",
-  "fingerprint": "99F5 7AF0 · E678 C534"
+  "fingerprint": "99F5 7AF0 · E678 C534",
+  "connection": { "path": "relay", "relay": "blr" }
 }
 ```
+
+`connection` (host ≥ 0.1.17, #86) is the caller's path per the computer's own Tailscale: `direct` (peer to peer), `relay` with the DERP region (`relay`), or `unknown` (Tailscale not installed or not asked, the caller not a tailnet peer, a direct localhost call). The phone shows it in words — "Live · 40 ms · relay" — instead of blaming the computer for a slow link. It is a fact for a screen, never a guardrail; an older host simply omits it.
 
 ### `GET /api/projects`
 
