@@ -336,7 +336,17 @@ struct IssueSummary: Decodable, Sendable, Equatable, Identifiable {
         }
         while slug.hasSuffix("-") { slug.removeLast() }
         if slug.count > 40 {
-            slug = String(slug.prefix(40))
+            // Cut at a word boundary: "…show-when-a-pane-is" read as a
+            // glitch on the phone (owner + a cold agent, 2026-09-02). A
+            // single word longer than the cap is cut mid-word — better
+            // than an empty slug.
+            let head = slug.prefix(40)
+            let alreadyAtBoundary = slug.dropFirst(40).first == "-"
+            if !alreadyAtBoundary, let boundary = head.lastIndex(of: "-"), head.distance(from: head.startIndex, to: boundary) >= 12 {
+                slug = String(head[..<boundary])
+            } else {
+                slug = String(head)
+            }
             while slug.hasSuffix("-") { slug.removeLast() }
         }
         return slug.isEmpty ? "issue/\(number)" : "issue/\(number)-\(slug)"

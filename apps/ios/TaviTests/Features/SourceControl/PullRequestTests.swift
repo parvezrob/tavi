@@ -38,5 +38,11 @@ struct PullRequestTests {
         #expect(long.hasPrefix("issue/1-word-word"))
         #expect(long.count <= "issue/1-".count + 40)
         #expect(!long.hasSuffix("-"))
+        // The cap lands on a word boundary, never mid-word.
+        #expect(IssueSummary(number: 2, title: "abcdefghij klmnopqrstuvwxyz abcdefghij klmnop").branchName == "issue/2-abcdefghij-klmnopqrstuvwxyz-abcdefghij")
+        // A whole word that ends exactly at the cap is kept.
+        #expect(IssueSummary(number: 3, title: "session handoff cue show when a pane is also open elsewhere").branchName == "issue/3-session-handoff-cue-show-when-a-pane-is")
+        // One word longer than the cap is cut mid-word rather than emptied.
+        #expect(IssueSummary(number: 4, title: String(repeating: "x", count: 50)).branchName == "issue/4-" + String(repeating: "x", count: 40))
     }
 }
