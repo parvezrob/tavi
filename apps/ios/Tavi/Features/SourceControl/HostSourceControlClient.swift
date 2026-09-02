@@ -251,6 +251,12 @@ struct PullReceipt: Decodable, Sendable, Equatable {
     let merged: Int
     let fastForward: Bool
     let sha: String
+    // Whether the host fetched the base's upstream before merging (#83);
+    // absent from an older host.
+    let fetched: Bool?
+    // The ref that was merged: the base, or its remote-tracking ref when
+    // the base is checked out somewhere and could not be moved.
+    let from: String?
 }
 
 struct PullRequestInfo: Decodable, Sendable, Equatable {
@@ -371,6 +377,9 @@ struct RemovalPreview: Decodable, Sendable, Equatable {
         let tabId: String
         let kind: String
         let status: String
+        // Where it works; the host names it for the agents removal takes
+        // down *outside* the worktree.
+        let cwd: String?
     }
     let path: String
     let branch: String?
@@ -382,7 +391,12 @@ struct RemovalPreview: Decodable, Sendable, Equatable {
     let uncommitted: Uncommitted
     let unpushed: Unpushed
     let agents: [Agent]
+    // Agents elsewhere that share a herdr tab with one inside: the tab
+    // closes whole, so they go too (#83). Absent from an older host.
+    let alsoClosed: [Agent]?
     let branchMerged: Bool
+
+    var agentsAlsoClosed: [Agent] { alsoClosed ?? [] }
 
     // Nothing here exists only here: safe to remove without a word of
     // warning beyond the counts.

@@ -46,6 +46,7 @@ struct SourceControlSheet: View {
     @State private var askingForLink = false
     @State private var linkReference = ""
     @State private var pullRequestNotice: String?
+    @State private var pullRequestTitle = ""
     @State private var removing = false
     @State private var removedReceipt: RemovalReceipt?
     @State private var tabLoad: Task<Void, Never>?
@@ -434,12 +435,25 @@ struct SourceControlSheet: View {
                 .foregroundStyle(TaviTheme.textSecondary)
                 .padding(.top, 6)
             if status.remote != nil, status.branch != nil {
+                // Prefilled from the newest commit over the base: with
+                // several commits gh would otherwise title the pull request
+                // after the branch (`demo/79 pr`) (#83). Cleared, gh fills.
+                TextField("Title", text: $pullRequestTitle, axis: .vertical)
+                    .lineLimit(1...3)
+                    .font(.subheadline)
+                    .foregroundStyle(TaviTheme.textPrimary)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(TaviTheme.groupFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .padding(.top, 20)
+                    .accessibilityIdentifier("sourceControl.pr.title")
                 Button(creatingPullRequest ? "Creating…" : "Create pull request") {
                     begin($creatingPullRequest) { await createPullRequest() }
                 }
                 .buttonStyle(.taviProminent)
                 .disabled(creatingPullRequest || linking)
-                .padding(.top, 24)
+                .padding(.top, 16)
                 .accessibilityIdentifier("sourceControl.pr.create")
                 Button(linking ? "Linking…" : "Link an existing one") {
                     linkReference = ""
@@ -526,6 +540,10 @@ struct SourceControlSheet: View {
         }
         switch await client.pullRequest(path: worktree.info.path) {
         case let .value(fresh):
+            if fresh.pullRequest == nil, pullRequestTitle.isEmpty {
+                if case .loading = log { await loadLog(quietly: true) }
+                if case let .loaded(log) = log, let newest = log.ahead.first { pullRequestTitle = newest.summary }
+            }
             if case let .loaded(current) = pullRequest, current == fresh { return }
             pullRequest = .loaded(fresh)
         case let .refused(_, reason): if !quietly { pullRequest = .failed(reason) }
@@ -535,7 +553,8 @@ struct SourceControlSheet: View {
 
     private func createPullRequest() async {
         guard let client else { return }
-        switch await client.createPullRequest(path: worktree.info.path, title: nil, body: nil) {
+        let title = pullRequestTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch await client.createPullRequest(path: worktree.info.path, title: title.isEmpty ? nil : title, body: nil) {
         case let .value(receipt):
             let pushed = receipt.pushed ?? 0
             pullRequestNotice = pushed > 0
@@ -706,9 +725,12 @@ struct SourceControlSheet: View {
         switch await client.pullBase(path: worktree.info.path) {
         case let .value(receipt):
             let base = { if case let .loaded(log) = log { log.base } else { nil } }() ?? "the base"
+            // An older host, or one that could not fetch, merged the base
+            // as it stood on the computer; said so (#83).
+            let asOf = receipt.fetched == true ? "" : " as of the computer's last fetch"
             commitsNotice = receipt.merged == 0
-                ? "Nothing to pull in from \(base)."
-                : "Pulled \(receipt.merged == 1 ? "1 commit" : "\(receipt.merged) commits") from \(base)\(receipt.fastForward ? "" : " with a merge commit")."
+                ? "Nothing to pull in from \(base)\(asOf)."
+                : "Pulled \(receipt.merged == 1 ? "1 commit" : "\(receipt.merged) commits") from \(base)\(receipt.fastForward ? "" : " with a merge commit")\(asOf)."
         case let .refused(_, reason), let .failure(reason):
             commitsNotice = reason
         }

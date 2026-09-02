@@ -218,7 +218,8 @@ enum HomeGrouping {
     // The order is deterministic and does not depend on status, so a
     // project never jumps around the screen as its agents start and finish
     // — the header's count says what is running.
-    static func group(_ agents: [AgentSummary], repos: [RepoInfo] = []) -> [HomeProject] {
+    static func group(_ agents: [AgentSummary], repos rawRepos: [RepoInfo] = []) -> [HomeProject] {
+        let repos = mergedByRoot(rawRepos)
         var order: [String] = []
         var folderAgents: [String: [AgentSummary]] = [:]
         var repoOf: [String: RepoInfo] = [:]
@@ -229,12 +230,12 @@ enum HomeGrouping {
             if let (repo, worktree) = repoAndWorktree(containing: path, in: repos) {
                 let key = projectPath(of: repo.root)
                 if repoOf[key] == nil {
-                    order.append(key)
+                    if !order.contains(key) { order.append(key) }
                     repoOf[key] = repo
                 }
                 worktreeAgents[comparisonKey(worktree.path), default: []].append(agent)
             } else {
-                if folderAgents[path] == nil { order.append(path) }
+                if folderAgents[path] == nil, !order.contains(path) { order.append(path) }
                 folderAgents[path, default: []].append(agent)
             }
         }
@@ -242,12 +243,18 @@ enum HomeGrouping {
         return order
             .map { key in
                 if let repo = repoOf[key] {
+                    // An agent at the repository's root when the root is
+                    // not one of its worktrees (a shape the host never
+                    // sends, but one card per path either way): it rides
+                    // on the card as a plain row rather than a second card
+                    // with the same identity (#76).
+                    let loose = folderAgents[key] ?? []
                     return HomeProject(
                         path: key,
                         name: repo.name,
-                        needsYou: [],
-                        active: [],
-                        recent: [],
+                        needsYou: loose.filter { $0.homeSection == .needsYou },
+                        active: loose.filter { $0.homeSection == .active },
+                        recent: loose.filter { $0.homeSection == .recent },
                         worktrees: repo.worktrees.map { info in
                             let members = worktreeAgents[comparisonKey(info.path)] ?? []
                             return HomeWorktree(
@@ -274,6 +281,33 @@ enum HomeGrouping {
                 if byName != .orderedSame { return byName == .orderedAscending }
                 return lhs.path < rhs.path
             }
+    }
+
+    // Two repositories reporting one root (a host answering through two
+    // roots that reach the same clone) are one card: the first keeps its
+    // name and order, the worktrees are pooled by path (#76).
+    static func mergedByRoot(_ repos: [RepoInfo]) -> [RepoInfo] {
+        var order: [String] = []
+        var byRoot: [String: RepoInfo] = [:]
+        for repo in repos {
+            let key = comparisonKey(repo.root)
+            guard let existing = byRoot[key] else {
+                order.append(key)
+                byRoot[key] = repo
+                continue
+            }
+            let known = Set(existing.worktrees.map { comparisonKey($0.path) })
+            let extra = repo.worktrees.filter { !known.contains(comparisonKey($0.path)) }
+            if extra.isEmpty { continue }
+            byRoot[key] = RepoInfo(
+                root: existing.root,
+                name: existing.name,
+                defaultBranch: existing.defaultBranch,
+                branches: existing.branches,
+                worktrees: existing.worktrees + extra
+            )
+        }
+        return order.compactMap { byRoot[$0] }
     }
 
     // The repository and worktree a folder lives under, or nil. Longest

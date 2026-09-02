@@ -144,11 +144,19 @@ struct WorktreeInfo: Identifiable, Equatable, Decodable {
     // The branch's open pull request per the host user's `gh` login (#74);
     // nil when none, or when the host cannot ask.
     let pullRequest: PullRequestRef?
+    // Inside the computer's project roots (#83): git lists a worktree
+    // wherever it lives, but the host's source-control routes answer only
+    // inside the roots. An older host does not say; assumed inside.
+    var withinRoots: Bool = true
 
     var id: String { path }
 
-    // The worktree's own name on its row: the branch, or "detached".
-    var title: String { branch ?? "detached" }
+    // The worktree's own name on its row: the branch, or where a detached
+    // HEAD stands ("detached · a1b2c3d").
+    var title: String {
+        if let branch { return branch }
+        return head.isEmpty ? "detached" : "detached · \(head.prefix(7))"
+    }
 
     // "PR #48 · ↑3 ↓1 · 2 uncommitted" — the line beneath the branch (#74;
     // approved design, PRD §7.12). "Uncommitted" over git's own "dirty":
@@ -168,6 +176,26 @@ struct WorktreeInfo: Identifiable, Equatable, Decodable {
         if dirty > 0 { parts.append(dirty == 1 ? "1 uncommitted" : "\(dirty) uncommitted") }
         if locked { parts.append("locked") }
         return parts.joined(separator: " · ")
+    }
+}
+
+// In an extension so the memberwise initialiser the tests use survives.
+extension WorktreeInfo {
+    private enum CodingKeys: String, CodingKey { case path, branch, head, isMain, dirty, ahead, behind, locked, prunable, pullRequest, withinRoots }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        path = try container.decode(String.self, forKey: .path)
+        branch = try container.decodeIfPresent(String.self, forKey: .branch)
+        head = try container.decode(String.self, forKey: .head)
+        isMain = try container.decode(Bool.self, forKey: .isMain)
+        dirty = try container.decode(Int.self, forKey: .dirty)
+        ahead = try container.decode(Int.self, forKey: .ahead)
+        behind = try container.decode(Int.self, forKey: .behind)
+        locked = try container.decode(Bool.self, forKey: .locked)
+        prunable = try container.decode(Bool.self, forKey: .prunable)
+        pullRequest = try container.decodeIfPresent(PullRequestRef.self, forKey: .pullRequest)
+        withinRoots = try container.decodeIfPresent(Bool.self, forKey: .withinRoots) ?? true
     }
 }
 
@@ -224,6 +252,8 @@ enum CreateWorktreeOutcome: Equatable {
 
 private struct RepoCatalog: Decodable {
     let repos: [RepoInfo]
+    // Why the host could list nothing (git missing); absent when it ran.
+    let error: String?
 }
 
 enum ReposFetch: Equatable {
@@ -402,6 +432,8 @@ final class AgentDirectory {
     private var latencyTask: Task<Void, Never>?
     private static let latencyInterval: Duration = .seconds(30)
     private var reposTask: Task<Void, Never>?
+    private var reposFailures = 0
+    static let reposFailuresBeforeClearing = 3
     // Reconnect coordination (#86, PRD §7.13): one probe in flight however
     // many askers; Offline only after two dials in a row produced no frame;
     // the backoff resets only once the stream has been up for a while.
@@ -518,11 +550,22 @@ final class AgentDirectory {
                 // skipping, a dead credential that redialing cannot fix.
                 // `isStale` too: while the stream is down this poll would
                 // only add a 20 s half-open socket to the redial's own.
-                if !self.isRevoked, !self.isOffline, !self.isStale, case let .repos(repos) = await self.fetchRepos() {
-                    // Equatable, so an unchanged answer never triggers the
-                    // @Observable re-render every poll would otherwise cost
-                    // the whole home for state that rarely moves.
-                    if repos != self.repos { self.repos = repos }
+                if !self.isRevoked, !self.isOffline, !self.isStale {
+                    switch await self.fetchRepos() {
+                    case let .repos(repos):
+                        self.reposFailures = 0
+                        // Equatable, so an unchanged answer never triggers the
+                        // @Observable re-render every poll would otherwise cost
+                        // the whole home for state that rarely moves.
+                        if repos != self.repos { self.repos = repos }
+                    case .failure:
+                        // A live host that cannot answer this route (git
+                        // gone, a broken answer) must not leave last week's
+                        // branches on the cards for good (#72): after a few
+                        // misses the cards fall back to plain folders.
+                        self.reposFailures += 1
+                        if self.reposFailures >= Self.reposFailuresBeforeClearing, !self.repos.isEmpty { self.repos = [] }
+                    }
                 }
                 // Jittered so it never ticks in lockstep with the latency
                 // probe's 30 s (cold review, 2026-09-02).

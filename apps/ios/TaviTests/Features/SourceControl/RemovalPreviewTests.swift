@@ -16,6 +16,24 @@ struct RemovalPreviewTests {
         return try JSONDecoder().decode(RemovalPreview.self, from: Data(json.utf8))
     }
 
+    // herdr closes tabs whole: the host names what else goes (#83); an
+    // older host says nothing and the sheet shows nothing.
+    @Test func agentsSharingATabAreNamedByFolder() throws {
+        #expect(try preview(agents: 1).agentsAlsoClosed.isEmpty)
+        let json = """
+        {"path":"/w","branch":"feat/x","isMain":false,"locked":false,"repoRoot":"/r","base":"main",
+         "uncommitted":{"files":0,"additions":0,"deletions":0},
+         "unpushed":{"commits":0,"upstream":"origin/feat/x","remote":"origin"},
+         "agents":[{"paneId":"p1","tabId":"t1","kind":"claude","status":"done"}],
+         "alsoClosed":[{"paneId":"p2","tabId":"t1","kind":"codex","status":"working","cwd":"/Users/me/Projects/other"}],
+         "branchMerged":true}
+        """
+        let shared = try JSONDecoder().decode(RemovalPreview.self, from: Data(json.utf8))
+        #expect(shared.agentsAlsoClosed.map(\.paneId) == ["p2"])
+        #expect(RemovalWords.alsoClosedLine(shared.agentsAlsoClosed[0]) == "Codex in other shares that tab and closes with it")
+        #expect(RemovalWords.alsoClosedLine(RemovalPreview.Agent(paneId: "p", tabId: "t", kind: "shell", status: "idle", cwd: nil)) == "Terminal in another folder shares that tab and closes with it")
+    }
+
     @Test func amberOnlyWhereNothingIsLost() throws {
         // Uncommitted changes and unpushed commits: no safe path, no amber.
         #expect(RemovalWords.choice(try preview(files: 2, commits: 3)) == .pushAndDiscard)

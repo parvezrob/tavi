@@ -104,6 +104,10 @@ struct RemoveWorktreeSheet: View {
                     trailing: nil
                 )
             }
+            ForEach(preview.agentsAlsoClosed, id: \.paneId) { agent in
+                line(dot: AgentStatusStyle.of(agent.status).color, text: RemovalWords.alsoClosedLine(agent), trailing: nil)
+                    .accessibilityIdentifier("removeWorktree.alsoClosed")
+            }
             if preview.locked {
                 line(dot: TaviTheme.textSecondary, text: "Locked on the computer (Claude Code locks the worktrees it makes); removing unlocks it", trailing: nil)
                     .accessibilityIdentifier("removeWorktree.locked")
@@ -301,6 +305,13 @@ enum RemovalWords {
         if let upstream = preview.unpushed.upstream, preview.unpushed.commits == 0 { return "\(branch) stays here (it is on \(upstream) too)" }
         if preview.unpushed.commits > 0 { return "\(branch) stays here unless you discard its commits" }
         return "\(branch) stays here"
+    }
+
+    // herdr closes whole tabs: an agent elsewhere sharing a tab with one in
+    // the worktree goes down with it, and the sheet says so by folder.
+    static func alsoClosedLine(_ agent: RemovalPreview.Agent) -> String {
+        let folder = agent.cwd.map { HomeGrouping.projectName(of: $0) } ?? "another folder"
+        return "\(AgentKindWords.name(agent.kind)) in \(folder) shares that tab and closes with it"
     }
 
     static func discardLabel(_ preview: RemovalPreview) -> String {

@@ -212,6 +212,49 @@ struct HomeGroupingTests {
         #expect(plain.recent.map(\.id) == ["3"])
     }
 
+    // Two repositories reporting one root (#76 edge) are one card with the
+    // worktrees pooled; nothing renders twice under one identity.
+    @Test
+    func twoRepositoriesWithOneRootAreOneCard() {
+        let first = repo("/p/tavi", [worktree("/p/tavi")])
+        let second = repo("/p/tavi", [worktree("/p/tavi"), worktree("/p/tavi-x", branch: "x", isMain: false)])
+        let projects = HomeGrouping.group([agent("1", status: "working", cwd: "/p/tavi-x/apps")], repos: [first, second])
+        #expect(projects.count == 1)
+        #expect(projects[0].path == "/p/tavi")
+        #expect(projects[0].worktrees.map(\.info.branch) == ["main", "x"])
+        #expect(projects[0].worktrees[1].active.map(\.id) == ["1"])
+        #expect(HomeGrouping.mergedByRoot([first, second]).count == 1)
+        #expect(HomeGrouping.mergedByRoot([first, first]).first?.worktrees.count == 1)
+    }
+
+    // A repository whose root is not among its worktrees (#76 edge): an
+    // agent at that root rides on the card as a plain row, not as a
+    // second card with the same path.
+    @Test
+    func anAgentAtARootThatIsNotAWorktreeRidesOnTheCard() {
+        let odd = repo("/p/tavi", [worktree("/p/tavi-only", branch: "only", isMain: false)])
+        let projects = HomeGrouping.group([
+            agent("1", status: "working", cwd: "/p/tavi"),
+            agent("2", status: "done", cwd: "/p/tavi-only"),
+        ], repos: [odd])
+        #expect(projects.count == 1)
+        #expect(Set(projects.map(\.id)).count == projects.count)
+        #expect(projects[0].active.map(\.id) == ["1"])
+        #expect(projects[0].worktrees[0].recent.map(\.id) == ["2"])
+        #expect(projects[0].agentCount == 2)
+    }
+
+    // An older host does not say whether a worktree is inside the roots;
+    // it is assumed to be. A newer one says, and the phone keeps the word.
+    @Test
+    func withinRootsDefaultsToTrueWhenTheHostDoesNotSay() throws {
+        let base = "\"path\":\"/w\",\"branch\":\"x\",\"head\":\"abc\",\"isMain\":false,\"dirty\":0,\"ahead\":0,\"behind\":0,\"locked\":false,\"prunable\":false,\"pullRequest\":null"
+        let old = try JSONDecoder().decode(WorktreeInfo.self, from: Data("{\(base)}".utf8))
+        #expect(old.withinRoots == true)
+        let outside = try JSONDecoder().decode(WorktreeInfo.self, from: Data("{\(base),\"withinRoots\":false}".utf8))
+        #expect(outside.withinRoots == false)
+    }
+
     // A folder that merely shares a prefix with a worktree path is not
     // inside it: "/Users/dev/tavi-docs" must not match "/Users/dev/tavi".
     @Test
@@ -288,7 +331,8 @@ struct HomeGroupingTests {
     func worktreeSummaryCoversEveryState() {
         #expect(worktree("/w", branch: "main").summary == "")
         #expect(WorktreeInfo(path: "/w", branch: "gone", head: "a", isMain: false, dirty: 0, ahead: 0, behind: 0, locked: false, prunable: true, pullRequest: nil).summary == "Folder missing")
-        #expect(worktree("/w", branch: nil).title == "detached")
+        #expect(worktree("/w", branch: nil).title == "detached · abc1234")
+        #expect(WorktreeInfo(path: "/w", branch: nil, head: "", isMain: false, dirty: 0, ahead: 0, behind: 0, locked: false, prunable: false, pullRequest: nil).title == "detached")
         #expect(worktree("/w", branch: "fix", dirty: 2, ahead: 3, behind: 1).summary == "↑3 ↓1 · 2 uncommitted")
         #expect(worktree("/w", branch: "fix", ahead: 2).summary == "↑2")
         #expect(worktree("/w", branch: "fix", dirty: 1, pullRequest: 48).summary == "PR #48 · 1 uncommitted")
