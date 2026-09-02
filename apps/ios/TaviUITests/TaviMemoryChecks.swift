@@ -114,10 +114,19 @@ final class TaviMemoryChecks: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 20), "The shell pane never appeared on the home.")
         openTerminal(app, row: row)
         let surface = app.descendants(matching: .any)["terminal.surface"]
+        // Keys typed before the terminal is connected are dropped, so give
+        // the attach a moment, then prove the stream is flowing before the
+        // hour starts.
+        sleep(3)
         surface.tap()
         // Five lines a second for the whole stay — a chatty agent, not a quiet one.
         surface.typeText("while true; do echo \"streamed output line $RANDOM $(date +%T)\"; sleep 0.2; done\n")
         app.buttons["terminal.dismissKeyboard"].tap()
+        let started = Date()
+        while ((surface.value as? String) ?? "").contains("streamed output line") == false {
+            XCTAssertLessThan(Date().timeIntervalSince(started), 20, "The output loop never started; the keystrokes did not reach the shell.")
+            sleep(1)
+        }
 
         let deadline = Date().addingTimeInterval(TimeInterval(minutes) * 60)
         var previous = ""
