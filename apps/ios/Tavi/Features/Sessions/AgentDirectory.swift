@@ -400,7 +400,11 @@ final class AgentDirectory {
         isRevoked = false
         isOffline = false
         latencyMilliseconds = nil
-        repos = []
+        // `repos` is kept across a restart on purpose: the agents snapshot
+        // lands before the first repos poll, and an empty list in between
+        // regrouped every worktree as a plain folder for a frame (owner,
+        // 2026-09-02: "a blip"). It is this computer's own last answer and
+        // the poll replaces it within a second.
         lastRawAgents = []
         smoother.reset()
         guard let url = URL(string: hostText),
