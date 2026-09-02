@@ -34,6 +34,7 @@ import { scanWorkspaces } from "./workspaces.js";
 import { diffFile, listChanges } from "./changes.js";
 import { listRepos, type PullRequestLookup } from "./git.js";
 import { createWorktree } from "./worktrees.js";
+import { commitStaged, stageFiles, worktreeStatus, writeCommitMessage } from "./source-control.js";
 import { MAX_RAW_BYTES, listDirectory, readTextContent, resolveWithinRoots, statFile } from "./files.js";
 import { PreviewRegistry, TICKET_COOKIE, defaultDiscoveryDeps, listProjectServers, stopProjectServer, validPort, type DiscoveryDeps } from "./preview.js";
 import { createReadStream } from "node:fs";
@@ -501,6 +502,54 @@ async function routeRequest(
     }
     projects.remember(result.worktree.path);
     sendJson(response, 201, { worktree: result.worktree });
+    return;
+  }
+
+  // Source Control — Changes (#77, #73 part 3): one worktree's status,
+  // staging, and commits. `path` is the worktree, realpath'd then checked
+  // against the roots like every file route; the writes are fixed argv.
+  if (url.pathname === "/api/worktrees/status" && request.method === "GET") {
+    const target = await resolveWithinRoots(url.searchParams.get("path") ?? "", "/", config.roots);
+    if (!target.ok) {
+      sendJson(response, target.status, { error: target.error, ...(target.outsideRoots ? { outsideRoots: true } : {}) });
+      return;
+    }
+    const result = await worktreeStatus(target.path);
+    if (!result.ok) {
+      sendJson(response, result.status, { error: result.error });
+      return;
+    }
+    sendJson(response, 200, result.status);
+    return;
+  }
+
+  const sourceControlWrite = url.pathname.match(/^\/api\/worktrees\/(stage|unstage|commit|commit-message)$/);
+  if (sourceControlWrite && request.method === "POST") {
+    const action = sourceControlWrite[1] as "stage" | "unstage" | "commit" | "commit-message";
+    const body = await readJsonBody(request);
+    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const target = await resolveWithinRoots(typeof record.path === "string" ? record.path : "", "/", config.roots);
+    if (!target.ok) {
+      sendJson(response, target.status, { error: target.error, ...(target.outsideRoots ? { outsideRoots: true } : {}) });
+      return;
+    }
+    if (action === "stage" || action === "unstage") {
+      const files = record.files === "all" ? "all" : Array.isArray(record.files) && record.files.every((f) => typeof f === "string") ? (record.files as string[]) : undefined;
+      if (!files) {
+        sendJson(response, 400, { error: 'files must be a list of repository paths, or "all".' });
+        return;
+      }
+      const result = await stageFiles(target.path, files, action);
+      sendJson(response, result.ok ? 200 : result.status, result.ok ? { staged: result.staged } : { error: result.error });
+      return;
+    }
+    if (action === "commit") {
+      const result = await commitStaged(target.path, typeof record.message === "string" ? record.message : "");
+      sendJson(response, result.ok ? 201 : result.status, result.ok ? { commit: result.commit } : { error: result.error });
+      return;
+    }
+    const result = await writeCommitMessage(target.path, { shell: config.shell });
+    sendJson(response, result.ok ? 200 : result.status, result.ok ? { message: result.message } : { error: result.error });
     return;
   }
 

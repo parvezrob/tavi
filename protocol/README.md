@@ -212,6 +212,15 @@ What runs, as fixed arguments: `git worktree add --no-track -b <branch> <path> <
 
 `503` carries git's own message when `worktree add` fails. Nothing else in the repository is touched; a client then starts an agent there with `POST /api/herdr/tabs`. `GET /api/repos` also gained `branches` (local branch names, default first, at most 200) for the "start from" choice.
 
+### `/api/worktrees/status`, `stage`, `unstage`, `commit`, `commit-message` — Source Control, Changes (#77)
+
+Every route takes the worktree's own `path` (query on the GET, body on the POSTs), realpath'd then checked against the roots exactly as `/api/changes` (`403` + `outsideRoots` outside; `404` + `notRepository` when no repository contains it).
+
+- `GET /api/worktrees/status?path=…` → `{ "path", "branch", "base", "ahead", "behind", "files": [ChangedFile…], "staged", "truncated" }` — `/api/changes`' files plus the branch's ahead/behind against `base`: `branch.<b>.base` when set (Tavi sets it on create), else the repository's default branch; `null` and `0`/`0` when there is none.
+- `POST /api/worktrees/stage` / `unstage` `{ "path", "files": ["src/a.ts"] | "all" }` → `{ "staged": n }`. `git add -- <files>` / `git restore --staged -- <files>`; a file path is relative to the repository and may not leave it (`400`). `"all"` takes every file `status` lists.
+- `POST /api/worktrees/commit` `{ "path", "message" }` → `201 { "commit": { "sha", "summary", "files" } }` of exactly the staged set. `400` for an empty message; `409` with a sentence when nothing is staged or git has no identity on the computer.
+- `POST /api/worktrees/commit-message` `{ "path" }` → `{ "message" }`: one conventional-commit line for the staged diff, written by the `claude` CLI on the computer (`claude -p`, resolved on the login-shell PATH, 45 s), with secret-looking files left out of the diff by name (they are named, never shown). `409` when nothing is staged; `503` with a sentence when claude is not installed or answered nothing — the phone offers to type one.
+
 ### `/api/preview…` — private dev-server preview (#58)
 
 An agent starts something on `localhost:<port>`; the phone shows it in a WebKit view without the server being started any differently, and nobody but the paired phone can open it. Two listeners are involved:
