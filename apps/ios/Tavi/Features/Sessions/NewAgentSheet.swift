@@ -45,6 +45,7 @@ struct NewAgentSheet: View {
     // The outside-roots alert serves both modes; this says which one asked.
     @State private var pendingOutsideRootsIsWorktree = false
     private let startingIn: (hostId: String, path: String)?
+    private let startMode: WhereMode
 
     enum WhereMode: String, CaseIterable, Identifiable {
         case folder, worktree
@@ -63,21 +64,24 @@ struct NewAgentSheet: View {
     // "New worktree" row (#74) names its folder and computer, so the sheet
     // skips both questions. Until #73 part 2 lands it starts an agent there
     // rather than creating a worktree.
+    // `startMode`: a card's "New worktree" row means a worktree (`load()`
+    // finds the repository for the folder); a worktree's "Start an agent
+    // here" means that folder as it is.
     init(
         computers: [HostFleet.Entry],
         startingIn: (hostId: String, path: String)? = nil,
+        startMode: WhereMode = .worktree,
         onCreated: @escaping (AgentTarget) -> Void
     ) {
         self.computers = computers
         self.onCreated = onCreated
         self.startingIn = startingIn
+        self.startMode = startMode
         let hostId = startingIn?.hostId ?? (computers.count == 1 ? computers[0].id : nil)
         _chosenHostId = State(initialValue: hostId)
         _phase = State(initialValue: hostId == nil ? .chooseComputer : .loading)
         _selectedPath = State(initialValue: startingIn?.path)
-        // A card's "New worktree" row means a worktree; `load()` finds the
-        // repository for the folder once the host has answered.
-        _whereMode = State(initialValue: startingIn == nil ? .folder : .worktree)
+        _whereMode = State(initialValue: startingIn == nil ? .folder : startMode)
     }
 
     private var canCreate: Bool {
@@ -676,6 +680,8 @@ struct NewAgentSheet: View {
         if worktreeRepo == nil, let startingIn, let (repo, _) = HomeGrouping.repoAndWorktree(containing: HomeGrouping.projectPath(of: startingIn.path), in: list) {
             worktreeRepo = repo
             worktreeBase = repo.defaultBranch ?? repo.branches.first
+            // Folder mode stays folder mode: the repository is only
+            // remembered in case the person switches.
         } else if worktreeRepo == nil, whereMode == .worktree {
             // Asked for a worktree from a folder no repo claims: fall back
             // to a plain folder rather than a mode with nothing to pick.

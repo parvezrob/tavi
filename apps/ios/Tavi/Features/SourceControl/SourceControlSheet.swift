@@ -13,6 +13,9 @@ struct SourceControlSheet: View {
     let computerName: String?
     // Remove (#81): the home refreshes and this sheet closes.
     var onRemoved: ((RemovalReceipt) -> Void)? = nil
+    // "Start an agent here" (owner ask, 2026-09-02): the New Agent sheet
+    // opens on this worktree's folder once this sheet has closed.
+    var onStartAgent: (() -> Void)? = nil
 
     enum Tab: String, CaseIterable, Identifiable {
         case changes = "Changes"
@@ -76,18 +79,26 @@ struct SourceControlSheet: View {
                     Button("Done") { dismiss() }
                 }
                 // Remove lives behind ··· (the canvas): never a button a
-                // thumb finds by accident.
-                if !worktree.info.isMain {
-                    ToolbarItem(placement: .primaryAction) {
-                        Menu {
+                // thumb finds by accident. Starting an agent in the
+                // worktree lives beside it.
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        if let onStartAgent {
+                            Button("Start an agent here…", systemImage: "plus") {
+                                dismiss()
+                                onStartAgent()
+                            }
+                            .accessibilityIdentifier("sourceControl.startAgent")
+                        }
+                        if !worktree.info.isMain {
                             Button("Remove worktree…", role: .destructive) { removing = true }
                                 .accessibilityIdentifier("sourceControl.remove")
-                        } label: {
-                            Image(systemName: "ellipsis")
-                                .accessibilityLabel("More")
                         }
-                        .accessibilityIdentifier("sourceControl.more")
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .accessibilityLabel("More")
                     }
+                    .accessibilityIdentifier("sourceControl.more")
                 }
             }
             // One presentation transition at a time: the removal sheet

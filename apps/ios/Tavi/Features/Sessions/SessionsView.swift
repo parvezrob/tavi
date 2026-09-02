@@ -122,11 +122,12 @@ struct SessionsView: View {
             }
             .sheet(isPresented: $showingNewAgent, onDismiss: {
                 newWorktreeIn = nil
+                newAgentStartMode = .worktree
                 guard let created = createdAgent else { return }
                 createdAgent = nil
                 openAgent(hostId: created.hostId, paneID: created.paneId)
             }) {
-                NewAgentSheet(computers: fleet.entries, startingIn: newWorktreeIn) { created in
+                NewAgentSheet(computers: fleet.entries, startingIn: newWorktreeIn, startMode: newAgentStartMode) { created in
                     createdAgent = created
                 }
             }
@@ -170,7 +171,16 @@ struct SessionsView: View {
                 if let selectedHostId, !ids.contains(selectedHostId) { self.selectedHostId = nil }
                 if let chipSheet, !ids.contains(chipSheet.id) { self.chipSheet = nil }
             }
-            .sheet(item: $sourceControlTarget) { target in
+            // A worktree's "Start an agent here" opens the New Agent sheet
+            // on that folder once this sheet has gone (one sheet at a time).
+            .sheet(item: $sourceControlTarget, onDismiss: {
+                if let pending = pendingAgentFolder {
+                    newWorktreeIn = pending
+                    newAgentStartMode = .folder
+                    pendingAgentFolder = nil
+                    showingNewAgent = true
+                }
+            }) { target in
                 SourceControlSheet(
                     worktree: target.worktree,
                     repoName: target.repoName,
@@ -180,6 +190,10 @@ struct SessionsView: View {
                     onRemoved: { _ in
                         sourceControlTarget = nil
                         Task { await fleet.directory(for: target.hostId)?.refreshRepos() }
+                    },
+                    onStartAgent: {
+                        pendingAgentFolder = (hostId: target.hostId, path: target.worktree.info.path)
+                        sourceControlTarget = nil
                     }
                 )
             }
@@ -474,6 +488,8 @@ struct SessionsView: View {
     // part 2 lands, that starts an agent in the folder rather than
     // creating a worktree.
     @State private var newWorktreeIn: (hostId: String, path: String)?
+    @State private var newAgentStartMode: NewAgentSheet.WhereMode = .worktree
+    @State private var pendingAgentFolder: (hostId: String, path: String)?
     // A worktree's Source Control sheet (#77), keyed by computer + path
     // since two computers can hold the same path.
     @State private var sourceControlTarget: SourceControlTarget?
