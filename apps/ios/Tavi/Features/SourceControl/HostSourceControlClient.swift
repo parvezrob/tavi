@@ -54,6 +54,19 @@ struct HostSourceControlClient: Sendable {
         await send("/api/worktrees/commit-message", method: "POST", query: [:], body: ["path": path])
     }
 
+    // Commits (#78): the branch over and under its base, Push, Pull main in.
+    func log(path: String) async -> Outcome<WorktreeLog> {
+        await send("/api/worktrees/log", method: "GET", query: ["path": path], body: nil)
+    }
+
+    func push(path: String) async -> Outcome<PushReceipt> {
+        await send("/api/worktrees/push", method: "POST", query: [:], body: ["path": path])
+    }
+
+    func pullBase(path: String) async -> Outcome<PullReceipt> {
+        await send("/api/worktrees/pull-base", method: "POST", query: [:], body: ["path": path])
+    }
+
     private func send<Value: Decodable & Sendable>(_ route: String, method: String, query: [String: String], body: [String: Any]?) async -> Outcome<Value> {
         guard var components = URLComponents(url: endpoint.baseURL, resolvingAgainstBaseURL: false) else {
             return .failure("The host address is invalid.")
@@ -124,4 +137,60 @@ struct CommitReceipt: Decodable, Sendable, Equatable {
 
 struct WrittenMessage: Decodable, Sendable {
     let message: String
+}
+
+struct CommitSummary: Decodable, Sendable, Equatable, Identifiable {
+    let sha: String
+    let summary: String
+    let author: String
+    // ISO 8601 author date, as the host sends it.
+    let when: String
+
+    var id: String { sha }
+    var shortSha: String { String(sha.prefix(7)) }
+    var date: Date? {
+        (try? Date(when, strategy: .iso8601)) ?? (try? Date(when, strategy: .iso8601.time(includingFractionalSeconds: true)))
+    }
+
+    // "12 min", "1 h", "3 d" — the canvas's register, never a clock glyph.
+    func age(now: Date = Date()) -> String {
+        guard let date else { return "" }
+        let seconds = max(0, now.timeIntervalSince(date))
+        switch seconds {
+        case ..<60: return "now"
+        case ..<3600: return "\(Int(seconds / 60)) min"
+        case ..<86_400: return "\(Int(seconds / 3600)) h"
+        case ..<(86_400 * 30): return "\(Int(seconds / 86_400)) d"
+        default:
+            return date.formatted(date: .abbreviated, time: .omitted)
+        }
+    }
+}
+
+struct UpstreamInfo: Decodable, Sendable, Equatable {
+    let name: String
+    let ahead: Int
+    let behind: Int
+}
+
+struct WorktreeLog: Decodable, Sendable, Equatable {
+    let path: String
+    let branch: String?
+    let base: String?
+    let ahead: [CommitSummary]
+    let behind: [CommitSummary]
+    let upstream: UpstreamInfo?
+    let remote: String?
+    let truncated: Bool
+}
+
+struct PushReceipt: Decodable, Sendable, Equatable {
+    let pushed: Int
+    let upstream: String
+}
+
+struct PullReceipt: Decodable, Sendable, Equatable {
+    let merged: Int
+    let fastForward: Bool
+    let sha: String
 }

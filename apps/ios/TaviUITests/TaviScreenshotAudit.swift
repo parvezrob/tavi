@@ -251,7 +251,30 @@ final class TaviScreenshotAudit: XCTestCase {
         app.buttons["Pull request"].firstMatch.tap()
         keep("sc-05-pull-request")
         app.buttons["Commits"].firstMatch.tap()
+        let commits = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'sourceControl.commit.' OR identifier == 'sourceControl.commitsEmpty' OR identifier == 'sourceControl.commitsFailed'")).firstMatch
+        XCTAssertTrue(commits.waitForExistence(timeout: 20), "Commits never loaded.")
         keep("sc-06-commits")
+
+        // Pulling the base in is a local merge in that worktree: only when
+        // asked for, so a capture run never changes a branch by surprise.
+        if environment["TAVI_AUDIT_PULL"] == "1" {
+            let pull = app.buttons["sourceControl.pullBase"]
+            XCTAssertTrue(pull.waitForExistence(timeout: 5), "No Pull action on the Commits tab.")
+            pull.tap()
+            XCTAssertTrue(app.staticTexts["sourceControl.commitsNotice"].waitForExistence(timeout: 60), "No pull receipt.")
+            sleep(3)
+            keep("sc-08-pulled")
+        }
+
+        // Pushing is real and reaches the remote: only when asked for.
+        if environment["TAVI_AUDIT_PUSH"] == "1" {
+            let push = app.buttons["sourceControl.push"]
+            XCTAssertTrue(push.waitForExistence(timeout: 5), "No Push action on the Commits tab.")
+            push.tap()
+            XCTAssertTrue(app.staticTexts["sourceControl.commitsNotice"].waitForExistence(timeout: 90), "No push receipt.")
+            sleep(2)
+            keep("sc-07-pushed")
+        }
     }
 
     @MainActor

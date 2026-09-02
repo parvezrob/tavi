@@ -28,6 +28,12 @@ struct SourceControlSheet: View {
     @State private var writing = false
     @State private var notice: String?
     @State private var openFile: FileTarget?
+    // Commits (#78): loaded when the tab is opened, refreshed on the same
+    // cadence while it stays open.
+    @State private var log: Loadable<WorktreeLog> = .loading
+    @State private var pushing = false
+    @State private var pulling = false
+    @State private var commitsNotice: String?
 
     var body: some View {
         NavigationStack {
@@ -46,7 +52,7 @@ struct SourceControlSheet: View {
                 switch tab {
                 case .changes: changesTab
                 case .pullRequest: placeholder("Pull request", "Creating and linking a pull request from here arrives with the next part of #73.")
-                case .commits: placeholder("Commits", "The branch's commits, Push, and Pull main in arrive with the next part of #73.")
+                case .commits: commitsTab
                 }
             }
             .background(TaviTheme.canvas)
@@ -68,9 +74,13 @@ struct SourceControlSheet: View {
         .task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
-                guard !Task.isCancelled, busy.isEmpty, !committing else { continue }
+                guard !Task.isCancelled, busy.isEmpty, !committing, !pushing, !pulling else { continue }
                 await load(quietly: true)
+                if tab == .commits { await loadLog(quietly: true) }
             }
+        }
+        .onChange(of: tab) { _, selected in
+            if selected == .commits { Task { await loadLog() } }
         }
         .accessibilityIdentifier("sourceControl.sheet")
     }
@@ -270,6 +280,164 @@ struct SourceControlSheet: View {
         case 1: "Commit 1 file"
         default: "Commit \(status.staged) files"
         }
+    }
+
+    // MARK: - Commits
+
+    // Per the canvas: "N AHEAD OF MAIN · Push" over the branch's commits,
+    // "N BEHIND MAIN · Pull main in" over the base's. Both actions are
+    // text in the section header — the tab's job is reading the list.
+    @ViewBuilder
+    private var commitsTab: some View {
+        switch log {
+        case .loading:
+            loadingRow("Reading commits on \(computerName ?? "the computer")…")
+        case let .failed(reason):
+            messageCard(reason, identifier: "sourceControl.commitsFailed")
+        case let .loaded(log):
+            let base = log.base ?? "the base"
+            VStack(spacing: 0) {
+                if log.ahead.isEmpty, log.behind.isEmpty {
+                    messageCard(log.base == nil ? "\(worktree.info.title) has no base branch to compare with." : "\(worktree.info.title) is level with \(base).", identifier: "sourceControl.commitsEmpty")
+                } else {
+                    List {
+                        if !log.ahead.isEmpty {
+                            Section {
+                                ForEach(log.ahead) { commit in
+                                    commitRow(commit, dimmed: false)
+                                        .listRowBackground(TaviTheme.card)
+                                }
+                            } header: {
+                                commitsHeader(log.ahead.count == 1 ? "1 ahead of \(base)" : "\(log.ahead.count) ahead of \(base)") {
+                                    Button(pushLabel(log)) { Task { await push() } }
+                                        .disabled(pushing || pulling || !canPush(log))
+                                        .accessibilityIdentifier("sourceControl.push")
+                                }
+                            } footer: {
+                                if log.truncated { Text("Showing the first 100 commits.") }
+                            }
+                        }
+                        if !log.behind.isEmpty {
+                            Section {
+                                ForEach(log.behind) { commit in
+                                    commitRow(commit, dimmed: true)
+                                        .listRowBackground(TaviTheme.card)
+                                }
+                            } header: {
+                                commitsHeader(log.behind.count == 1 ? "1 behind \(base)" : "\(log.behind.count) behind \(base)") {
+                                    Button(pulling ? "Pulling…" : "Pull \(base) in") { Task { await pullBase() } }
+                                        .disabled(pushing || pulling)
+                                        .accessibilityIdentifier("sourceControl.pullBase")
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                    .scrollContentBackground(.hidden)
+                }
+                if let commitsNotice {
+                    Text(commitsNotice)
+                        .font(.footnote)
+                        .foregroundStyle(TaviTheme.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .accessibilityIdentifier("sourceControl.commitsNotice")
+                }
+            }
+        }
+    }
+
+    private func commitsHeader<Action: View>(_ title: String, @ViewBuilder action: () -> Action) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .kerning(1.1)
+                .textCase(.uppercase)
+                .foregroundStyle(TaviTheme.textSecondary)
+            Spacer()
+            action()
+                .font(.footnote)
+                .textCase(nil)
+                .foregroundStyle(TaviTheme.textSecondary)
+        }
+    }
+
+    private func commitRow(_ commit: CommitSummary, dimmed: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(commit.summary)
+                .font(.subheadline)
+                .foregroundStyle(dimmed ? TaviTheme.textPrimary.opacity(0.7) : TaviTheme.textPrimary)
+                .lineLimit(2)
+            HStack(spacing: 0) {
+                Text("\(commit.author) · \(commit.age()) · ")
+                Text(commit.shortSha)
+                    .font(.system(size: 11, design: .monospaced))
+            }
+            .font(.footnote)
+            .foregroundStyle(TaviTheme.textSecondary)
+            .lineLimit(1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("sourceControl.commit.\(commit.shortSha)")
+    }
+
+    private func canPush(_ log: WorktreeLog) -> Bool {
+        guard log.branch != nil else { return false }
+        if let upstream = log.upstream { return upstream.ahead > 0 }
+        return log.remote != nil
+    }
+
+    private func pushLabel(_ log: WorktreeLog) -> String {
+        if pushing { return "Pushing…" }
+        if log.upstream == nil, log.remote == nil { return "No remote" }
+        if let upstream = log.upstream, upstream.ahead == 0 { return "Pushed" }
+        return "Push"
+    }
+
+    private func loadLog(quietly: Bool = false) async {
+        guard let client else {
+            log = .failed("Connect a computer first.")
+            return
+        }
+        switch await client.log(path: worktree.info.path) {
+        case let .value(fresh):
+            if case let .loaded(current) = log, current == fresh { return }
+            log = .loaded(fresh)
+        case let .refused(_, reason): if !quietly { log = .failed(reason) }
+        case let .failure(reason): if !quietly { log = .failed(reason) }
+        }
+    }
+
+    private func push() async {
+        guard let client else { return }
+        pushing = true
+        defer { pushing = false }
+        switch await client.push(path: worktree.info.path) {
+        case let .value(receipt):
+            commitsNotice = "Pushed \(receipt.pushed == 1 ? "1 commit" : "\(receipt.pushed) commits") to \(receipt.upstream)."
+        case let .refused(_, reason), let .failure(reason):
+            commitsNotice = reason
+        }
+        await loadLog()
+        await load(quietly: true)
+    }
+
+    private func pullBase() async {
+        guard let client else { return }
+        pulling = true
+        defer { pulling = false }
+        switch await client.pullBase(path: worktree.info.path) {
+        case let .value(receipt):
+            let base = { if case let .loaded(log) = log { log.base } else { nil } }() ?? "the base"
+            commitsNotice = receipt.merged == 0
+                ? "Nothing to pull in from \(base)."
+                : "Pulled \(receipt.merged == 1 ? "1 commit" : "\(receipt.merged) commits") from \(base)\(receipt.fastForward ? "" : " with a merge commit")."
+        case let .refused(_, reason), let .failure(reason):
+            commitsNotice = reason
+        }
+        await loadLog()
+        await load(quietly: true)
     }
 
     // MARK: - Actions
