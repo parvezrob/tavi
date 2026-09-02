@@ -713,6 +713,11 @@ struct NewAgentSheet: View {
             case let .created(worktree):
                 createdWorktree = worktree
                 cwd = worktree.path
+                // The home files agents under the worktrees it knows; the
+                // repo poll is 30 s, so learn about this one now, before the
+                // agent's row arrives on the feed (owner, 2026-09-02: the new
+                // worktree sat as a plain folder card until the next poll).
+                await directory.refreshRepos()
             case .needsOutsideRootsConfirmation where allowOutsideRoots:
                 failure = "The host would not create the worktree even after confirmation."
                 return
