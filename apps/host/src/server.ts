@@ -32,7 +32,8 @@ import type { AttachCommand, HostInfo, ServerTerminalMessage, WorkspaceInfo } fr
 import { InputError, safeSessionId } from "./validation.js";
 import { scanWorkspaces } from "./workspaces.js";
 import { diffFile, listChanges } from "./changes.js";
-import { listRepos } from "./git.js";
+import { listRepos, type PullRequestLookup } from "./git.js";
+import { createWorktree } from "./worktrees.js";
 import { MAX_RAW_BYTES, listDirectory, readTextContent, resolveWithinRoots, statFile } from "./files.js";
 import { PreviewRegistry, TICKET_COOKIE, defaultDiscoveryDeps, listProjectServers, stopProjectServer, validPort, type DiscoveryDeps } from "./preview.js";
 import { createReadStream } from "node:fs";
@@ -59,6 +60,9 @@ export interface TaviServerOptions {
   projects?: ProjectHistory;
   agentKinds?: AgentKindDetector;
   devices?: DeviceRegistry;
+  // The pull-request lookup behind /api/repos; injectable so tests never
+  // run the developer's gh (#74 review).
+  pullRequests?: PullRequestLookup;
   pairing?: PairingSessions;
   spawnTerminal?: typeof pty.spawn;
   /** Checks npm for a newer host and applies it (the managed runtime's self-update). */
@@ -103,6 +107,7 @@ export async function createTaviServer(options: TaviServerOptions) {
     previews = new PreviewRegistry(),
     doorReady = async () => false,
     discovery,
+    pullRequests,
   } = options;
   previews.start();
   const eventsWss = new WebSocketServer({
@@ -160,6 +165,7 @@ export async function createTaviServer(options: TaviServerOptions) {
         previews,
         doorReady,
         discovery,
+        pullRequests,
       });
     } catch (error) {
       const status = error instanceof InputError ? 400 : 500;
@@ -337,6 +343,7 @@ interface RouteContext {
   previews: PreviewRegistry;
   doorReady: () => Promise<boolean>;
   discovery?: (DiscoveryDeps & { kill?: (pid: number) => void }) | undefined;
+  pullRequests?: PullRequestLookup | undefined;
 }
 
 async function routeRequest(
@@ -344,7 +351,7 @@ async function routeRequest(
   response: ServerResponse,
   context: RouteContext,
 ): Promise<void> {
-  const { config, herdr, listWorkspaces, attention, projects, agentKinds, devices, pairing, authorized, update, previews, doorReady, discovery } = context;
+  const { config, herdr, listWorkspaces, attention, projects, agentKinds, devices, pairing, authorized, update, previews, doorReady, discovery, pullRequests } = context;
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
   if (url.pathname === "/api/health" && request.method === "GET") {
@@ -468,8 +475,32 @@ async function routeRequest(
   // reachable from the configured roots, with every worktree git itself
   // knows about — "where is my work happening" in one call.
   if (url.pathname === "/api/repos" && request.method === "GET") {
-    const repos = await listRepos(config.roots);
+    const repos = await listRepos(config.roots, pullRequests ? { pullRequests } : {});
     sendJson(response, 200, { repos });
+    return;
+  }
+
+  // Create a worktree (#75, #73 part 2): the third answer to "where" in
+  // the New Agent sheet. The folder is judged against the roots before git
+  // hears of it; outside them the phone must confirm, as for #24.
+  if (url.pathname === "/api/worktrees" && request.method === "POST") {
+    const body = await readJsonBody(request);
+    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    if (typeof record.repo !== "string" || typeof record.branch !== "string") {
+      sendJson(response, 400, { error: "repo and branch are required." });
+      return;
+    }
+    const result = await createWorktree(
+      { repo: record.repo, branch: record.branch, base: typeof record.base === "string" ? record.base : undefined },
+      config.roots,
+      { allowOutsideRoots: record.allowOutsideRoots === true },
+    );
+    if (!result.ok) {
+      sendJson(response, result.status, { error: result.error, ...(result.outsideRoots ? { outsideRoots: true } : {}) });
+      return;
+    }
+    projects.remember(result.worktree.path);
+    sendJson(response, 201, { worktree: result.worktree });
     return;
   }
 

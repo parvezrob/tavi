@@ -54,8 +54,13 @@ export interface RepoInfo {
   root: string;
   name: string;
   defaultBranch: string | null;
+  // Local branch names, for "start from" when creating a worktree (#75).
+  // Capped; the default branch is always first when present.
+  branches: string[];
   worktrees: WorktreeInfo[];
 }
+
+const MAX_BRANCHES = 200;
 
 // Repositories reachable from the configured roots, each with every
 // worktree git knows about (which may live outside the roots — git found
@@ -84,9 +89,10 @@ export async function listRepos(roots: string[], options: ListReposOptions = {})
         const [ahead, behind] = await aheadBehind(main.path, worktree.branch, defaultBranch);
         worktree.ahead = ahead;
         worktree.behind = behind;
-        if (worktree.branch) worktree.pullRequest = await pullRequests(main.path, worktree.branch);
       }
-      repos.push({ root: main.path, name: path.basename(main.path), defaultBranch, worktrees });
+      await attachPullRequests(main.path, worktrees, defaultBranch, pullRequests);
+      const branches = await listBranches(main.path, defaultBranch);
+      repos.push({ root: main.path, name: path.basename(main.path), defaultBranch, branches, worktrees });
     } catch {
       // One repository that this call cannot read (a stalled network mount,
       // a mid-operation .git) does not blank the whole list; its neighbours
@@ -157,39 +163,90 @@ export function parseWorktreeList(raw: string): WorktreeInfo[] {
   return worktrees;
 }
 
-// `gh pr list --head <branch>` under the person's own login, one call per
-// branch, remembered for a minute per repo+branch so a phone polling every
-// 30 s does not fan out into a GitHub call per worktree per poll. Any
-// failure — `gh` missing, logged out, offline, not a GitHub remote — is
-// null, never an error: the badge is a nicety, the list is not.
-const PR_CACHE_MS = 60_000;
-const GH_TIMEOUT_MS = 5_000;
-const pullRequestCache = new Map<string, { at: number; value: PullRequestRef | null }>();
+// Pull requests for one repository's worktrees, all at once and within one
+// budget: the badge is a nicety, so whatever has not answered when the
+// budget runs out is null this poll. The default branch is skipped (it has
+// no PR of its own by construction), a lookup that throws costs the badge,
+// never the repository.
+const PR_PASS_BUDGET_MS = 3_000;
 
-export async function cachedPullRequestLookup(repository: string, branch: string): Promise<PullRequestRef | null> {
-  const key = `${repository}\0${branch}`;
-  const hit = pullRequestCache.get(key);
-  const now = Date.now();
-  if (hit && now - hit.at < PR_CACHE_MS) return hit.value;
-  const value = await ghPullRequest(repository, branch);
-  pullRequestCache.set(key, { at: now, value });
-  return value;
+async function attachPullRequests(
+  repository: string,
+  worktrees: WorktreeInfo[],
+  defaultBranch: string | null,
+  lookup: PullRequestLookup,
+): Promise<void> {
+  const candidates = worktrees.filter((worktree) => worktree.branch && worktree.branch !== defaultBranch);
+  if (candidates.length === 0) return;
+  let expired = false;
+  const budget = new Promise<null>((resolve) => setTimeout(() => { expired = true; resolve(null); }, PR_PASS_BUDGET_MS).unref());
+  await Promise.all(
+    candidates.map(async (worktree) => {
+      try {
+        const value = await Promise.race([lookup(repository, worktree.branch as string), budget]);
+        worktree.pullRequest = expired ? null : value;
+      } catch {
+        worktree.pullRequest = null;
+      }
+    }),
+  );
 }
 
-async function ghPullRequest(repository: string, branch: string): Promise<PullRequestRef | null> {
+// `gh pr list` under the person's own login. Remembered per repo+branch —
+// a minute for an answer, ten seconds for a failure (a timeout or a moment
+// offline must not blank a real badge for a minute) — and single-flight,
+// so a phone polling every 30 s while gh is slow never stacks calls for
+// the same branch. Only a PR whose head is *this* repository counts:
+// `--head` alone matches any fork's branch of the same name, and a
+// stranger's PR on the card would be worse than none (found in review,
+// 2026-09-02). Any failure — gh missing, logged out, offline, not a GitHub
+// remote — is null, never an error.
+const PR_CACHE_MS = 60_000;
+const PR_FAILURE_CACHE_MS = 10_000;
+const PR_CACHE_MAX_ENTRIES = 2_000;
+const GH_TIMEOUT_MS = 5_000;
+type PullRequestCacheEntry = { at: number; ttl: number; value: Promise<PullRequestRef | null> };
+const pullRequestCache = new Map<string, PullRequestCacheEntry>();
+
+export function cachedPullRequestLookup(repository: string, branch: string): Promise<PullRequestRef | null> {
+  const key = `${repository}\0${branch}`;
+  const now = monotonicNow();
+  const hit = pullRequestCache.get(key);
+  if (hit && now - hit.at < hit.ttl) return hit.value;
+  const entry: PullRequestCacheEntry = { at: now, ttl: PR_CACHE_MS, value: Promise.resolve(null) };
+  entry.value = ghPullRequest(repository, branch).then((result) => {
+    if (result.failed) entry.ttl = PR_FAILURE_CACHE_MS;
+    return result.value;
+  });
+  if (pullRequestCache.size >= PR_CACHE_MAX_ENTRIES) {
+    const oldest = pullRequestCache.keys().next().value;
+    if (oldest !== undefined) pullRequestCache.delete(oldest);
+  }
+  pullRequestCache.set(key, entry);
+  return entry.value;
+}
+
+function monotonicNow(): number {
+  return Number(process.hrtime.bigint() / 1_000_000n);
+}
+
+async function ghPullRequest(repository: string, branch: string): Promise<{ value: PullRequestRef | null; failed: boolean }> {
   try {
     const { stdout } = await execFileAsync(
       "gh",
-      ["pr", "list", "--head", branch, "--state", "open", "--json", "number,url", "--limit", "1"],
+      ["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isCrossRepository", "--limit", "5"],
       { cwd: repository, timeout: GH_TIMEOUT_MS, encoding: "utf8", env: { ...process.env, GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1" } },
     );
     const parsed: unknown = JSON.parse(stdout);
-    if (!Array.isArray(parsed) || parsed.length === 0) return null;
-    const first = parsed[0] as { number?: unknown; url?: unknown };
-    if (typeof first.number !== "number" || typeof first.url !== "string") return null;
-    return { number: first.number, url: first.url };
+    if (!Array.isArray(parsed)) return { value: null, failed: true };
+    for (const item of parsed as { number?: unknown; url?: unknown; isCrossRepository?: unknown }[]) {
+      if (item.isCrossRepository === false && typeof item.number === "number" && typeof item.url === "string") {
+        return { value: { number: item.number, url: item.url }, failed: false };
+      }
+    }
+    return { value: null, failed: false };
   } catch {
-    return null;
+    return { value: null, failed: true };
   }
 }
 
@@ -221,7 +278,7 @@ async function dirtyCount(worktreePath: string): Promise<number> {
 // compare against. Checked as refs, not against which branches happen to be
 // checked out in a worktree right now — a repo can have a `main` nobody is
 // standing on, and that is the ordinary case this feature is for.
-async function findDefaultBranch(mainWorktreePath: string): Promise<string | null> {
+export async function findDefaultBranch(mainWorktreePath: string): Promise<string | null> {
   try {
     const { stdout } = await git(mainWorktreePath, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
     const ref = stdout.trim().replace(/^origin\//, "");
@@ -234,7 +291,21 @@ async function findDefaultBranch(mainWorktreePath: string): Promise<string | nul
   return null;
 }
 
-async function refExists(repository: string, ref: string): Promise<boolean> {
+// Local branches, default branch first, alphabetical after; capped so a
+// repository with thousands of stale branches does not turn one poll into
+// a megabyte. Empty when git cannot list (a repo with no commits yet).
+async function listBranches(repository: string, defaultBranch: string | null): Promise<string[]> {
+  try {
+    const { stdout } = await git(repository, ["for-each-ref", "--format=%(refname:short)", "--sort=refname", "refs/heads/"]);
+    const names = stdout.split("\n").filter((name) => name.length > 0);
+    const rest = names.filter((name) => name !== defaultBranch).slice(0, MAX_BRANCHES);
+    return defaultBranch && names.includes(defaultBranch) ? [defaultBranch, ...rest] : rest;
+  } catch {
+    return [];
+  }
+}
+
+export async function refExists(repository: string, ref: string): Promise<boolean> {
   try {
     await git(repository, ["rev-parse", "--verify", "--quiet", ref]);
     return true;

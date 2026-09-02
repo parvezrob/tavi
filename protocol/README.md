@@ -196,6 +196,22 @@ Every git repository reachable from the configured roots, with every worktree gi
 
 `branch` is `null` for a detached `HEAD`. `head` is the full SHA. `pullRequest` (#74) is the open pull request for the branch per the host user's own `gh` login (`gh pr list --head <branch>`), remembered for a minute per branch; `null` when there is none, when `gh` is not installed or not logged in, when the remote is not GitHub, or for a detached worktree — a client shows no badge and says nothing. `dirty` is a count of changed-or-untracked entries (`status --porcelain=v2`), not the files themselves — see `/api/changes` for those. `ahead`/`behind` are commits relative to `defaultBranch` (the remote's default branch, else a local `main` or `master`, else `null` and both `0`); a worktree already on the default branch also reports `0`/`0`. `defaultBranch` is `null` when none of those resolve.
 
+### `POST /api/worktrees` — create a worktree (#75)
+
+```json
+{ "repo": "/Users/me/Projects/app", "branch": "fix/login", "base": "main", "allowOutsideRoots": false }
+```
+
+`repo` is any folder inside the repository (realpath'd; the main worktree is found from it). `branch` must be a new, valid branch name (`git check-ref-format --branch`); `409` if it exists. `base` is a ref that exists; absent, the repository's default branch as `/api/repos` reports it (`400` when there is none to pick). The worktree is created at `<parent of the main worktree>/<repo name>-worktrees/<branch with / → ->` — beside the repository, never inside it, so the picker's root scan finds it; `409` if that path exists. When that path falls outside the configured roots the request is refused with `400` + `{ "outsideRoots": true }` unless it carries `allowOutsideRoots: true`, which a client sends only after asking the person.
+
+What runs, as fixed arguments: `git worktree add --no-track -b <branch> <path> <base>`, then `git config --local push.autoSetupRemote true` and `branch.<branch>.base <base>` in the new worktree, then top-level ignored setup files present in the main worktree and absent in the new one are copied (`.env`, `.env.*`, `.envrc`, `.tool-versions`, `.nvmrc`, `.node-version`, `.ruby-version`, `.python-version`) — copied, never read or logged. `201`:
+
+```json
+{ "worktree": { "path": "/Users/me/Projects/app-worktrees/fix-login", "branch": "fix/login", "base": "main", "repoRoot": "/Users/me/Projects/app", "copiedSetupFiles": 1 } }
+```
+
+`503` carries git's own message when `worktree add` fails. Nothing else in the repository is touched; a client then starts an agent there with `POST /api/herdr/tabs`. `GET /api/repos` also gained `branches` (local branch names, default first, at most 200) for the "start from" choice.
+
 ### `/api/preview…` — private dev-server preview (#58)
 
 An agent starts something on `localhost:<port>`; the phone shows it in a WebKit view without the server being started any differently, and nobody but the paired phone can open it. Two listeners are involved:

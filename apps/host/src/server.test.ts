@@ -1114,7 +1114,7 @@ test("repos endpoint reports worktrees with branch and dirty state (#59a)", asyn
     env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
   });
 
-  const server = await createTaviServer({ config: { ...config, roots: [base] } });
+  const server = await createTaviServer({ config: { ...config, roots: [base] }, pullRequests: async () => null });
   await listen(server);
   try {
     const address = server.address() as AddressInfo;

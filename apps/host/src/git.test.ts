@@ -6,6 +6,9 @@ import path from "node:path";
 import test from "node:test";
 import { listRepos, parseWorktreeList } from "./git.js";
 
+// Tests never shell out to the developer's real `gh`.
+const noPullRequests = { pullRequests: async () => null };
+
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf8",
@@ -75,7 +78,7 @@ test("listRepos reports the main worktree, a linked worktree, dirty count, and a
   writeFileSync(path.join(worktreeDir, "scratch.txt"), "wip\n");
   git(worktreeDir, "add", "scratch.txt");
 
-  const repos = await listRepos([parent]);
+  const repos = await listRepos([parent], noPullRequests);
   const found = repos.find((r) => r.root === dir);
   assert.ok(found, "expected the repository to be discovered");
   assert.equal(found?.defaultBranch, "main");
@@ -108,7 +111,7 @@ test("listRepos computes ahead/behind against the default branch", async () => {
   git(dir, "add", "advance.txt");
   git(dir, "commit", "-q", "-m", "advance main");
 
-  const repos = await listRepos([parent]);
+  const repos = await listRepos([parent], noPullRequests);
   const found = repos.find((r) => r.root === dir);
   const linked = found?.worktrees.find((w) => w.path === linkedPath);
   assert.equal(linked?.ahead, 1);
@@ -131,14 +134,15 @@ test("listRepos asks the pull-request lookup once per branch and carries its ans
     },
   });
   const found = repos.find((r) => r.root === dir);
-  assert.deepEqual(asked.sort(), ["feat/pr", "main"]);
+  // The default branch is never asked about: it has no PR of its own.
+  assert.deepEqual(asked, ["feat/pr"]);
   assert.deepEqual(found?.worktrees.find((w) => w.branch === "feat/pr")?.pullRequest, { number: 48, url: "https://github.com/x/y/pull/48" });
   assert.equal(found?.worktrees.find((w) => w.isMain)?.pullRequest, null);
 });
 
 test("listRepos returns no repositories for a plain folder", async () => {
   const dir = mktemp();
-  const repos = await listRepos([dir]);
+  const repos = await listRepos([dir], noPullRequests);
   assert.deepEqual(repos, []);
 });
 
@@ -149,7 +153,7 @@ test("listRepos finds a local default branch even when nothing has it checked ou
   // actively working on.
   git(dir, "checkout", "-q", "-b", "work");
 
-  const repos = await listRepos([parent]);
+  const repos = await listRepos([parent], noPullRequests);
   const found = repos.find((r) => r.root === dir);
   assert.equal(found?.defaultBranch, "main");
 });
@@ -159,7 +163,7 @@ test("listRepos counts a rename as one dirty file, not two", async () => {
   renameSync(path.join(dir, "README.md"), path.join(dir, "RENAMED.md"));
   git(dir, "add", "-A");
 
-  const repos = await listRepos([path.dirname(dir)]);
+  const repos = await listRepos([path.dirname(dir)], noPullRequests);
   const found = repos.find((r) => r.root === dir);
   const main = found?.worktrees.find((w) => w.isMain);
   assert.equal(main?.dirty, 1);
@@ -177,7 +181,7 @@ test("listRepos skips an unreadable repository instead of failing the whole list
   // Corrupt the repository so `git worktree list` fails on it specifically.
   rmSync(path.join(broken, ".git", "HEAD"));
 
-  const repos = await listRepos([parent, good.parent]);
+  const repos = await listRepos([parent, good.parent], noPullRequests);
   assert.equal(repos.some((r) => r.root === broken), false);
   assert.ok(repos.some((r) => r.root === good.dir), "the healthy repository is still reported");
 });
