@@ -34,7 +34,9 @@
 
 **Lessons, again:** measure the *phone's* side or say you cannot; a review by someone who was not in the room caught in ten minutes what three hours of pings did not — use `second-opinion` and Opus cold seats *before* arguing with the owner; never call the reconnect code "identical" without diffing it; `xcrun devicectl` re-opens the wireless tunnel on every call and Xcode.app keeps it alive — quit Xcode and kill `remotepairingd`/`CoreDeviceService` after a USB install; `~/.tavi/config.json` holds the token, never `cat` it.
 
-**Left open:** the owner's feel on cellular over a longer stretch; whether "Forget on this iPhone only" shows for the offline robin-PC (not yet seen); closing #74 #75 #77 #78 #79 #81 #73 once confirmed on the phone; #82, #83, #72; robin-PC needs `tavi update` to 0.1.16 (it was offline all evening) and one more `npx tavi-host pair` for the preview door.
+**23:45–23:58:** with a second Opus agent driving from the phone on 4G, the owner created a worktree from issue #29, opened PR #87 from the app, closed it, and removed the worktree — all verified on the Mac (folder gone, no `.removing-*` leftover, no tab, branch kept because pushed-not-merged; scratch branch then deleted by hand). A 44 s simulator test run by the agent at 23:47:35 froze the app (proxy "context canceled" at 23:48:13) — the Mac-is-the-host rule, broken a third time. The issue slug now caps at a word boundary (a040a35). **#73 and #74 #75 #77 #78 #79 #81 closed.**
+
+**Left open:** whether "Forget on this iPhone only" shows for the offline robin-PC (not yet seen); closing #74 #75 #77 #78 #79 #81 #73 once confirmed on the phone; #82, #83, #72; robin-PC needs `tavi update` to 0.1.16 (it was offline all evening) and one more `npx tavi-host pair` for the preview door.
 
 ## 2026-09-02 (evening) — Source control: the bar became Orca, design approved, three of six parts shipped (#59a, #74, #75, #77)
 
