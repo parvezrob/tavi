@@ -2,7 +2,7 @@
 
 > Every agent starts here. This file holds the live state of the project *right now* and the next piece of work. Update it before ending a session (or at any significant milestone); move the previous state into [`handoffs.md`](./handoffs.md). Keep it short — details belong in the linked docs.
 
-**Last updated:** 2026-09-03 ~00:50 (mid-session; **#86 connection resilience (07a4c67 / e66d7e0) and #88 attach an image (10288ba / 24d5a77) are built, pushed, and on the phone over USB; unit suites green (host 242, iOS 142); the Mac's host runs the 0.1.17 checkout as the service** — `npx tavi-host@latest pair` puts the managed runtime back once 0.1.17 is published)
+**Last updated:** 2026-09-03 ~01:30 (compaction point; **#86 connection resilience and #88 attach an image are built, pushed, and on the phone over USB (last build 651e383); the owner: #88 "passes the test", saw "· relay" on cellular, WiFi reads 24 ms direct; the Mac's host runs the 0.1.17 checkout as the service** — `npx tavi-host@latest pair` puts the managed runtime back once 0.1.17 is published; **next work is #83**)
 
 ## Next work
 
@@ -12,9 +12,9 @@
 
 **2. #86 connection resilience** (with #84 inside it): one shared `URLSession`, no terminal teardown on `NWPathMonitor` snapshots, one reconnect coordinator per host, single-flight probes, events heartbeat, jitter, the connection in plain words, cellular-only release check. Read the night entry in `handoffs.md` and the three reviews' items in #86 before designing; design in the repo first (§7.12 precedent).
 
-**2b. #88 attach an image — built, on the phone.** Paperclip on the composer → photo library → 2048 px JPEG → `POST /api/files/upload?cwd=` → `<cwd>/.tavi/uploads/…` (out of git via `.git/info/exclude`, swept after 7 days) → the path appended to the message + a note saying where it went (PRD §7.14). **To finish:** the owner attaches a screenshot to a Claude Code pane and asks what it sees; look at the note line; then close #88. Camera and paste are later.
+**2b. #88 attach an image — built, on the phone.** Paperclip on the composer → photo library → 2048 px JPEG → `POST /api/files/upload?cwd=` → `<cwd>/.tavi/uploads/…` (out of git via `.git/info/exclude`, swept after 7 days) → the path appended to the message + a note saying where it went (PRD §7.14). The owner: "passes the test" (01:10). **To finish:** close #88. Camera, paste, and a thumbnail chip are later. Note for the record: the picker is Apple's PhotosPicker — no permission prompt by design; the image is read from the Mac, never the phone, once sent.
 
-**3. #83 git leftovers**, one pass (now holds #72 #76 #82 #85 too).
+**3. #83 git leftovers — START HERE after compaction**, one pass, then close: sweep stranded `*.removing-*` folders on host start and report failed deletes; cap the `gh pr list` fan-out in `attachPullRequests` (~4 at a time, kill the losers when the budget expires); `git worktree list --porcelain -z` parsing; truncation flags on cut-short lists; fetch-error handling instead of an empty repo; the #74 grouping edges and the rest of the #76 notes. Host tests for each; no phone install needed until the end (then cable only). Also shipped tonight, unasked-for but owner-spotted: "Start an agent here" names the folder as one row with Change (651e383).
 
 **4. #54 design pass** (absorb #52), then **#37 App Store readiness** (the paid developer account ends the 7-day profile; privacy strings; the TestFlight build itself).
 
