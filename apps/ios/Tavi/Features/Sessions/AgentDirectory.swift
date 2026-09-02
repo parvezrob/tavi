@@ -247,6 +247,12 @@ final class AgentDirectory {
     private var credential = ""
     private var host: HostEndpoint?
     private var streamTask: Task<Void, Never>?
+    // The live events socket. `stop()` must close it itself: cancelling the
+    // task alone leaves `receive()` waiting for the host's next frame, and a
+    // quiet host never sends one — the directory, its socket and its buffers
+    // then live on (measured 2026-09-02: 242 directories after 200
+    // home → terminal → home trips, ~140 KB and one host stream each).
+    private var socket: URLSessionWebSocketTask?
     private var previewTask: Task<Void, Never>?
     private let smoother = AgentStatusSmoother()
     // Raw agents from the latest snapshot, re-presented when a pending
@@ -336,6 +342,8 @@ final class AgentDirectory {
     func stop() {
         streamTask?.cancel()
         streamTask = nil
+        socket?.cancel(with: .goingAway, reason: nil)
+        socket = nil
         previewTask?.cancel()
         previewTask = nil
         reviewTask?.cancel()
@@ -747,8 +755,12 @@ final class AgentDirectory {
         // the home says, this decides when the attempt is abandoned.
         request.timeoutInterval = 15
         let socket = Self.session.webSocketTask(with: request)
+        self.socket = socket
         socket.resume()
-        defer { socket.cancel(with: .normalClosure, reason: nil) }
+        defer {
+            socket.cancel(with: .normalClosure, reason: nil)
+            if self.socket === socket { self.socket = nil }
+        }
 
         // Bounded "Connecting…": if nothing has arrived by the deadline,
         // ask the host directly; no answer at all is Offline, said now,

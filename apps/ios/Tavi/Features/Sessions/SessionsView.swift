@@ -11,6 +11,7 @@ struct SessionsView: View {
     // Every paired computer and its live mirror (#50). The fleet is the
     // only writer of the host list and the Keychain credentials.
     @State private var fleet = HostFleet()
+    @State private var bootstrapped = false
     @State private var draftHost = ""
     @State private var draftToken = ""
     @State private var showingHostForm = false
@@ -214,6 +215,12 @@ struct SessionsView: View {
                 Text("\(computerLabel(for: hostId) ?? "It") stays paired on its own side until you revoke this iPhone there. You can pair it again any time.")
             }
             .task {
+                // Once per home, not once per visit: the root of a
+                // NavigationStack appears again every time a terminal pops
+                // back to it, and reloading the fleet there rebuilt every
+                // computer's directory per trip (2026-09-02 memory check).
+                guard !bootstrapped else { return }
+                bootstrapped = true
                 fleet.load()
                 #if DEBUG
                 // UI tests must not inherit a connection persisted by an
