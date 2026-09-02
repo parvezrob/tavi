@@ -2,7 +2,7 @@
 
 > Every agent starts here. This file holds the live state of the project *right now* and the next piece of work. Update it before ending a session (or at any significant milestone); move the previous state into [`handoffs.md`](./handoffs.md). Keep it short — details belong in the linked docs.
 
-**Last updated:** 2026-09-03 ~00:50 (mid-session; **#86 connection resilience is built and pushed (07a4c67 phone, e66d7e0 host 0.1.17), unit suites green (host 238, iOS 140), the device build is ready and waits for the cable; the Mac's host now runs the 0.1.17 checkout as the service so the phone can show the path in words** — `npx tavi-host@latest pair` puts the managed runtime back once 0.1.17 is published)
+**Last updated:** 2026-09-03 ~00:50 (mid-session; **#86 connection resilience (07a4c67 / e66d7e0) and #88 attach an image (10288ba / 24d5a77) are built, pushed, and on the phone over USB; unit suites green (host 242, iOS 142); the Mac's host runs the 0.1.17 checkout as the service** — `npx tavi-host@latest pair` puts the managed runtime back once 0.1.17 is published)
 
 ## Next work
 
@@ -11,6 +11,8 @@
 **The road to TestFlight (owner, 2026-09-03 00:05: close issues, don't pile up). Four issues, in this order, then ship:**
 
 **2. #86 connection resilience** (with #84 inside it): one shared `URLSession`, no terminal teardown on `NWPathMonitor` snapshots, one reconnect coordinator per host, single-flight probes, events heartbeat, jitter, the connection in plain words, cellular-only release check. Read the night entry in `handoffs.md` and the three reviews' items in #86 before designing; design in the repo first (§7.12 precedent).
+
+**2b. #88 attach an image — built, on the phone.** Paperclip on the composer → photo library → 2048 px JPEG → `POST /api/files/upload?cwd=` → `<cwd>/.tavi/uploads/…` (out of git via `.git/info/exclude`, swept after 7 days) → the path appended to the message + a note saying where it went (PRD §7.14). **To finish:** the owner attaches a screenshot to a Claude Code pane and asks what it sees; look at the note line; then close #88. Camera and paste are later.
 
 **3. #83 git leftovers**, one pass (now holds #72 #76 #82 #85 too).
 
