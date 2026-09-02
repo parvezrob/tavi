@@ -176,7 +176,11 @@ struct SessionsView: View {
                     repoName: target.repoName,
                     client: fleet.directory(for: target.hostId)?.sourceControlClient,
                     filesClient: fleet.directory(for: target.hostId)?.filesClient,
-                    computerName: computerLabel(for: target.hostId)
+                    computerName: computerLabel(for: target.hostId),
+                    onRemoved: { _ in
+                        sourceControlTarget = nil
+                        Task { await fleet.directory(for: target.hostId)?.refreshRepos() }
+                    }
                 )
             }
             .sheet(item: $filesAgent) { agent in

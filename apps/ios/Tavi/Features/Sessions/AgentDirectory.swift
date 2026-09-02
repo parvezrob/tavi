@@ -477,6 +477,12 @@ final class AgentDirectory {
         }
     }
 
+    // One immediate repos poll, after the phone changed something (#81
+    // removed a worktree) and should not wait out the interval to see it.
+    func refreshRepos() async {
+        if case let .repos(repos) = await fetchRepos(), repos != self.repos { self.repos = repos }
+    }
+
     func stop() {
         streamTask?.cancel()
         streamTask = nil

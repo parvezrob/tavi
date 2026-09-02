@@ -11,6 +11,8 @@ struct SourceControlSheet: View {
     let client: HostSourceControlClient?
     let filesClient: HostFilesClient?
     let computerName: String?
+    // Remove (#81): the home refreshes and this sheet closes.
+    var onRemoved: ((RemovalReceipt) -> Void)? = nil
 
     enum Tab: String, CaseIterable, Identifiable {
         case changes = "Changes"
@@ -41,6 +43,7 @@ struct SourceControlSheet: View {
     @State private var askingForLink = false
     @State private var linkReference = ""
     @State private var pullRequestNotice: String?
+    @State private var removing = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -70,6 +73,30 @@ struct SourceControlSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
                 }
+                // Remove lives behind ··· (the canvas): never a button a
+                // thumb finds by accident.
+                if !worktree.info.isMain {
+                    ToolbarItem(placement: .primaryAction) {
+                        Menu {
+                            Button("Remove worktree…", role: .destructive) { removing = true }
+                                .accessibilityIdentifier("sourceControl.remove")
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .accessibilityLabel("More")
+                        }
+                        .accessibilityIdentifier("sourceControl.more")
+                    }
+                }
+            }
+            .sheet(isPresented: $removing) {
+                RemoveWorktreeSheet(worktree: worktree, client: client, computerName: computerName) { receipt in
+                    removing = false
+                    dismiss()
+                    onRemoved?(receipt)
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(TaviTheme.canvas)
             }
             .navigationDestination(item: $openFile) { target in
                 FileViewerView(target: target, client: filesClient)

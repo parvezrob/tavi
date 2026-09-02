@@ -88,6 +88,22 @@ struct HostSourceControlClient: Sendable {
         await send("/api/repos/issues", method: "GET", query: ["repo": repo], body: nil)
     }
 
+    // Remove (#81): what would be lost, then the removal that repeats the
+    // counts back — the guardrail lives on the host.
+    func removalPreview(path: String) async -> Outcome<RemovalPreview> {
+        await send("/api/worktrees/removal", method: "GET", query: ["path": path], body: nil)
+    }
+
+    func remove(path: String, confirm: RemovalPreview, pushFirst: Bool, deleteBranch: Bool?) async -> Outcome<RemovalReceipt> {
+        var payload: [String: Any] = [
+            "path": path,
+            "confirm": ["uncommitted": confirm.uncommitted.files, "unpushed": confirm.unpushed.commits],
+            "pushFirst": pushFirst,
+        ]
+        if let deleteBranch { payload["deleteBranch"] = deleteBranch }
+        return await send("/api/worktrees", method: "DELETE", query: [:], body: payload)
+    }
+
     private func send<Value: Decodable & Sendable>(_ route: String, method: String, query: [String: String], body: [String: Any]?) async -> Outcome<Value> {
         guard var components = URLComponents(url: endpoint.baseURL, resolvingAgainstBaseURL: false) else {
             return .failure("The host address is invalid.")
@@ -306,4 +322,51 @@ struct IssueSummary: Decodable, Sendable, Equatable, Identifiable {
 struct IssueList: Decodable, Sendable {
     let issues: [IssueSummary]
     let gh: GhState
+}
+
+struct RemovalPreview: Decodable, Sendable, Equatable {
+    struct Uncommitted: Decodable, Sendable, Equatable {
+        let files: Int
+        let additions: Int
+        let deletions: Int
+    }
+    struct Unpushed: Decodable, Sendable, Equatable {
+        let commits: Int
+        let upstream: String?
+        let remote: String?
+    }
+    struct Agent: Decodable, Sendable, Equatable {
+        let paneId: String
+        let tabId: String
+        let kind: String
+        let status: String
+    }
+    let path: String
+    let branch: String?
+    let isMain: Bool
+    let repoRoot: String
+    let base: String?
+    let uncommitted: Uncommitted
+    let unpushed: Unpushed
+    let agents: [Agent]
+    let branchMerged: Bool
+
+    // Nothing here exists only here: safe to remove without a word of
+    // warning beyond the counts.
+    var isSafe: Bool { uncommitted.files == 0 && unpushed.commits == 0 }
+    var canPushFirst: Bool { unpushed.commits > 0 && remote != nil && branch != nil }
+    var remote: String? { unpushed.upstream != nil ? unpushed.upstream : unpushed.remote }
+}
+
+struct RemovalReceipt: Decodable, Sendable, Equatable {
+    struct Removed: Decodable, Sendable, Equatable {
+        let path: String
+        let branch: String?
+        let branchDeleted: Bool
+        let branchKept: String?
+        let branchNote: String?
+        let closedAgents: Int
+        let pushed: Int
+    }
+    let removed: Removed
 }

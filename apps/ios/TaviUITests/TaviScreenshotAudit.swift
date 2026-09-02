@@ -289,6 +289,61 @@ final class TaviScreenshotAudit: XCTestCase {
         }
     }
 
+    // Remove worktree (#81): opens Source Control on TAVI_AUDIT_WORKTREE,
+    // ··· → Remove, keeps the sheet that names what would be lost. With
+    // TAVI_AUDIT_REMOVE=1 it taps Discard — the worktree really goes (its
+    // unmerged branch too) — and keeps the home afterwards.
+    @MainActor
+    func testCaptureRemoveWorktree() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["TAVI_AUDIT"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_AUDIT=1 to capture the design-audit screens.")
+        }
+        guard let host = environment["TAVI_DEV_HOST"],
+              let token = environment["TAVI_DEV_TOKEN"],
+              let worktree = environment["TAVI_AUDIT_WORKTREE"] else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_DEV_HOST/TOKEN and TEST_RUNNER_TAVI_AUDIT_WORKTREE.")
+        }
+
+        let app = XCUIApplication()
+        app.launchEnvironment["TAVI_DEV_RESET"] = "1"
+        app.launchEnvironment["TAVI_DEV_HOST"] = host
+        app.launchEnvironment["TAVI_DEV_TOKEN"] = token
+        app.launch()
+
+        let header = app.buttons["sessions.worktree.\(worktree)"]
+        var tries = 0
+        while !header.exists, tries < 8 {
+            if tries == 0 { _ = header.waitForExistence(timeout: 20) } else { app.swipeUp() }
+            tries += 1
+        }
+        XCTAssertTrue(header.exists, "The home never showed the worktree \(worktree).")
+        header.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["sourceControl.sheet"].waitForExistence(timeout: 20), "Source Control did not open.")
+        let more = app.buttons["sourceControl.more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10), "No ··· menu on the sheet.")
+        more.tap()
+        let remove = app.buttons["sourceControl.remove"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 10), "The ··· menu never offered Remove.")
+        remove.tap()
+        // The removal sheet sits over a sheet: query by identifier, any type.
+        let title = app.descendants(matching: .any)["removeWorktree.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 30), "The removal sheet never loaded.")
+        sleep(1)
+        keep("rm-00-sheet")
+
+        if environment["TAVI_AUDIT_REMOVE"] == "1" {
+            let discard = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN {'removeWorktree.discard', 'removeWorktree.remove'}")).firstMatch
+            XCTAssertTrue(discard.waitForExistence(timeout: 5), "No Discard or Remove action on the sheet.")
+            discard.tap()
+            let deadline = Date().addingTimeInterval(60)
+            while Date() < deadline, header.exists { sleep(1) }
+            XCTAssertFalse(header.exists, "The worktree row is still on the home after removing.")
+            sleep(2)
+            keep("rm-01-home-after")
+        }
+    }
+
     // Create worktree — "From a GitHub issue" (#79): opens the New Agent
     // sheet in worktree mode on the first repository, shows the issue menu,
     // picks the first issue, and keeps the filled-in branch. Creates nothing.
