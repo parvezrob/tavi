@@ -649,7 +649,13 @@ final class TaviUITests: XCTestCase {
         XCTAssertTrue(create.isEnabled, "Create stayed disabled after picking a folder.")
         create.tap()
 
-        // The agent arrives on the home through the live snapshot feed.
+        // Creating opens the new agent's terminal at once (#67) — no hunting
+        // for the row on the home. The identity header names it once the
+        // live list catches up.
+        XCTAssertTrue(
+            app.descendants(matching: .any)["terminal.identity"].waitForExistence(timeout: 30),
+            "Create did not open the new agent's terminal."
+        )
         var created: String?
         let deadline = Date().addingTimeInterval(60)
         while Date() < deadline, created == nil {
@@ -665,10 +671,22 @@ final class TaviUITests: XCTestCase {
                 try? await Self.closeAgentTab(host: host, token: token, tabId: tabId)
             }
         }
+        // The terminal is connected to that pane, not failed on a pane the
+        // host had not listed yet.
+        XCTAssertTrue(
+            waitForLiveTerminal(app, timeout: 30),
+            "The terminal opened on the new pane did not connect: \(app.descendants(matching: .any)["terminal.status"].firstMatch.label)"
+        )
+        keepScreenshot(named: "new-agent-opened-terminal")
 
         // Born where it was told to be, not in the host's home directory.
         let cwd = try await agentCwd(host: host, token: token, paneId: paneId)
         XCTAssertEqual(cwd, project, "The agent did not start in the folder picked on the phone.")
+
+        // Back on the home the same agent has its row.
+        let backButton = app.navigationBars.buttons.element(boundBy: 0)
+        XCTAssertTrue(backButton.waitForExistence(timeout: 5))
+        backButton.tap()
         XCTAssertTrue(
             app.buttons["sessions.agent.\(paneId)"].waitForExistence(timeout: 20),
             "The agent created from the picker never appeared on the home."
@@ -733,14 +751,15 @@ final class TaviUITests: XCTestCase {
         XCTAssertEqual(kind, "shell")
         XCTAssertEqual(cwd, project)
 
-        // It opens like any agent: the pane shows up on the home and the
-        // terminal lands with a live shell prompt.
-        let row = app.buttons["sessions.agent.\(paneId)"]
-        XCTAssertTrue(row.waitForExistence(timeout: 20), "The terminal never appeared on the home.")
-        row.tap()
+        // Creating lands you in the terminal (#67), attached to the new pane
+        // with a live shell prompt.
         XCTAssertTrue(
-            app.descendants(matching: .any)["terminal.identity"].waitForExistence(timeout: 10),
-            "The terminal never opened."
+            app.descendants(matching: .any)["terminal.identity"].waitForExistence(timeout: 20),
+            "Create did not open the new terminal."
+        )
+        XCTAssertTrue(
+            waitForLiveTerminal(app, timeout: 20),
+            "The new terminal did not connect: \(app.descendants(matching: .any)["terminal.status"].firstMatch.label)"
         )
 
         // A shell takes commands, not prompts (#43): the composer must run
@@ -1463,6 +1482,21 @@ final class TaviUITests: XCTestCase {
     private func startOutputLoop(on surface: XCUIElement) {
         surface.tap()
         surface.typeText("while true; do echo streamed output line $RANDOM; sleep 0.2; done\n")
+    }
+
+    // A connected terminal is silent (#54): no status bar, input chrome
+    // present. A failed one collapses the chrome and shows its verdict.
+    @MainActor
+    private func waitForLiveTerminal(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if app.descendants(matching: .any)["terminal.disconnected"].exists { return false }
+            let status = app.descendants(matching: .any)["terminal.status"]
+            if status.exists, status.label.contains("failed") { return false }
+            if app.buttons["terminal.keyboard"].exists, !status.exists { return true }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        return false
     }
 
     @MainActor

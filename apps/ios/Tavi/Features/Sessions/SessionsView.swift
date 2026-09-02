@@ -22,6 +22,9 @@ struct SessionsView: View {
     // present; flipping both flags in one turn silently drops the second.
     @State private var pairingAfterSettings = false
     @State private var showingNewAgent = false
+    // The agent the New Agent sheet just created (#67); opened once the
+    // sheet has finished dismissing, so the push is not fighting the sheet.
+    @State private var createdAgent: AgentTarget?
     @State private var decisionAgent: DecisionTarget?
     // A revoked computer's Remove asks first: it wipes a credential.
     @State private var removingHostId: String?
@@ -117,8 +120,14 @@ struct SessionsView: View {
                     onSelectAgent: { agent in openAgent(agent) }
                 )
             }
-            .sheet(isPresented: $showingNewAgent) {
-                NewAgentSheet(computers: fleet.entries)
+            .sheet(isPresented: $showingNewAgent, onDismiss: {
+                guard let created = createdAgent else { return }
+                createdAgent = nil
+                openAgent(hostId: created.hostId, paneID: created.paneId)
+            }) {
+                NewAgentSheet(computers: fleet.entries) { created in
+                    createdAgent = created
+                }
             }
             .sheet(isPresented: $showingPairing) {
                 PairingFlowView { endpoint, grant in

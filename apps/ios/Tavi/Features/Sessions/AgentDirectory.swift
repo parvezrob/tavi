@@ -99,7 +99,9 @@ enum ProjectsFetch: Equatable {
 // outside its configured roots comes back as a confirmation request rather
 // than a failure — the phone asks, then retries with the confirmation.
 enum CreateAgentOutcome: Equatable {
-    case created
+    // The host answers with the new pane and tab (#67): the phone opens the
+    // terminal on that pane at once instead of leaving you on the home.
+    case created(paneId: String, tabId: String)
     case needsOutsideRootsConfirmation
     case failure(String)
 }
@@ -436,13 +438,23 @@ final class AgentDirectory {
             guard let status = (response as? HTTPURLResponse)?.statusCode else {
                 return .failure("The host did not answer.")
             }
-            if status == 201 { return .created }
+            if status == 201 {
+                guard let created = try? JSONDecoder().decode(CreatedTab.self, from: data) else {
+                    return .failure("The host created the agent but did not say which pane it lives in.")
+                }
+                return .created(paneId: created.paneId, tabId: created.tabId)
+            }
             let failure = try? JSONDecoder().decode(CreateTabFailure.self, from: data)
             if failure?.outsideRoots == true { return .needsOutsideRootsConfirmation }
             return .failure(failure?.error ?? "The host could not create the tab (HTTP \(status)).")
         } catch {
             return .failure(error.localizedDescription)
         }
+    }
+
+    private struct CreatedTab: Decodable {
+        let paneId: String
+        let tabId: String
     }
 
     private struct CreateTabFailure: Decodable {

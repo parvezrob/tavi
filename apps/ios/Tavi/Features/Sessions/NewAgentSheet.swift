@@ -10,6 +10,9 @@ import SwiftUI
 // rather than an error.
 struct NewAgentSheet: View {
     let computers: [HostFleet.Entry]
+    // Called after the sheet has asked to dismiss: the home opens the new
+    // pane's terminal (#67) so you land in what you just created.
+    let onCreated: (AgentTarget) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var phase: Phase = .loading
@@ -34,8 +37,9 @@ struct NewAgentSheet: View {
         case failed(String)
     }
 
-    init(computers: [HostFleet.Entry]) {
+    init(computers: [HostFleet.Entry], onCreated: @escaping (AgentTarget) -> Void) {
         self.computers = computers
+        self.onCreated = onCreated
         _chosenHostId = State(initialValue: computers.count == 1 ? computers[0].id : nil)
         _phase = State(initialValue: computers.count == 1 ? .loading : .chooseComputer)
     }
@@ -476,9 +480,11 @@ struct NewAgentSheet: View {
         defer { inFlight = false }
 
         switch await directory.createTab(agent: agentKind, cwd: cwd, allowOutsideRoots: allowOutsideRoots) {
-        case .created:
-            // The new agent arrives on the live snapshot feed like any other.
+        case let .created(paneId, _):
+            // The row arrives on the live snapshot feed like any other; the
+            // terminal opens right away on the pane the host named.
             dismiss()
+            onCreated(AgentTarget(hostId: directory.hostId, paneId: paneId))
         case .needsOutsideRootsConfirmation where allowOutsideRoots:
             // The host asked to confirm a location this call already
             // confirmed. Never re-raise the alert: that is a loop with no
