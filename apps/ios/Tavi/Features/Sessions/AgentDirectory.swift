@@ -470,7 +470,7 @@ final class AgentDirectory {
                 // (`fetchRepos` guards on host/credential) when there is
                 // nothing to answer it — `isRevoked` is the one state worth
                 // skipping, a dead credential that redialing cannot fix.
-                if !self.isRevoked, case let .repos(repos) = await self.fetchRepos() {
+                if !self.isRevoked, !self.isOffline, case let .repos(repos) = await self.fetchRepos() {
                     // Equatable, so an unchanged answer never triggers the
                     // @Observable re-render every poll would otherwise cost
                     // the whole home for state that rarely moves.
@@ -484,7 +484,7 @@ final class AgentDirectory {
     // One immediate repos poll, after the phone changed something (#81
     // removed a worktree) and should not wait out the interval to see it.
     func refreshRepos() async {
-        if case let .repos(repos) = await fetchRepos(), repos != self.repos { self.repos = repos }
+        if case let .repos(repos) = await fetchRepos(fresh: true), repos != self.repos { self.repos = repos }
     }
 
     func stop() {
@@ -568,15 +568,19 @@ final class AgentDirectory {
     // see, with every worktree git knows about. Polled on its own cadence
     // (dirty state has no push feed) rather than carried on the agents
     // snapshot, so a quiet folder never blocks on it.
-    func fetchRepos() async -> ReposFetch {
+    // `fresh` bypasses the host's cache — after the phone itself changed
+    // something; the poll takes the cached answer, which is instant.
+    func fetchRepos(fresh: Bool = false) async -> ReposFetch {
         guard let host, !credential.isEmpty else { return .failure("Connect a host first.") }
         guard var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else {
             return .failure("The host address is invalid.")
         }
         components.path = "/api/repos"
+        if fresh { components.queryItems = [URLQueryItem(name: "fresh", value: "1")] }
         guard let url = components.url else { return .failure("The host address is invalid.") }
 
         var request = URLRequest(url: url)
+        request.timeoutInterval = 20
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
         do {
             let (data, response) = try await Self.session.data(for: request)
@@ -1005,7 +1009,7 @@ final class AgentDirectory {
         let deadline = Task { [weak self] in
             try? await Task.sleep(for: Self.reconnectPolicy.connectDeadline)
             guard !Task.isCancelled, let self else { return }
-            let probe = await self.probeHost()
+            let probe = await self.probeHostTwice()
             guard !Task.isCancelled else { return }
             if probe == .unreachable { self.isOffline = true }
         }
@@ -1043,7 +1047,7 @@ final class AgentDirectory {
             // host directly before deciding. The same probe says whether
             // the computer answers at all (#50): "reconnecting" and
             // "offline" are different headers on the home.
-            switch await probeHost() {
+            switch await probeHostTwice() {
             case .rejected:
                 isRevoked = true
                 isOffline = false
@@ -1061,6 +1065,17 @@ final class AgentDirectory {
                 isOffline = true
             }
         }
+    }
+
+    // Offline is said only after two misses a moment apart: one slow
+    // round trip on a jittery WiFi hop must not flip a live computer to
+    // "isn't answering" (owner-felt, 2026-09-02 evening).
+    private func probeHostTwice() async -> HostProbe {
+        let first = await probeHost()
+        guard first == .unreachable, !Task.isCancelled else { return first }
+        try? await Task.sleep(for: .seconds(1.5))
+        guard !Task.isCancelled else { return first }
+        return await probeHost()
     }
 
     enum HostProbe: Equatable {
@@ -1084,7 +1099,7 @@ final class AgentDirectory {
         components.path = "/api/host"
         guard let url = components.url else { return .unreachable }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 3
+        request.timeoutInterval = 5
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
         let started = Date()
         guard let (_, response) = try? await Self.session.data(for: request),
