@@ -578,6 +578,7 @@ async function routeRequest(
         confirm: { uncommitted: confirm.uncommitted, unpushed: confirm.unpushed },
         pushFirst: record.pushFirst === true,
         deleteBranch: typeof record.deleteBranch === "boolean" ? record.deleteBranch : undefined,
+        unlock: record.unlock === true,
       },
       removalDeps,
     );

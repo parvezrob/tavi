@@ -104,6 +104,10 @@ struct RemoveWorktreeSheet: View {
                     trailing: nil
                 )
             }
+            if preview.locked {
+                line(dot: TaviTheme.textSecondary, text: "Locked on the computer (Claude Code locks the worktrees it makes); removing unlocks it", trailing: nil)
+                    .accessibilityIdentifier("removeWorktree.locked")
+            }
             line(dot: TaviTheme.textSecondary, text: RemovalWords.branchLine(preview, afterPush: false), trailing: nil)
                 .accessibilityIdentifier("removeWorktree.branch")
         }
@@ -117,12 +121,12 @@ struct RemoveWorktreeSheet: View {
             } else {
                 switch RemovalWords.choice(preview) {
                 case .safeRemove:
-                    Button(working == nil ? "Remove" : "Removing…") { start("remove") { await remove(preview, pushFirst: false, deleteBranch: nil) } }
+                    Button(working == nil ? (preview.locked ? "Unlock and remove" : "Remove") : "Removing…") { start("remove") { await remove(preview, pushFirst: false, deleteBranch: nil) } }
                         .buttonStyle(.taviProminent)
                         .disabled(working != nil)
                         .accessibilityIdentifier("removeWorktree.remove")
                 case .pushThenRemove:
-                    Button(working == "push" ? "Pushing, then removing…" : "Push branch, then remove") { start("push") { await remove(preview, pushFirst: true, deleteBranch: nil) } }
+                    Button(working == "push" ? "Pushing, then removing…" : (preview.locked ? "Push branch, unlock, then remove" : "Push branch, then remove")) { start("push") { await remove(preview, pushFirst: true, deleteBranch: nil) } }
                         .buttonStyle(.taviProminent)
                         .disabled(working != nil)
                         .accessibilityIdentifier("removeWorktree.pushThenRemove")

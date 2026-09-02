@@ -8,7 +8,7 @@ struct RemovalPreviewTests {
     private func preview(files: Int = 0, commits: Int = 0, upstream: String? = nil, remote: String? = "origin", merged: Bool = false, agents: Int = 0, branch: String? = "feat/x") throws -> RemovalPreview {
         let agentJSON = (0..<agents).map { "{\"paneId\":\"p\($0)\",\"tabId\":\"t\($0)\",\"kind\":\"claude\",\"status\":\"done\"}" }.joined(separator: ",")
         let json = """
-        {"path":"/w","branch":\(branch.map { "\"\($0)\"" } ?? "null"),"isMain":false,"repoRoot":"/r","base":"main",
+        {"path":"/w","branch":\(branch.map { "\"\($0)\"" } ?? "null"),"isMain":false,"locked":false,"repoRoot":"/r","base":"main",
          "uncommitted":{"files":\(files),"additions":60,"deletions":7},
          "unpushed":{"commits":\(commits),"upstream":\(upstream.map { "\"\($0)\"" } ?? "null"),"remote":\(remote.map { "\"\($0)\"" } ?? "null")},
          "agents":[\(agentJSON)],"branchMerged":\(merged)}

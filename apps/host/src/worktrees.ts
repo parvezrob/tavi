@@ -342,6 +342,9 @@ export interface RemoveWorktreeRequest {
   // commit count); false: keep it; absent: delete only when merged or
   // just pushed.
   deleteBranch?: boolean | undefined;
+  // A locked worktree (Claude Code locks every one it makes) is refused
+  // unless the person chose "Unlock and remove".
+  unlock?: boolean | undefined;
 }
 
 export interface RemovedWorktree {
@@ -370,9 +373,17 @@ export async function removeWorktree(worktreePath: string, request: RemoveWorktr
     return { ok: false, status: 409, error: `${path.basename(worktreePath)} is the repository's main checkout; it cannot be removed from here.` };
   }
   if (preview.locked) {
-    // A lock is the person's own "do not remove"; prune would skip it
-    // and leave the repository pointing at a deleted folder.
-    return { ok: false, status: 409, error: `${preview.branch ?? path.basename(worktreePath)} is locked on the computer. Unlock it there (git worktree unlock) if you mean to remove it.`, preview };
+    // A lock is a "do not remove" — Claude Code's own worktrees carry one
+    // — so it is lifted only on request; prune would otherwise skip the
+    // entry and leave the repository pointing at a deleted folder.
+    if (!request.unlock) {
+      return { ok: false, status: 409, error: `${preview.branch ?? path.basename(worktreePath)} is locked on the computer. Choose "Unlock and remove" if you mean to remove it.`, preview };
+    }
+    try {
+      await git(preview.repoRoot, ["worktree", "unlock", worktreePath]);
+    } catch (error) {
+      return { ok: false, status: 503, error: `Nothing was removed: git could not unlock the worktree: ${describeGitError(error)}`, preview };
+    }
   }
   if (preview.uncommitted.files !== request.confirm.uncommitted || preview.unpushed.commits !== request.confirm.unpushed) {
     return {

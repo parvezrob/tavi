@@ -115,6 +115,8 @@ struct HostSourceControlClient: Sendable {
             "confirm": ["uncommitted": confirm.uncommitted.files, "unpushed": confirm.unpushed.commits],
             "pushFirst": pushFirst,
         ]
+        // The sheet showed the lock as a line and the button said so.
+        if confirm.locked { payload["unlock"] = true }
         if let deleteBranch { payload["deleteBranch"] = deleteBranch }
         return await send("/api/worktrees", method: "DELETE", query: [:], body: payload)
     }
@@ -366,6 +368,8 @@ struct RemovalPreview: Decodable, Sendable, Equatable {
     let path: String
     let branch: String?
     let isMain: Bool
+    // `git worktree lock` — Claude Code locks every worktree it makes.
+    let locked: Bool
     let repoRoot: String
     let base: String?
     let uncommitted: Uncommitted

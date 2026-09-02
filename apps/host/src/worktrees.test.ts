@@ -163,6 +163,12 @@ test("removal counts a detached worktree's orphan commits, refuses a locked work
   }
   assert.ok(existsSync(locked.wt));
   assert.equal(git(locked.dir, "worktree", "list").split("\n").filter(Boolean).length, 2);
+  // "Unlock and remove" lifts the lock first, then removes as usual.
+  const unlocked = await removeWorktree(locked.wt, { confirm: { uncommitted: 1, unpushed: 1 }, deleteBranch: true, unlock: true });
+  assert.ok(unlocked.ok, JSON.stringify(unlocked));
+  await awaitPendingDeletes();
+  assert.equal(existsSync(locked.wt), false);
+  assert.equal(git(locked.dir, "worktree", "list").split("\n").filter(Boolean).length, 1);
 
   // An unreadable index: the preview must refuse, never say "clean".
   const broken = await removable();
