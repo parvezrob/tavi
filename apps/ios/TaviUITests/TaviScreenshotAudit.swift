@@ -336,11 +336,17 @@ final class TaviScreenshotAudit: XCTestCase {
             let discard = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN {'removeWorktree.discard', 'removeWorktree.remove'}")).firstMatch
             XCTAssertTrue(discard.waitForExistence(timeout: 5), "No Discard or Remove action on the sheet.")
             discard.tap()
-            let deadline = Date().addingTimeInterval(60)
+            // The receipt comes first; Done closes both sheets.
+            let finish = app.descendants(matching: .any)["removeWorktree.finish"]
+            XCTAssertTrue(finish.waitForExistence(timeout: 60), "No receipt after removing.")
+            sleep(1)
+            keep("rm-01-receipt")
+            finish.tap()
+            let deadline = Date().addingTimeInterval(30)
             while Date() < deadline, header.exists { sleep(1) }
             XCTAssertFalse(header.exists, "The worktree row is still on the home after removing.")
             sleep(2)
-            keep("rm-01-home-after")
+            keep("rm-02-home-after")
         }
     }
 
