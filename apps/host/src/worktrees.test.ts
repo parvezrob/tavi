@@ -30,6 +30,10 @@ function repo(): { dir: string; parent: string } {
 
 test("worktreePath sits beside the repository, one folder per repo, slash → dash", () => {
   assert.equal(worktreePath("/Users/me/Projects/app", "fix/login redirect"), "/Users/me/Projects/app-worktrees/fix-login-redirect");
+  // Punctuation never leaves a leading dash or a run of them (owner saw
+  // "(test)worktree" become "-test-worktree").
+  assert.equal(worktreePath("/Users/me/Projects/app", "(test)worktree"), "/Users/me/Projects/app-worktrees/test-worktree");
+  assert.equal(worktreePath("/Users/me/Projects/app", "--- ---"), "/Users/me/Projects/app-worktrees/worktree");
 });
 
 test("createWorktree adds the branch off the default base, sets the configs, copies .env (#75)", async () => {

@@ -126,7 +126,7 @@ export async function createWorktree(
 // picker's root scan (one level under each root) finds the worktrees
 // folder, and nothing is ever created inside the checkout itself.
 export function worktreePath(mainWorktree: string, branch: string): string {
-  const slug = branch.replace(/[\\/]/g, "-").replace(/[^A-Za-z0-9._-]/g, "-");
+  const slug = branch.replace(/[\\/]/g, "-").replace(/[^A-Za-z0-9._-]/g, "-").replace(/-{2,}/g, "-").replace(/^[-.]+|[-.]+$/g, "") || "worktree";
   return path.join(path.dirname(mainWorktree), `${path.basename(mainWorktree)}-worktrees`, slug);
 }
 
