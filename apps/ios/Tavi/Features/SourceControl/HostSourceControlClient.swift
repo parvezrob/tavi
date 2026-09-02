@@ -321,6 +321,8 @@ struct IssueSummary: Decodable, Sendable, Equatable, Identifiable {
 
     // `issue/12-login-redirect-loops`: the number keeps it unique, the
     // words keep it readable, and git accepts every character in it.
+    // The slug is capped at 40 characters, so a long title is cut
+    // wherever the cap falls — mid-word if that is where it lands.
     var branchName: String {
         let lowered = title.lowercased()
         var slug = ""
