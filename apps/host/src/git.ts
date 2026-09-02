@@ -1,6 +1,10 @@
+import { execFile } from "node:child_process";
 import path from "node:path";
+import { promisify } from "node:util";
 import { describeGitError, git } from "./git-exec.js";
 import { scanWorkspaces } from "./workspaces.js";
+
+const execFileAsync = promisify(execFile);
 
 // Read-only worktree and branch visibility (#59a): "where is my work
 // happening", one repository at a time. Every call here is a fixed,
@@ -26,6 +30,23 @@ export interface WorktreeInfo {
   behind: number;
   locked: boolean;
   prunable: boolean;
+  // The open pull request for this branch, per the person's own `gh`
+  // login (#74). null when there is none, when `gh` is missing or logged
+  // out, or for a detached worktree — the row simply shows no badge.
+  pullRequest: PullRequestRef | null;
+}
+
+export interface PullRequestRef {
+  number: number;
+  url: string;
+}
+
+// How a pull request is looked up for a branch; injectable so tests need
+// no `gh`. The default shells out to `gh pr list`.
+export type PullRequestLookup = (repository: string, branch: string) => Promise<PullRequestRef | null>;
+
+export interface ListReposOptions {
+  pullRequests?: PullRequestLookup;
 }
 
 export interface RepoInfo {
@@ -41,10 +62,11 @@ export interface RepoInfo {
 // them, so hiding them would be a lie, not a guardrail; the guardrail is on
 // *creating* new ones, in #59b). Roots that hold several repos, or a repo
 // found through more than one root, each appear once.
-export async function listRepos(roots: string[]): Promise<RepoInfo[]> {
+export async function listRepos(roots: string[], options: ListReposOptions = {}): Promise<RepoInfo[]> {
   const workspaces = await scanWorkspaces(roots);
   const seen = new Set<string>();
   const repos: RepoInfo[] = [];
+  const pullRequests = options.pullRequests ?? cachedPullRequestLookup;
 
   for (const workspace of workspaces) {
     if (repos.length >= MAX_REPOS) break;
@@ -62,6 +84,7 @@ export async function listRepos(roots: string[]): Promise<RepoInfo[]> {
         const [ahead, behind] = await aheadBehind(main.path, worktree.branch, defaultBranch);
         worktree.ahead = ahead;
         worktree.behind = behind;
+        if (worktree.branch) worktree.pullRequest = await pullRequests(main.path, worktree.branch);
       }
       repos.push({ root: main.path, name: path.basename(main.path), defaultBranch, worktrees });
     } catch {
@@ -127,10 +150,47 @@ export function parseWorktreeList(raw: string): WorktreeInfo[] {
       behind: 0,
       locked,
       prunable,
+      pullRequest: null,
     });
     first = false;
   }
   return worktrees;
+}
+
+// `gh pr list --head <branch>` under the person's own login, one call per
+// branch, remembered for a minute per repo+branch so a phone polling every
+// 30 s does not fan out into a GitHub call per worktree per poll. Any
+// failure — `gh` missing, logged out, offline, not a GitHub remote — is
+// null, never an error: the badge is a nicety, the list is not.
+const PR_CACHE_MS = 60_000;
+const GH_TIMEOUT_MS = 5_000;
+const pullRequestCache = new Map<string, { at: number; value: PullRequestRef | null }>();
+
+export async function cachedPullRequestLookup(repository: string, branch: string): Promise<PullRequestRef | null> {
+  const key = `${repository}\0${branch}`;
+  const hit = pullRequestCache.get(key);
+  const now = Date.now();
+  if (hit && now - hit.at < PR_CACHE_MS) return hit.value;
+  const value = await ghPullRequest(repository, branch);
+  pullRequestCache.set(key, { at: now, value });
+  return value;
+}
+
+async function ghPullRequest(repository: string, branch: string): Promise<PullRequestRef | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      "gh",
+      ["pr", "list", "--head", branch, "--state", "open", "--json", "number,url", "--limit", "1"],
+      { cwd: repository, timeout: GH_TIMEOUT_MS, encoding: "utf8", env: { ...process.env, GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1" } },
+    );
+    const parsed: unknown = JSON.parse(stdout);
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    const first = parsed[0] as { number?: unknown; url?: unknown };
+    if (typeof first.number !== "number" || typeof first.url !== "string") return null;
+    return { number: first.number, url: first.url };
+  } catch {
+    return null;
+  }
 }
 
 // Changed or untracked entries per `status --porcelain=v2`, one worktree at

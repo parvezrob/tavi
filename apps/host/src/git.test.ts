@@ -119,6 +119,23 @@ test("listRepos computes ahead/behind against the default branch", async () => {
   assert.equal(baz?.behind, 1);
 });
 
+test("listRepos asks the pull-request lookup once per branch and carries its answer (#74)", async () => {
+  const { dir, parent } = repo();
+  git(dir, "worktree", "add", "-b", "feat/pr", path.join(parent, "feat-pr"), "main");
+  const asked: string[] = [];
+  const repos = await listRepos([parent], {
+    pullRequests: async (repository, branch) => {
+      asked.push(branch);
+      assert.equal(repository, dir);
+      return branch === "feat/pr" ? { number: 48, url: "https://github.com/x/y/pull/48" } : null;
+    },
+  });
+  const found = repos.find((r) => r.root === dir);
+  assert.deepEqual(asked.sort(), ["feat/pr", "main"]);
+  assert.deepEqual(found?.worktrees.find((w) => w.branch === "feat/pr")?.pullRequest, { number: 48, url: "https://github.com/x/y/pull/48" });
+  assert.equal(found?.worktrees.find((w) => w.isMain)?.pullRequest, null);
+});
+
 test("listRepos returns no repositories for a plain folder", async () => {
   const dir = mktemp();
   const repos = await listRepos([dir]);

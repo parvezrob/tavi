@@ -188,13 +188,13 @@ Every git repository reachable from the configured roots, with every worktree gi
   "name": "app",
   "defaultBranch": "main",
   "worktrees": [
-    { "path": "/Users/me/Projects/app", "branch": "main", "head": "a1b2c3d", "isMain": true, "dirty": 0, "ahead": 0, "behind": 0, "locked": false, "prunable": false },
-    { "path": "/Users/me/Projects/app-fix-foo", "branch": "fix/foo", "head": "e4f5a6b", "isMain": false, "dirty": 2, "ahead": 3, "behind": 1, "locked": false, "prunable": false }
+    { "path": "/Users/me/Projects/app", "branch": "main", "head": "a1b2c3d…", "isMain": true, "dirty": 0, "ahead": 0, "behind": 0, "locked": false, "prunable": false, "pullRequest": null },
+    { "path": "/Users/me/Projects/app-fix-foo", "branch": "fix/foo", "head": "e4f5a6b…", "isMain": false, "dirty": 2, "ahead": 3, "behind": 1, "locked": false, "prunable": false, "pullRequest": { "number": 48, "url": "https://github.com/me/app/pull/48" } }
   ]
 }] }
 ```
 
-`branch` is `null` for a detached `HEAD`. `dirty` is a count of changed-or-untracked entries (`status --porcelain=v2`), not the files themselves — see `/api/changes` for those. `ahead`/`behind` are commits relative to `defaultBranch` (the remote's default branch, else a local `main` or `master`, else `null` and both `0`); a worktree already on the default branch also reports `0`/`0`. `defaultBranch` is `null` when none of those resolve.
+`branch` is `null` for a detached `HEAD`. `head` is the full SHA. `pullRequest` (#74) is the open pull request for the branch per the host user's own `gh` login (`gh pr list --head <branch>`), remembered for a minute per branch; `null` when there is none, when `gh` is not installed or not logged in, when the remote is not GitHub, or for a detached worktree — a client shows no badge and says nothing. `dirty` is a count of changed-or-untracked entries (`status --porcelain=v2`), not the files themselves — see `/api/changes` for those. `ahead`/`behind` are commits relative to `defaultBranch` (the remote's default branch, else a local `main` or `master`, else `null` and both `0`); a worktree already on the default branch also reports `0`/`0`. `defaultBranch` is `null` when none of those resolve.
 
 ### `/api/preview…` — private dev-server preview (#58)
 
