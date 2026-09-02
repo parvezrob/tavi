@@ -127,8 +127,16 @@ test("removal preview names the uncommitted files, the unpushed commits, the age
   assert.equal(preview.preview.uncommitted.additions, 1);
   assert.deepEqual(preview.preview.unpushed, { commits: 1, upstream: null, remote: "origin" });
   assert.deepEqual(preview.preview.agents.map((a) => a.tabId), ["t1"]);
+  assert.deepEqual(preview.preview.alsoClosed, []);
   assert.equal(preview.preview.branchMerged, false);
   assert.equal(preview.preview.locked, false);
+
+  // herdr closes tabs: an agent elsewhere that shares tab t1 with the one
+  // inside goes down too, and the preview names it (#83).
+  const shared = await previewRemoval(wt, { agents: async () => [agent(wt, "t1"), agent(dir, "t1"), agent(dir, "t2")] });
+  assert.ok(shared.ok);
+  assert.deepEqual(shared.preview.agents.map((a) => a.tabId), ["t1"]);
+  assert.deepEqual(shared.preview.alsoClosed.map((a) => [a.tabId, a.cwd]), [["t1", dir]]);
 
   const main = await previewRemoval(dir);
   assert.ok(main.ok);

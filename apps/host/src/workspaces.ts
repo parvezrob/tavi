@@ -1,5 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
+import { isRemovalLeftover } from "./removal-sweep.js";
 import type { WorkspaceInfo } from "./types.js";
 
 const MAX_WORKSPACES = 160;
@@ -19,7 +20,9 @@ export async function scanWorkspaces(roots: string[]): Promise<WorkspaceInfo[]> 
 
       const entries = await readdir(root, { withFileTypes: true });
       for (const entry of entries) {
-        if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+        // A folder a removed worktree left behind is not a place to work
+        // (#82); the host deletes it when it can.
+        if (!entry.isDirectory() || entry.name.startsWith(".") || isRemovalLeftover(entry.name)) continue;
         const candidate = path.join(root, entry.name);
         workspaces.set(candidate, { name: entry.name, path: candidate, git: await isGitRoot(candidate) });
         if (workspaces.size >= MAX_WORKSPACES) break;

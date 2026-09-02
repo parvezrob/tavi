@@ -1,19 +1,20 @@
-import { execFile } from "node:child_process";
 import path from "node:path";
-import { promisify } from "node:util";
-import { ghBinary } from "./gh.js";
+import { runGh } from "./gh.js";
 import { describeGitError, git } from "./git-exec.js";
+import { isWithinRoots } from "./projects.js";
 import { scanWorkspaces } from "./workspaces.js";
-
-const execFileAsync = promisify(execFile);
 
 // Read-only worktree and branch visibility (#59a): "where is my work
 // happening", one repository at a time. Every call here is a fixed,
-// non-mutating git invocation — `worktree list`, `status`, `rev-list` — the
-// same discipline as changes.ts. Nothing here creates or removes a worktree.
+// non-mutating git invocation — `worktree list`, `status`, `for-each-ref` —
+// the same discipline as changes.ts. Nothing here creates or removes a
+// worktree.
 
 const MAX_REPOS = 40;
 const MAX_WORKTREES_PER_REPO = 40;
+// `status` per worktree, this many at a time: a repository with forty
+// worktrees must not fork forty git processes at once (#83).
+const STATUS_CONCURRENCY = 4;
 
 export interface WorktreeInfo {
   path: string;
@@ -26,7 +27,8 @@ export interface WorktreeInfo {
   dirty: number;
   // Commits this branch has that the default branch does not, and vice
   // versa. 0/0 when there is no default branch to compare against, or the
-  // worktree already is the default branch.
+  // worktree already is the default branch. A detached worktree is
+  // compared by its HEAD.
   ahead: number;
   behind: number;
   locked: boolean;
@@ -35,6 +37,11 @@ export interface WorktreeInfo {
   // login (#74). null when there is none, when `gh` is missing or logged
   // out, or for a detached worktree — the row simply shows no badge.
   pullRequest: PullRequestRef | null;
+  // Inside the configured roots. git lists a worktree wherever it lives,
+  // but the host's write routes (status, commit, remove…) answer only
+  // inside the roots; a client can say so instead of showing a dead
+  // button (#83).
+  withinRoots: boolean;
 }
 
 export interface PullRequestRef {
@@ -43,8 +50,9 @@ export interface PullRequestRef {
 }
 
 // How a pull request is looked up for a branch; injectable so tests need
-// no `gh`. The default shells out to `gh pr list`.
-export type PullRequestLookup = (repository: string, branch: string) => Promise<PullRequestRef | null>;
+// no `gh`. The default shells out to `gh pr list`. The signal fires when
+// the pass's budget runs out: a lookup that can stop should.
+export type PullRequestLookup = (repository: string, branch: string, signal?: AbortSignal) => Promise<PullRequestRef | null>;
 
 export interface ListReposOptions {
   pullRequests?: PullRequestLookup;
@@ -59,6 +67,19 @@ export interface RepoInfo {
   // Capped; the default branch is always first when present.
   branches: string[];
   worktrees: WorktreeInfo[];
+  // The worktree or branch list was cut at its cap; what is shown is
+  // real, what is missing is unnamed (#83).
+  truncated: boolean;
+}
+
+export interface ReposAnswer {
+  repos: RepoInfo[];
+  // More repositories than the cap: the list stops, it does not lie.
+  truncated: boolean;
+  // Why nothing could be listed at all — git is not installed — as a
+  // sentence; null when the listing ran. An empty list with no error
+  // means there are no repositories (#83).
+  error: string | null;
 }
 
 const MAX_BRANCHES = 200;
@@ -68,33 +89,49 @@ const MAX_BRANCHES = 200;
 // them, so hiding them would be a lie, not a guardrail; the guardrail is on
 // *creating* new ones, in #59b). Roots that hold several repos, or a repo
 // found through more than one root, each appear once.
-export async function listRepos(roots: string[], options: ListReposOptions = {}): Promise<RepoInfo[]> {
+export async function listRepos(roots: string[], options: ListReposOptions = {}): Promise<ReposAnswer> {
   const workspaces = await scanWorkspaces(roots);
   const seen = new Set<string>();
   const repos: RepoInfo[] = [];
   const pullRequests = options.pullRequests ?? cachedPullRequestLookup;
+  let truncated = false;
+  let error: string | null = null;
 
   for (const workspace of workspaces) {
-    if (repos.length >= MAX_REPOS) break;
     if (!workspace.git) continue;
+    if (repos.length >= MAX_REPOS) {
+      truncated = true;
+      break;
+    }
     try {
       const commonDir = (await git(workspace.path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).stdout.trim();
       if (!commonDir || seen.has(commonDir)) continue;
       seen.add(commonDir);
 
-      const worktrees = await listWorktrees(workspace.path);
+      const listed = await listWorktrees(workspace.path);
+      const worktrees = listed.worktrees;
       const main = worktrees.find((worktree) => worktree.isMain) ?? worktrees[0];
       if (!main) continue;
+      for (const worktree of worktrees) worktree.withinRoots = isWithinRoots(worktree.path, roots);
       const defaultBranch = await findDefaultBranch(main.path);
-      for (const worktree of worktrees) {
-        const [ahead, behind] = await aheadBehind(main.path, worktree.branch, defaultBranch);
-        worktree.ahead = ahead;
-        worktree.behind = behind;
-      }
+      await attachAheadBehind(main.path, worktrees, defaultBranch);
       await attachPullRequests(main.path, worktrees, defaultBranch, pullRequests);
       const branches = await listBranches(main.path, defaultBranch);
-      repos.push({ root: main.path, name: path.basename(main.path), defaultBranch, branches, worktrees });
-    } catch {
+      repos.push({
+        root: main.path,
+        name: path.basename(main.path),
+        defaultBranch,
+        branches: branches.names,
+        worktrees,
+        truncated: listed.truncated || branches.truncated,
+      });
+    } catch (caught) {
+      // No git at all is one sentence for the whole answer, not an empty
+      // list that reads as "no repositories" (#72).
+      if (isGitMissing(caught)) {
+        error = "git is not installed on this computer.";
+        break;
+      }
       // One repository that this call cannot read (a stalled network mount,
       // a mid-operation .git) does not blank the whole list; its neighbours
       // still answer.
@@ -102,7 +139,13 @@ export async function listRepos(roots: string[], options: ListReposOptions = {})
     }
   }
 
-  return repos;
+  return { repos, truncated, error };
+}
+
+function isGitMissing(error: unknown): boolean {
+  const code = (error as { code?: unknown }).code;
+  const message = error instanceof Error ? error.message : String(error);
+  return code === "ENOENT" && /\bgit\b/.test(message);
 }
 
 // `/api/repos` from the cache (#83, owner-felt 2026-09-02: a 3 s answer
@@ -114,17 +157,17 @@ export async function listRepos(roots: string[], options: ListReposOptions = {})
 // sees it.
 const REPOS_FRESH_MS = 90_000;
 const REPOS_REFRESH_MS = 15_000;
-let reposCache: { key: string; at: number; value: RepoInfo[] } | null = null;
-let reposInFlight: Promise<RepoInfo[]> | null = null;
+let reposCache: { key: string; at: number; value: ReposAnswer } | null = null;
+let reposInFlight: Promise<ReposAnswer> | null = null;
 
 export function invalidateRepos(): void {
   reposCache = null;
 }
 
-export async function listReposCached(roots: string[], options: ListReposOptions = {}, fresh = false): Promise<RepoInfo[]> {
+export async function listReposCached(roots: string[], options: ListReposOptions = {}, fresh = false): Promise<ReposAnswer> {
   const key = roots.join("\0");
   const now = monotonicNow();
-  const refresh = (): Promise<RepoInfo[]> => {
+  const refresh = (): Promise<ReposAnswer> => {
     if (!reposInFlight) {
       reposInFlight = listRepos(roots, options)
         .then((value) => {
@@ -144,29 +187,37 @@ export async function listReposCached(roots: string[], options: ListReposOptions
   return refresh();
 }
 
-async function listWorktrees(repository: string): Promise<WorktreeInfo[]> {
+async function listWorktrees(repository: string): Promise<{ worktrees: WorktreeInfo[]; truncated: boolean }> {
   let stdout: string;
   try {
-    stdout = (await git(repository, ["worktree", "list", "--porcelain"])).stdout;
+    stdout = (await git(repository, ["worktree", "list", "--porcelain", "-z"])).stdout;
   } catch (error) {
+    if (isGitMissing(error)) throw error;
     throw new Error(`git worktree list failed: ${describeGitError(error)}`);
   }
-  const worktrees = parseWorktreeList(stdout).slice(0, MAX_WORKTREES_PER_REPO);
-  for (const worktree of worktrees) {
-    worktree.dirty = await dirtyCount(worktree.path);
-  }
-  return worktrees;
+  const all = parseWorktreeList(stdout);
+  const worktrees = all.slice(0, MAX_WORKTREES_PER_REPO);
+  const counts = await mapPool(worktrees, STATUS_CONCURRENCY, (worktree) => dirtyCount(worktree.path));
+  worktrees.forEach((worktree, index) => {
+    worktree.dirty = counts[index] ?? 0;
+  });
+  return { worktrees, truncated: all.length > worktrees.length };
 }
 
-// `git worktree list --porcelain`: blank-line-separated records, the main
-// worktree always first. Each record is `worktree <path>` then `HEAD <sha>`
-// then one of `branch <ref>` / `detached` / `bare`, plus optional `locked
-// [reason]` and `prunable [reason]`.
+// `git worktree list --porcelain -z`: NUL-terminated lines, records ended
+// by an extra NUL, the main worktree always first. (The newline form is
+// read too, for callers and tests that still hand it over; with -z a path
+// holding a newline comes through whole — #72.) Each record is `worktree
+// <path>` then `HEAD <sha>` then one of `branch <ref>` / `detached` /
+// `bare`, plus optional `locked [reason]` and `prunable [reason]`.
 export function parseWorktreeList(raw: string): WorktreeInfo[] {
   const worktrees: WorktreeInfo[] = [];
+  const nulTerminated = raw.includes("\0");
+  const records = nulTerminated ? raw.split("\0\0") : raw.split(/\n{2,}/);
+  const lineBreak = nulTerminated ? "\0" : "\n";
   let first = true;
-  for (const record of raw.split(/\n{2,}/)) {
-    const lines = record.split("\n").filter((line) => line.length > 0);
+  for (const record of records) {
+    const lines = record.split(lineBreak).filter((line) => line.length > 0);
     if (lines.length === 0) continue;
     let worktreePath: string | undefined;
     let head = "";
@@ -185,30 +236,82 @@ export function parseWorktreeList(raw: string): WorktreeInfo[] {
       else if (line.startsWith("locked")) locked = true;
       else if (line.startsWith("prunable")) prunable = true;
     }
-    if (!worktreePath || bare) continue;
+    if (!worktreePath) continue;
+    // A bare repository's first record is the repository itself, not a
+    // checkout: skipped, and the next record is not the main worktree.
+    const isMain = first;
+    first = false;
+    if (bare) continue;
     worktrees.push({
       path: worktreePath,
       branch,
       head,
-      isMain: first,
+      isMain,
       dirty: 0,
       ahead: 0,
       behind: 0,
       locked,
       prunable,
       pullRequest: null,
+      withinRoots: true,
     });
-    first = false;
   }
   return worktrees;
 }
 
-// Pull requests for one repository's worktrees, all at once and within one
-// budget: the badge is a nicety, so whatever has not answered when the
-// budget runs out is null this poll. The default branch is skipped (it has
-// no PR of its own by construction), a lookup that throws costs the badge,
-// never the repository.
+// Ahead/behind for every worktree in one git call: `for-each-ref
+// --format=%(ahead-behind:<default>)` over the branches the worktrees are
+// on (git ≥ 2.41; older git falls back to one `rev-list` per branch). The
+// default is named as a full ref — a tag called `main` must not win — and
+// when there is no local copy, its remote-tracking ref stands in. A
+// detached worktree is compared by its HEAD (#72).
+async function attachAheadBehind(repository: string, worktrees: WorktreeInfo[], defaultBranch: string | null): Promise<void> {
+  if (!defaultBranch) return;
+  const target = (await refExists(repository, `refs/heads/${defaultBranch}`))
+    ? `refs/heads/${defaultBranch}`
+    : (await refExists(repository, `refs/remotes/origin/${defaultBranch}`))
+      ? `refs/remotes/origin/${defaultBranch}`
+      : null;
+  if (!target) return;
+  const branches = [...new Set(worktrees.flatMap((worktree) => (worktree.branch && worktree.branch !== defaultBranch ? [worktree.branch] : [])))];
+  const counts = new Map<string, [number, number]>();
+  if (branches.length > 0) {
+    try {
+      const { stdout } = await git(repository, [
+        "for-each-ref",
+        `--format=%(refname)%00%(ahead-behind:${target})`,
+        ...branches.map((branch) => `refs/heads/${branch}`),
+      ]);
+      for (const line of stdout.split("\n")) {
+        const [ref, pair] = line.split("\0");
+        if (!ref?.startsWith("refs/heads/")) continue;
+        const [ahead = 0, behind = 0] = (pair ?? "").trim().split(/\s+/).map((value) => Number.parseInt(value, 10) || 0);
+        counts.set(ref.slice("refs/heads/".length), [ahead, behind]);
+      }
+    } catch {
+      for (const branch of branches) counts.set(branch, await aheadBehind(repository, `refs/heads/${branch}`, target));
+    }
+  }
+  for (const worktree of worktrees) {
+    if (worktree.branch) {
+      // Exact names only: `for-each-ref refs/heads/fix` also lists
+      // `refs/heads/fix/foo`, and the map holds both under their own name.
+      const pair = counts.get(worktree.branch);
+      if (pair) [worktree.ahead, worktree.behind] = pair;
+    } else if (worktree.head) {
+      [worktree.ahead, worktree.behind] = await aheadBehind(repository, worktree.head, target);
+    }
+  }
+}
+
+// Pull requests for one repository's worktrees, a few at a time and within
+// one budget: the badge is a nicety, so whatever has not answered when the
+// budget runs out is null this poll, and the lookups still running are
+// told to stop (their `gh` is killed) rather than left to finish for
+// nobody (#85). The default branch is skipped (it has no PR of its own by
+// construction); a lookup that throws costs the badge, never the repo.
 const PR_PASS_BUDGET_MS = 3_000;
+const PR_PASS_CONCURRENCY = 4;
 
 async function attachPullRequests(
   repository: string,
@@ -218,29 +321,39 @@ async function attachPullRequests(
 ): Promise<void> {
   const candidates = worktrees.filter((worktree) => worktree.branch && worktree.branch !== defaultBranch);
   if (candidates.length === 0) return;
-  let expired = false;
-  const budget = new Promise<null>((resolve) => setTimeout(() => { expired = true; resolve(null); }, PR_PASS_BUDGET_MS).unref());
-  await Promise.all(
-    candidates.map(async (worktree) => {
+  const controller = new AbortController();
+  const expired = new Promise<null>((resolve) => controller.signal.addEventListener("abort", () => resolve(null), { once: true }));
+  const timer = setTimeout(() => controller.abort(), PR_PASS_BUDGET_MS);
+  timer.unref();
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < candidates.length && !controller.signal.aborted) {
+      const worktree = candidates[next] as WorktreeInfo;
+      next += 1;
       try {
-        const value = await Promise.race([lookup(repository, worktree.branch as string), budget]);
-        worktree.pullRequest = expired ? null : value;
+        // Raced as well as signalled: an injected lookup that ignores the
+        // signal must not hold the whole answer past the budget.
+        const value = await Promise.race([lookup(repository, worktree.branch as string, controller.signal), expired]);
+        worktree.pullRequest = controller.signal.aborted ? null : value;
       } catch {
         worktree.pullRequest = null;
       }
-    }),
-  );
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(PR_PASS_CONCURRENCY, candidates.length) }, worker));
+  clearTimeout(timer);
 }
 
 // `gh pr list` under the person's own login. Remembered per repo+branch —
 // a minute for an answer, ten seconds for a failure (a timeout or a moment
-// offline must not blank a real badge for a minute) — and single-flight,
-// so a phone polling every 30 s while gh is slow never stacks calls for
-// the same branch. Only a PR whose head is *this* repository counts:
-// `--head` alone matches any fork's branch of the same name, and a
-// stranger's PR on the card would be worse than none (found in review,
-// 2026-09-02). Any failure — gh missing, logged out, offline, not a GitHub
-// remote — is null, never an error.
+// offline must not blank a real badge for a minute) — least recently used
+// first out, and single-flight, so a phone polling every 30 s while gh is
+// slow never stacks calls for the same branch. Only a PR whose head is
+// *this* repository counts: `--head` alone matches any fork's branch of
+// the same name, and a stranger's PR on the card would be worse than none
+// (found in review, 2026-09-02). Any failure — gh missing, logged out,
+// offline, not a GitHub remote, stopped by the pass's budget — is null,
+// never an error.
 const PR_CACHE_MS = 60_000;
 const PR_FAILURE_CACHE_MS = 10_000;
 const PR_CACHE_MAX_ENTRIES = 2_000;
@@ -248,16 +361,23 @@ const GH_TIMEOUT_MS = 5_000;
 type PullRequestCacheEntry = { at: number; ttl: number; value: Promise<PullRequestRef | null> };
 const pullRequestCache = new Map<string, PullRequestCacheEntry>();
 
-export function cachedPullRequestLookup(repository: string, branch: string): Promise<PullRequestRef | null> {
+export function cachedPullRequestLookup(repository: string, branch: string, signal?: AbortSignal): Promise<PullRequestRef | null> {
   const key = `${repository}\0${branch}`;
   const now = monotonicNow();
   const hit = pullRequestCache.get(key);
-  if (hit && now - hit.at < hit.ttl) return hit.value;
+  if (hit && now - hit.at < hit.ttl) {
+    // Touched: a Map keeps insertion order, so re-inserting makes it the
+    // newest and the first key the least recently used.
+    pullRequestCache.delete(key);
+    pullRequestCache.set(key, hit);
+    return hit.value;
+  }
   const entry: PullRequestCacheEntry = { at: now, ttl: PR_CACHE_MS, value: Promise.resolve(null) };
-  entry.value = ghPullRequest(repository, branch).then((result) => {
+  entry.value = ghPullRequest(repository, branch, signal).then((result) => {
     if (result.failed) entry.ttl = PR_FAILURE_CACHE_MS;
     return result.value;
   });
+  pullRequestCache.delete(key);
   if (pullRequestCache.size >= PR_CACHE_MAX_ENTRIES) {
     const oldest = pullRequestCache.keys().next().value;
     if (oldest !== undefined) pullRequestCache.delete(oldest);
@@ -276,12 +396,12 @@ function monotonicNow(): number {
   return Number(process.hrtime.bigint() / 1_000_000n);
 }
 
-async function ghPullRequest(repository: string, branch: string): Promise<{ value: PullRequestRef | null; failed: boolean }> {
+async function ghPullRequest(repository: string, branch: string, signal?: AbortSignal): Promise<{ value: PullRequestRef | null; failed: boolean }> {
   try {
-    const { stdout } = await execFileAsync(
-      (await ghBinary()) ?? "gh",
+    const { stdout } = await runGh(
+      repository,
       ["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isCrossRepository", "--limit", "5"],
-      { cwd: repository, timeout: GH_TIMEOUT_MS, encoding: "utf8", env: { ...process.env, GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1" } },
+      { timeoutMs: GH_TIMEOUT_MS, ...(signal ? { signal } : {}) },
     );
     const parsed: unknown = JSON.parse(stdout);
     if (!Array.isArray(parsed)) return { value: null, failed: true };
@@ -339,15 +459,18 @@ export async function findDefaultBranch(mainWorktreePath: string): Promise<strin
 
 // Local branches, default branch first, alphabetical after; capped so a
 // repository with thousands of stale branches does not turn one poll into
-// a megabyte. Empty when git cannot list (a repo with no commits yet).
-async function listBranches(repository: string, defaultBranch: string | null): Promise<string[]> {
+// a megabyte, and said so when cut. Empty when git cannot list (a repo
+// with no commits yet).
+async function listBranches(repository: string, defaultBranch: string | null): Promise<{ names: string[]; truncated: boolean }> {
   try {
     const { stdout } = await git(repository, ["for-each-ref", "--format=%(refname:short)", "--sort=refname", "refs/heads/"]);
     const names = stdout.split("\n").filter((name) => name.length > 0);
-    const rest = names.filter((name) => name !== defaultBranch).slice(0, MAX_BRANCHES);
-    return defaultBranch && names.includes(defaultBranch) ? [defaultBranch, ...rest] : rest;
+    const others = names.filter((name) => name !== defaultBranch);
+    const rest = others.slice(0, MAX_BRANCHES);
+    const withDefault = defaultBranch && names.includes(defaultBranch) ? [defaultBranch, ...rest] : rest;
+    return { names: withDefault, truncated: others.length > rest.length };
   } catch {
-    return [];
+    return { names: [], truncated: false };
   }
 }
 
@@ -360,15 +483,32 @@ export async function refExists(repository: string, ref: string): Promise<boolea
   }
 }
 
-async function aheadBehind(repository: string, branch: string | null, defaultBranch: string | null): Promise<[number, number]> {
-  if (!branch || !defaultBranch || branch === defaultBranch) return [0, 0];
+// Commits `left` has that `right` does not, and the reverse — the one
+// ahead/behind helper (#83; source-control.ts and pull-requests.ts share
+// it). 0/0 when either side is missing or they are the same ref, and when
+// a side does not resolve (a remote-only default with no local copy).
+export async function aheadBehind(repository: string, left: string | null, right: string | null): Promise<[number, number]> {
+  if (!left || !right || left === right) return [0, 0];
   try {
-    const { stdout } = await git(repository, ["rev-list", "--left-right", "--count", `${branch}...${defaultBranch}`]);
+    const { stdout } = await git(repository, ["rev-list", "--left-right", "--count", `${left}...${right}`]);
     const [ahead, behind] = stdout.trim().split(/\s+/).map((value) => Number.parseInt(value, 10) || 0);
     return [ahead ?? 0, behind ?? 0];
   } catch {
-    // The default branch may not exist as a ref reachable from here (e.g.
-    // a remote-only default with no local copy yet).
     return [0, 0];
   }
+}
+
+// `map` with at most `limit` calls in flight, results in input order.
+async function mapPool<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await fn(items[index] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }

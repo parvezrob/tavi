@@ -4,6 +4,7 @@ import { listChanges } from "./changes.js";
 import { describeGitError, git } from "./git-exec.js";
 import { findDefaultBranch, parseWorktreeList, refExists } from "./git.js";
 import { isWithinRoots } from "./projects.js";
+import { leftoverName } from "./removal-sweep.js";
 import { baseBranch, currentBranch, pushBranch, upstreamInfo } from "./source-control.js";
 import type { HerdrAgentInfo } from "./types.js";
 
@@ -182,7 +183,7 @@ async function resolveRepository(candidate: string): Promise<RepositoryResolutio
     return { ok: false, status: 404, error: "That folder does not exist on this computer." };
   }
   try {
-    const { stdout } = await git(real, ["worktree", "list", "--porcelain"]);
+    const { stdout } = await git(real, ["worktree", "list", "--porcelain", "-z"]);
     const main = parseWorktreeList(stdout).find((worktree) => worktree.isMain);
     if (!main) return { ok: false, status: 404, error: "That folder is not inside a git repository." };
     return { ok: true, main: await fs.realpath(main.path) };
@@ -244,6 +245,9 @@ export interface RemovalAgent {
   tabId: string;
   kind: string;
   status: string;
+  // Where the agent works — named for the ones removal takes down
+  // *outside* the worktree (`alsoClosed`), so the preview can say which.
+  cwd?: string;
 }
 
 export interface RemovalPreview {
@@ -257,6 +261,10 @@ export interface RemovalPreview {
   uncommitted: { files: number; additions: number; deletions: number };
   unpushed: { commits: number; upstream: string | null; remote: string | null };
   agents: RemovalAgent[];
+  // Agents *outside* the worktree that go with it anyway: herdr closes
+  // whole tabs, so a tab holding an agent inside the worktree and one
+  // elsewhere loses both (#83). The preview says so before anyone taps.
+  alsoClosed: RemovalAgent[];
   // The branch's commits are all reachable from its base.
   branchMerged: boolean;
 }
@@ -315,7 +323,7 @@ export async function previewRemoval(worktreePath: string, deps: RemovalDeps = {
     remote = null;
   }
   const branchMerged = branch && base && branch !== base ? await isAncestor(worktreePath, branch, base) : false;
-  const agents = await agentsInside(worktreePath, deps);
+  const { inside: agents, alsoClosed } = await agentsInside(worktreePath, deps);
   return {
     ok: true,
     preview: {
@@ -328,6 +336,7 @@ export async function previewRemoval(worktreePath: string, deps: RemovalDeps = {
       uncommitted,
       unpushed: { commits, upstream: upstream?.name ?? null, remote },
       agents,
+      alsoClosed,
       branchMerged,
     },
   };
@@ -422,7 +431,7 @@ export async function removeWorktree(worktreePath: string, request: RemoveWorktr
     }
   }
 
-  const aside = `${worktreePath}.removing-${Date.now().toString(36)}`;
+  const aside = leftoverName(worktreePath);
   try {
     await fs.rename(worktreePath, aside);
   } catch (error) {
@@ -439,7 +448,9 @@ export async function removeWorktree(worktreePath: string, request: RemoveWorktr
   const deletion = fs.rm(aside, { recursive: true, force: true }).then(
     () => undefined,
     (error: unknown) => {
-      console.error(`tavi: could not delete ${aside} after removing the worktree: ${error instanceof Error ? error.message : String(error)}`);
+      // Said on the log now; retried by the hourly sweep and named by
+      // `tavi doctor` until it goes (#82).
+      console.error(`tavi: could not delete ${aside} after removing the worktree (it will be retried; tavi doctor lists it): ${error instanceof Error ? error.message : String(error)}`);
     },
   );
   pendingDeletes.add(deletion);
@@ -496,7 +507,7 @@ type Located = { ok: true; main: string; isMain: boolean; locked: boolean } | { 
 async function locateWorktree(worktreePath: string): Promise<Located> {
   let listed: ReturnType<typeof parseWorktreeList>;
   try {
-    listed = parseWorktreeList((await git(worktreePath, ["worktree", "list", "--porcelain"])).stdout);
+    listed = parseWorktreeList((await git(worktreePath, ["worktree", "list", "--porcelain", "-z"])).stdout);
   } catch (error) {
     if (/not a git repository/i.test(describeGitError(error))) return { ok: false, status: 404, error: "That folder is not inside a git repository." };
     return { ok: false, status: 503, error: `git could not read that worktree: ${describeGitError(error)}` };
@@ -528,15 +539,17 @@ async function isAncestor(cwd: string, branch: string, base: string): Promise<bo
   }
 }
 
-async function agentsInside(worktreePath: string, deps: RemovalDeps): Promise<RemovalAgent[]> {
-  if (!deps.agents) return [];
+async function agentsInside(worktreePath: string, deps: RemovalDeps): Promise<{ inside: RemovalAgent[]; alsoClosed: RemovalAgent[] }> {
+  const none = { inside: [], alsoClosed: [] };
+  if (!deps.agents) return none;
   let agents: HerdrAgentInfo[];
   try {
     agents = await deps.agents();
   } catch {
-    return [];
+    return none;
   }
   const inside: RemovalAgent[] = [];
+  const outside: RemovalAgent[] = [];
   for (const agent of agents) {
     if (!agent.cwd) continue;
     let real = agent.cwd;
@@ -546,9 +559,14 @@ async function agentsInside(worktreePath: string, deps: RemovalDeps): Promise<Re
       // A cwd that no longer exists cannot be inside the worktree.
       continue;
     }
-    if (isWithinRoots(real, [worktreePath])) inside.push({ paneId: agent.id, tabId: agent.tabId, kind: agent.agent, status: agent.status });
+    const entry = { paneId: agent.id, tabId: agent.tabId, kind: agent.agent, status: agent.status };
+    if (isWithinRoots(real, [worktreePath])) inside.push(entry);
+    else outside.push({ ...entry, cwd: agent.cwd });
   }
-  return inside;
+  // herdr closes tabs, not panes: whatever else shares a tab with an
+  // agent inside the worktree goes down with it.
+  const tabs = new Set(inside.map((agent) => agent.tabId).filter(Boolean));
+  return { inside, alsoClosed: outside.filter((agent) => tabs.has(agent.tabId)) };
 }
 
 function countWords(count: number, noun: string): string {

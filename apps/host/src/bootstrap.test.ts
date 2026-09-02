@@ -165,6 +165,20 @@ test("doctor reports every check green on a configured machine", async () => {
   assert.match(formatChecks(checks), /✓ Tailscale {8}connected as studio.tail1234.ts.net/);
 });
 
+test("doctor names the folders removed worktrees left behind, with the command that clears them (#82)", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "tavi-doctor-leftover-"));
+  const leftover = path.join(root, "app-worktrees", "fix-foo.removing-k1x");
+  mkdirSync(leftover, { recursive: true });
+  const { deps } = createDeps({ ...READY, serveProxies: [...READY.serveProxies] });
+  const checks = await diagnose({ ...config, roots: [root] }, deps);
+  const check = checks.find((entry) => entry.name === "Removed worktrees");
+  assert.equal(check?.ok, false);
+  assert.equal(check?.optional, true);
+  assert.match(check?.detail ?? "", /1 folder left by removed worktrees could not be deleted/);
+  assert.equal(check?.fix, `rm -rf '${leftover}'`);
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("doctor on Linux reads the systemd unit state", async () => {
   const { deps } = createDeps({ ...READY, os: "linux", serveProxies: [...READY.serveProxies] });
   const checks = await diagnose(config, deps);

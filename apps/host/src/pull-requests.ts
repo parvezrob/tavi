@@ -1,6 +1,7 @@
 import { describeGitError, git } from "./git-exec.js";
 import { describeGhFailure, runGh, type GhRunner } from "./gh.js";
-import { aheadBehind, baseBranch, currentBranch, pushBranch, pushRemote, upstreamInfo } from "./source-control.js";
+import { aheadBehind } from "./git.js";
+import { baseBranch, currentBranch, pushBranch, pushRemote, upstreamInfo } from "./source-control.js";
 
 // Source Control — Pull request (#79, #73 part 5; PRD §7.12): one
 // worktree's pull request, created and read through the person's own `gh`

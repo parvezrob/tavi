@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -192,12 +192,69 @@ test("push refuses in words with no remote, and when the remote moved on", async
   }
 });
 
+test("pull-base fetches the base's upstream first: a commit pushed elsewhere comes in, and the local base moves up when nothing stands on it (#83)", async () => {
+  const { dir, remote } = branched();
+  // Someone else pushes to main from another clone.
+  const other = path.join(path.dirname(dir), "other");
+  git(path.dirname(dir), "clone", "-q", remote, "other");
+  // The bare remote's HEAD names a branch nobody pushed; stand on main.
+  git(other, "checkout", "-q", "main");
+  writeFileSync(path.join(other, "remote.txt"), "from elsewhere\n");
+  git(other, "add", "remote.txt");
+  git(other, "commit", "-q", "-m", "chore: pushed elsewhere");
+  git(other, "push", "-q", "origin", "main");
+  // The local main tracks origin/main (as a clone's would) but has its own
+  // commit too — diverged — so it is merged as it stands.
+  git(dir, "branch", "--set-upstream-to=origin/main", "main");
+  const diverged = await pullBase(dir);
+  assert.ok(diverged.ok, JSON.stringify(diverged));
+  assert.equal(diverged.fetched, true);
+  assert.equal(diverged.from, "main");
+  assert.equal(diverged.merged, 1);
+  assert.equal(existsSync(path.join(dir, "remote.txt")), false);
+
+  // Local main made the remote's (force-pushed, level); the remote moves again.
+  git(dir, "push", "-q", "--force", "origin", "main");
+  git(other, "fetch", "-q", "origin");
+  git(other, "reset", "-q", "--hard", "origin/main");
+  writeFileSync(path.join(other, "again.txt"), "again\n");
+  git(other, "add", "again.txt");
+  git(other, "commit", "-q", "-m", "chore: pushed again");
+  git(other, "push", "-q", "origin", "main");
+  // Nothing stands on main here (the checkout is on feat/x), so the fetch
+  // fast-forwards local main and that is what gets merged.
+  const behind = await pullBase(dir);
+  assert.ok(behind.ok, JSON.stringify(behind));
+  assert.equal(behind.fetched, true);
+  assert.equal(behind.from, "main");
+  assert.ok(behind.merged >= 1);
+  assert.equal(existsSync(path.join(dir, "again.txt")), true);
+  assert.equal(git(dir, "rev-parse", "main").trim(), git(dir, "rev-parse", "origin/main").trim());
+
+  // With main checked out in a second worktree, `branch -f` is refused and
+  // the fresh remote-tracking ref is merged instead.
+  const mainCheckout = path.join(path.dirname(dir), "main-checkout");
+  git(dir, "worktree", "add", "-q", mainCheckout, "main");
+  writeFileSync(path.join(other, "third.txt"), "third\n");
+  git(other, "add", "third.txt");
+  git(other, "commit", "-q", "-m", "chore: third");
+  git(other, "push", "-q", "origin", "main");
+  const tracking = await pullBase(dir);
+  assert.ok(tracking.ok, JSON.stringify(tracking));
+  assert.equal(tracking.from, "origin/main");
+  assert.equal(tracking.merged, 1);
+  assert.equal(existsSync(path.join(dir, "third.txt")), true);
+});
+
 test("pull-base merges the base in, reports nothing to do when level, and aborts a conflict with the file named", async () => {
   const { dir } = branched();
   const merged = await pullBase(dir);
   assert.ok(merged.ok, JSON.stringify(merged));
   assert.equal(merged.merged, 1);
   assert.equal(merged.fastForward, false);
+  // No upstream on main: nothing to fetch, and the answer says so.
+  assert.equal(merged.fetched, false);
+  assert.equal(merged.from, "main");
   assert.equal(git(dir, "rev-list", "--count", "feat/x..main").trim(), "0");
   assert.equal(git(dir, "status", "--porcelain").trim(), "");
 

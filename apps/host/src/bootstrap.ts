@@ -12,6 +12,7 @@ import { LINUX_UNIT } from "./service-linux.js";
 import { installHerdrService } from "./herdr-service.js";
 import { isManagedRuntime, packageRootFor, runtimeLayout, switchCurrent, versionPrefix, writeLauncher } from "./runtime.js";
 import { HerdrService } from "./herdr.js";
+import { listRemovalLeftovers } from "./removal-sweep.js";
 
 // `tavi pair` on a fresh Mac (#47): everything a tester would otherwise do by
 // hand — install the service, expose it through Tailscale Serve, notice a
@@ -168,6 +169,24 @@ export async function diagnose(config: HostConfig, deps: BootstrapDeps): Promise
     await checkService(config, deps),
     await checkHerdr(deps),
     ...(await checkCommand(deps)),
+    ...(await checkRemovalLeftovers(config)),
+  ];
+}
+
+// Folders removed worktrees left behind that the host could not delete
+// (#82): named, with the command, only when there are any.
+export async function checkRemovalLeftovers(config: Pick<HostConfig, "roots">): Promise<Check[]> {
+  const leftovers = await listRemovalLeftovers(config.roots);
+  if (leftovers.length === 0) return [];
+  const quoted = leftovers.map((folder) => `'${folder.replaceAll("'", "'\\''")}'`).join(" ");
+  return [
+    {
+      name: "Removed worktrees",
+      ok: false,
+      optional: true,
+      detail: `${leftovers.length} folder${leftovers.length === 1 ? "" : "s"} left by removed worktrees could not be deleted: ${leftovers.join(", ")}`,
+      fix: `rm -rf ${quoted}`,
+    },
   ];
 }
 

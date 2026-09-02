@@ -500,8 +500,8 @@ async function routeRequest(
   // reachable from the configured roots, with every worktree git itself
   // knows about — "where is my work happening" in one call.
   if (url.pathname === "/api/repos" && request.method === "GET") {
-    const repos = await listReposCached(config.roots, pullRequests ? { pullRequests } : {}, url.searchParams.get("fresh") === "1");
-    sendJson(response, 200, { repos });
+    const answer = await listReposCached(config.roots, pullRequests ? { pullRequests } : {}, url.searchParams.get("fresh") === "1");
+    sendJson(response, 200, { repos: answer.repos, truncated: answer.truncated, ...(answer.error ? { error: answer.error } : {}) });
     return;
   }
 

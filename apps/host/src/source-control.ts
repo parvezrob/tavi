@@ -3,7 +3,7 @@ import path from "node:path";
 import { listChanges, type ChangedFile } from "./changes.js";
 import { looksLikeASecret } from "./files.js";
 import { describeGitError, git } from "./git-exec.js";
-import { findDefaultBranch, refExists } from "./git.js";
+import { aheadBehind, findDefaultBranch, refExists } from "./git.js";
 
 // Source Control — Changes (#77, #73 part 3; PRD §7.12): one worktree's
 // changed files, staging, and committing, from the phone. The first git
@@ -359,11 +359,19 @@ function upstreamBranch(upstreamName: string, remote: string): string {
 }
 
 export type PullBaseResult =
-  | { ok: true; merged: number; fastForward: boolean; sha: string }
+  | { ok: true; merged: number; fastForward: boolean; sha: string; fetched: boolean; from: string }
   | { ok: false; status: 409 | 503; error: string };
 
-// Merges the (local) base branch into the worktree with a merge commit or a
-// fast-forward. A conflict is aborted before anyone sees it, and named.
+const FETCH_TIMEOUT_MS = 15_000;
+
+// Merges the base branch into the worktree with a merge commit or a
+// fast-forward. The base's upstream is fetched first, so "pull main in"
+// means today's main, not the last fetch's (#83): the local base is moved
+// up when it can be (behind its upstream and not checked out anywhere),
+// else the fresh remote-tracking ref is what gets merged; when the fetch
+// cannot happen (no upstream, offline, too slow) the local base is merged
+// as it stands and `fetched` says so. A conflict is aborted before anyone
+// sees it, and named.
 export async function pullBase(worktreePath: string): Promise<PullBaseResult> {
   let branch: string | null;
   try {
@@ -374,13 +382,15 @@ export async function pullBase(worktreePath: string): Promise<PullBaseResult> {
   if (!branch) return { ok: false, status: 409, error: "This worktree is not on a branch, so there is nothing to merge into." };
   const base = await baseBranch(worktreePath, branch);
   if (!base || base === branch) return { ok: false, status: 409, error: "This branch has no base branch to pull in." };
-  const [, behind] = await aheadBehind(worktreePath, branch, base);
+  const refreshed = await refreshBase(worktreePath, base);
+  const from = refreshed.ref;
+  const [, behind] = await aheadBehind(worktreePath, branch, from);
   if (behind === 0) {
     const sha = await headSha(worktreePath);
-    return { ok: true, merged: 0, fastForward: false, sha };
+    return { ok: true, merged: 0, fastForward: false, sha, fetched: refreshed.fetched, from };
   }
   try {
-    await git(worktreePath, ["merge", "--quiet", "--no-edit", "--no-stat", base], undefined, [0], 30_000);
+    await git(worktreePath, ["merge", "--quiet", "--no-edit", "--no-stat", from], undefined, [0], 30_000);
   } catch (error) {
     const reason = describeGitError(error);
     if (/would be overwritten|uncommitted changes|unmerged files|not possible because you have/i.test(reason)) {
@@ -412,7 +422,44 @@ export async function pullBase(worktreePath: string): Promise<PullBaseResult> {
   } catch {
     // Reported as a merge; the count is what matters.
   }
-  return { ok: true, merged: behind, fastForward, sha };
+  return { ok: true, merged: behind, fastForward, sha, fetched: refreshed.fetched, from };
+}
+
+// The freshest ref for the base: its upstream fetched (best effort, one
+// short budget, never a prompt), then the local branch fast-forwarded to
+// it when git allows — `branch -f` refuses a branch checked out in any
+// worktree, and the main checkout usually stands on the base — else the
+// remote-tracking ref itself when the local base is merely behind it. A
+// local base that has moved on its own (diverged) is the person's, and it
+// is what gets merged.
+async function refreshBase(worktreePath: string, base: string): Promise<{ ref: string; fetched: boolean }> {
+  let upstream: string | null = null;
+  try {
+    upstream = (await git(worktreePath, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${base}@{upstream}`])).stdout.trim() || null;
+  } catch {
+    upstream = null;
+  }
+  if (!upstream) return { ref: base, fetched: false };
+  const remote = upstream.split("/")[0] ?? "";
+  const remoteBranch = upstream.slice(remote.length + 1);
+  if (!remote || !remoteBranch) return { ref: base, fetched: false };
+  try {
+    await git(worktreePath, ["fetch", "--quiet", remote, remoteBranch], undefined, [0], FETCH_TIMEOUT_MS);
+  } catch {
+    return { ref: base, fetched: false };
+  }
+  try {
+    await git(worktreePath, ["merge-base", "--is-ancestor", base, upstream]);
+  } catch {
+    // Diverged, or something did not resolve: the local base stands.
+    return { ref: base, fetched: true };
+  }
+  try {
+    await git(worktreePath, ["branch", "-f", base, upstream]);
+    return { ref: base, fetched: true };
+  } catch {
+    return { ref: upstream, fetched: true };
+  }
 }
 
 async function mergeInProgress(worktreePath: string): Promise<boolean> {
@@ -506,17 +553,6 @@ export async function baseBranch(worktreePath: string, branch: string | null): P
   }
   const fallback = await findDefaultBranch(worktreePath);
   return fallback;
-}
-
-export async function aheadBehind(worktreePath: string, branch: string | null, base: string | null): Promise<[number, number]> {
-  if (!branch || !base || branch === base) return [0, 0];
-  try {
-    const { stdout } = await git(worktreePath, ["rev-list", "--left-right", "--count", `${branch}...${base}`]);
-    const [ahead, behind] = stdout.trim().split(/\s+/).map((value) => Number.parseInt(value, 10) || 0);
-    return [ahead ?? 0, behind ?? 0];
-  } catch {
-    return [0, 0];
-  }
 }
 
 function normalizeRelative(file: string): string | null {

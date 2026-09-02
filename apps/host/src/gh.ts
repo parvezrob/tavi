@@ -10,7 +10,14 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-export type GhRunner = (cwd: string, args: string[]) => Promise<{ stdout: string }>;
+export interface GhRunOptions {
+  // The card badge (git.ts) asks with a short budget; writes keep the
+  // default. A signal that fires kills the child.
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+export type GhRunner = (cwd: string, args: string[], options?: GhRunOptions) => Promise<{ stdout: string }>;
 
 const GH_TIMEOUT_MS = 20_000;
 const RESOLVE_RETRY_MS = 30_000;
@@ -41,11 +48,13 @@ export function ghBinary(): Promise<string | null> {
   return resolved;
 }
 
-export async function runGh(cwd: string, args: string[]): Promise<{ stdout: string }> {
+export async function runGh(cwd: string, args: string[], options: GhRunOptions = {}): Promise<{ stdout: string }> {
   const binary = (await ghBinary()) ?? "gh";
+  if (options.signal?.aborted) throw new Error("gh was not started: the budget had already run out");
   const { stdout } = await execFileAsync(binary, args, {
     cwd,
-    timeout: GH_TIMEOUT_MS,
+    timeout: options.timeoutMs ?? GH_TIMEOUT_MS,
+    ...(options.signal ? { signal: options.signal } : {}),
     encoding: "utf8",
     maxBuffer: 4 * 1024 * 1024,
     env: { ...process.env, GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", NO_COLOR: "1", GH_PAGER: "cat" },

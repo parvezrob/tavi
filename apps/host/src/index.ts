@@ -17,6 +17,7 @@ import { HerdrEventFeed } from "./herdr-events.js";
 import { installService, uninstallService } from "./service.js";
 import { isManagedRuntime, runtimeLayout } from "./runtime.js";
 import { defaultUpdaterDeps, markStarted, startUpdater, type UpdateOutcome } from "./updater.js";
+import { describeSweep, SWEEP_INTERVAL_MS, sweepRemovalLeftovers } from "./removal-sweep.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -293,6 +294,17 @@ server.listen(config.port, config.bindHost, () => {
   console.log(`Tavi ${VERSION} is running on http://${config.bindHost}:${config.port}`);
   console.log(`Machine: ${config.machineName}`);
   console.log("Run `tavi pair` to pair a phone.");
+  // Folders removed worktrees left behind (#82): retried now and hourly,
+  // each outcome one line on the log.
+  const sweep = (): void => {
+    void sweepRemovalLeftovers(config.roots)
+      .then((report) => {
+        for (const line of describeSweep(report)) console.error(line);
+      })
+      .catch(() => undefined);
+  };
+  sweep();
+  setInterval(sweep, SWEEP_INTERVAL_MS).unref();
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
