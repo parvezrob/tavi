@@ -202,11 +202,17 @@ export type LogResult = { ok: true; log: WorktreeLog } | { ok: false; status: 40
 
 const MAX_LOG_COMMITS = 100;
 
+// The checked-out branch, or null on a detached HEAD. Throws when the path
+// is not a worktree git can read.
+export async function currentBranch(worktreePath: string): Promise<string | null> {
+  const { stdout } = await git(worktreePath, ["symbolic-ref", "--quiet", "--short", "HEAD"], undefined, [0, 1]);
+  return stdout.trim() || null;
+}
+
 export async function worktreeLog(worktreePath: string): Promise<LogResult> {
   let branch: string | null;
   try {
-    const { stdout } = await git(worktreePath, ["symbolic-ref", "--quiet", "--short", "HEAD"], undefined, [0, 1]);
-    branch = stdout.trim() || null;
+    branch = await currentBranch(worktreePath);
   } catch (error) {
     return { ok: false, status: 503, error: `git could not read that worktree: ${describeGitError(error)}` };
   }
@@ -246,7 +252,7 @@ async function readLog(worktreePath: string, range: string): Promise<{ commits: 
   }
 }
 
-async function upstreamInfo(worktreePath: string, branch: string): Promise<UpstreamInfo | null> {
+export async function upstreamInfo(worktreePath: string, branch: string): Promise<UpstreamInfo | null> {
   try {
     const name = (await git(worktreePath, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${branch}@{upstream}`])).stdout.trim();
     if (!name) return null;
@@ -261,7 +267,7 @@ async function upstreamInfo(worktreePath: string, branch: string): Promise<Upstr
 
 // `branch.<b>.pushRemote` → `remote.pushDefault` → `origin` → the only
 // remote there is. null when the repository has none.
-async function pushRemote(worktreePath: string, branch: string): Promise<string | null> {
+export async function pushRemote(worktreePath: string, branch: string): Promise<string | null> {
   let remotes: string[];
   try {
     remotes = (await git(worktreePath, ["remote"])).stdout.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -446,7 +452,7 @@ async function stagedPaths(worktreePath: string): Promise<string[]> {
   }
 }
 
-async function baseBranch(worktreePath: string, branch: string | null): Promise<string | null> {
+export async function baseBranch(worktreePath: string, branch: string | null): Promise<string | null> {
   if (branch) {
     try {
       const configured = (await git(worktreePath, ["config", "--get", `branch.${branch}.base`])).stdout.trim();
@@ -459,7 +465,7 @@ async function baseBranch(worktreePath: string, branch: string | null): Promise<
   return fallback && fallback !== branch ? fallback : fallback;
 }
 
-async function aheadBehind(worktreePath: string, branch: string | null, base: string | null): Promise<[number, number]> {
+export async function aheadBehind(worktreePath: string, branch: string | null, base: string | null): Promise<[number, number]> {
   if (!branch || !base || branch === base) return [0, 0];
   try {
     const { stdout } = await git(worktreePath, ["rev-list", "--left-right", "--count", `${branch}...${base}`]);

@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
+import { ghBinary } from "./gh.js";
 import { describeGitError, git } from "./git-exec.js";
 import { scanWorkspaces } from "./workspaces.js";
 
@@ -233,7 +234,7 @@ function monotonicNow(): number {
 async function ghPullRequest(repository: string, branch: string): Promise<{ value: PullRequestRef | null; failed: boolean }> {
   try {
     const { stdout } = await execFileAsync(
-      "gh",
+      (await ghBinary()) ?? "gh",
       ["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isCrossRepository", "--limit", "5"],
       { cwd: repository, timeout: GH_TIMEOUT_MS, encoding: "utf8", env: { ...process.env, GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1" } },
     );

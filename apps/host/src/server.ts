@@ -34,6 +34,8 @@ import { scanWorkspaces } from "./workspaces.js";
 import { diffFile, listChanges } from "./changes.js";
 import { listRepos, type PullRequestLookup } from "./git.js";
 import { createWorktree } from "./worktrees.js";
+import { configureGh, type GhRunner } from "./gh.js";
+import { createPullRequest, linkPullRequest, listIssues, pullRequestStatus } from "./pull-requests.js";
 import { commitStaged, pullBase, pushBranch, stageFiles, worktreeLog, worktreeStatus, writeCommitMessage } from "./source-control.js";
 import { MAX_RAW_BYTES, listDirectory, readTextContent, resolveWithinRoots, statFile } from "./files.js";
 import { PreviewRegistry, TICKET_COOKIE, defaultDiscoveryDeps, listProjectServers, stopProjectServer, validPort, type DiscoveryDeps } from "./preview.js";
@@ -64,6 +66,9 @@ export interface TaviServerOptions {
   // The pull-request lookup behind /api/repos; injectable so tests never
   // run the developer's gh (#74 review).
   pullRequests?: PullRequestLookup;
+  // The `gh` runner behind the pull-request routes (#79); injectable for
+  // the same reason. The default finds gh on the login-shell PATH.
+  gh?: GhRunner;
   pairing?: PairingSessions;
   spawnTerminal?: typeof pty.spawn;
   /** Checks npm for a newer host and applies it (the managed runtime's self-update). */
@@ -109,7 +114,9 @@ export async function createTaviServer(options: TaviServerOptions) {
     doorReady = async () => false,
     discovery,
     pullRequests,
+    gh,
   } = options;
+  configureGh(config.shell);
   previews.start();
   const eventsWss = new WebSocketServer({
     noServer: true,
@@ -167,6 +174,7 @@ export async function createTaviServer(options: TaviServerOptions) {
         doorReady,
         discovery,
         pullRequests,
+        gh,
       });
     } catch (error) {
       const status = error instanceof InputError ? 400 : 500;
@@ -345,6 +353,7 @@ interface RouteContext {
   doorReady: () => Promise<boolean>;
   discovery?: (DiscoveryDeps & { kill?: (pid: number) => void }) | undefined;
   pullRequests?: PullRequestLookup | undefined;
+  gh?: GhRunner | undefined;
 }
 
 async function routeRequest(
@@ -352,7 +361,8 @@ async function routeRequest(
   response: ServerResponse,
   context: RouteContext,
 ): Promise<void> {
-  const { config, herdr, listWorkspaces, attention, projects, agentKinds, devices, pairing, authorized, update, previews, doorReady, discovery, pullRequests } = context;
+  const { config, herdr, listWorkspaces, attention, projects, agentKinds, devices, pairing, authorized, update, previews, doorReady, discovery, pullRequests, gh } = context;
+  const ghDeps = gh ? { gh } : {};
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
   if (url.pathname === "/api/health" && request.method === "GET") {
@@ -520,6 +530,58 @@ async function routeRequest(
       return;
     }
     sendJson(response, 200, result.status);
+    return;
+  }
+
+  // Open issues for naming a branch (#79): the create sheet's "From a
+  // GitHub issue". `repo` is any folder inside the repository.
+  if (url.pathname === "/api/repos/issues" && request.method === "GET") {
+    const target = await resolveWithinRoots(url.searchParams.get("repo") ?? "", "/", config.roots);
+    if (!target.ok) {
+      sendJson(response, target.status, { error: target.error, ...(target.outsideRoots ? { outsideRoots: true } : {}) });
+      return;
+    }
+    const result = await listIssues(target.path, ghDeps);
+    sendJson(response, 200, { issues: result.issues, gh: result.gh });
+    return;
+  }
+
+  // Source Control — Pull request (#79, #73 part 5): read, create (pushing
+  // first), or link the branch's pull request through the person's own gh.
+  if (url.pathname === "/api/worktrees/pull-request" && request.method === "GET") {
+    const target = await resolveWithinRoots(url.searchParams.get("path") ?? "", "/", config.roots);
+    if (!target.ok) {
+      sendJson(response, target.status, { error: target.error, ...(target.outsideRoots ? { outsideRoots: true } : {}) });
+      return;
+    }
+    const result = await pullRequestStatus(target.path, ghDeps);
+    sendJson(response, result.ok ? 200 : result.status, result.ok ? result.status : { error: result.error });
+    return;
+  }
+  const pullRequestWrite = url.pathname.match(/^\/api\/worktrees\/pull-request(\/link)?$/);
+  if (pullRequestWrite && request.method === "POST") {
+    const body = await readJsonBody(request);
+    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const target = await resolveWithinRoots(typeof record.path === "string" ? record.path : "", "/", config.roots);
+    if (!target.ok) {
+      sendJson(response, target.status, { error: target.error, ...(target.outsideRoots ? { outsideRoots: true } : {}) });
+      return;
+    }
+    if (pullRequestWrite[1]) {
+      const result = await linkPullRequest(target.path, { number: record.number, url: record.url }, ghDeps);
+      sendJson(response, result.ok ? 200 : result.status, result.ok ? { pullRequest: result.pullRequest } : { error: result.error });
+      return;
+    }
+    const result = await createPullRequest(
+      target.path,
+      {
+        title: typeof record.title === "string" ? record.title : undefined,
+        body: typeof record.body === "string" ? record.body : undefined,
+        draft: record.draft === true,
+      },
+      ghDeps,
+    );
+    sendJson(response, result.ok ? 201 : result.status, result.ok ? { pullRequest: result.pullRequest, pushed: result.pushed } : { error: result.error });
     return;
   }
 
