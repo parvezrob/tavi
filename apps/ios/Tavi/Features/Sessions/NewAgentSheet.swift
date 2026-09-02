@@ -33,6 +33,7 @@ struct NewAgentSheet: View {
     // sheet creates first. Worktree mode needs a repository (pre-filled
     // when opened from a card's "New worktree" row), a base, and a branch.
     @State private var whereMode: WhereMode = .folder
+    @State private var whereLocked = false
     @State private var worktreeRepo: RepoInfo?
     @State private var worktreeBase: String?
     @State private var worktreeBranch = ""
@@ -82,6 +83,10 @@ struct NewAgentSheet: View {
         _phase = State(initialValue: hostId == nil ? .chooseComputer : .loading)
         _selectedPath = State(initialValue: startingIn?.path)
         _whereMode = State(initialValue: startingIn == nil ? .folder : startMode)
+        // "Start an agent here" already knows the place: say it as one
+        // row instead of a list with a checkmark buried in it (owner,
+        // 2026-09-03). "Change" brings the list back.
+        _whereLocked = State(initialValue: startingIn != nil && startMode == .folder)
     }
 
     private var canCreate: Bool {
@@ -351,9 +356,36 @@ struct NewAgentSheet: View {
             }
             .listRowBackground(TaviTheme.card)
 
+            if whereLocked, let startingIn {
+                Section {
+                    HStack(spacing: 10) {
+                        Image(systemName: "folder")
+                            .foregroundStyle(TaviTheme.textSecondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(HomeGrouping.projectName(of: startingIn.path))
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(TaviTheme.textPrimary)
+                            Text(startingIn.path)
+                                .font(.caption2)
+                                .foregroundStyle(TaviTheme.textSecondary)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                        }
+                        Spacer(minLength: 8)
+                        Button("Change") { whereLocked = false }
+                            .font(.subheadline)
+                            .accessibilityIdentifier("newAgent.whereChange")
+                    }
+                    .accessibilityIdentifier("newAgent.whereLocked")
+                } header: {
+                    Text("Where")
+                }
+                .listRowBackground(TaviTheme.card)
+            }
+
             // Where (#75): an existing folder, or a worktree made first.
             // Only offered when the host reported a repository to make it in.
-            if !repos.isEmpty {
+            if !repos.isEmpty, !whereLocked {
                 Section {
                     Picker("Where", selection: $whereMode) {
                         ForEach(WhereMode.allCases) { mode in
@@ -369,11 +401,11 @@ struct NewAgentSheet: View {
                 .listRowBackground(TaviTheme.card)
             }
 
-            if whereMode == .worktree {
+            if whereMode == .worktree, !whereLocked {
                 worktreeSections(catalog)
             }
 
-            if whereMode == .folder, !sections.recent.isEmpty {
+            if whereMode == .folder, !whereLocked, !sections.recent.isEmpty {
                 Section("Recent") {
                     ForEach(sections.recent) { folder in
                         folderRow(
@@ -387,7 +419,7 @@ struct NewAgentSheet: View {
                 .listRowBackground(TaviTheme.card)
             }
 
-            if whereMode == .folder, !sections.projects.isEmpty {
+            if whereMode == .folder, !whereLocked, !sections.projects.isEmpty {
                 Section("Projects") {
                     ForEach(sections.projects) { workspace in
                         folderRow(
@@ -401,7 +433,7 @@ struct NewAgentSheet: View {
                 .listRowBackground(TaviTheme.card)
             }
 
-            if whereMode == .folder, sections.isEmpty {
+            if whereMode == .folder, !whereLocked, sections.isEmpty {
                 Section {
                     Text(emptyMessage(for: catalog))
                         .font(.footnote)
@@ -413,7 +445,7 @@ struct NewAgentSheet: View {
 
             // Last, not first (#54): Recent is the common path; the custom
             // field led the sheet visually while serving the rare case.
-            if whereMode == .folder {
+            if whereMode == .folder, !whereLocked {
             Section {
                 TextField("/Users/you/Projects/thing", text: $customPath)
                     .autocorrectionDisabled()
