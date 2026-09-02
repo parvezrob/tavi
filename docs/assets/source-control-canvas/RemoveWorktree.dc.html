@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; background: #0D0D0D; font-family: -apple-system, "SF Pro Text", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #E8A33D; } a:hover { color: #F2B65A; }
+    .mono { font-family: "SF Mono", ui-monospace, Menlo, monospace; }
+  </style>
+</helmet>
+<div style="width: 390px; height: 844px; background: #0D0D0D; color: rgba(255,255,255,0.92); box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-end;">
+
+  <div style="background: #1B1B1B; border-top-left-radius: 14px; border-top-right-radius: 14px; border: 1px solid rgba(255,255,255,0.08); border-bottom: none; overflow: hidden; padding: 10px 16px 34px 16px; display: flex; flex-direction: column; gap: 18px;">
+    <div style="width: 36px; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.25); align-self: center;"></div>
+
+    <div style="display: flex; flex-direction: column; gap: 6px;">
+      <span style="font-size: 17px; font-weight: 600;">Remove theme-improvement?</span>
+      <span style="font-size: 15px; color: rgba(255,255,255,0.55); line-height: 1.4;">This worktree has work that exists nowhere else.</span>
+    </div>
+
+    <div style="background: #0A0A0A; border-radius: 8px; overflow: hidden;">
+      <div style="display: flex; align-items: center; gap: 12px; padding: 11px 14px;">
+        <span style="width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.55);"></span>
+        <span style="font-size: 15px; flex: 1;">2 uncommitted changes</span>
+        <span class="mono" style="font-size: 13px; color: rgba(255,255,255,0.55);">+60 −7</span>
+      </div>
+      <div style="height: 1px; background: rgba(255,255,255,0.08); margin-left: 32px;"></div>
+      <div style="display: flex; align-items: center; gap: 12px; padding: 11px 14px;">
+        <span style="width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.55);"></span>
+        <span style="font-size: 15px; flex: 1;">3 commits not pushed</span>
+        <span style="font-size: 13px; color: rgba(255,255,255,0.55);">no remote branch</span>
+      </div>
+      <div style="height: 1px; background: rgba(255,255,255,0.08); margin-left: 32px;"></div>
+      <div style="display: flex; align-items: center; gap: 12px; padding: 11px 14px;">
+        <span style="width: 6px; height: 6px; border-radius: 50%; background: #8CAF8B;"></span>
+        <span style="font-size: 15px; flex: 1; color: rgba(255,255,255,0.55);">Claude Code in this worktree is done</span>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <div style="display: flex; align-items: center; justify-content: center; padding: 13px 18px; border-radius: 999px; background: #E8A33D; color: #141414; font-size: 17px; font-weight: 600;">Push branch, then remove</div>
+      <div style="display: flex; align-items: center; justify-content: center; padding: 13px 18px; border-radius: 999px; background: #0D0D0D; border: 1px solid rgba(255,255,255,0.08); color: #C9766F; font-size: 17px; font-weight: 600;">Discard 2 changes and 3 commits</div>
+      <div style="display: flex; align-items: center; justify-content: center; padding: 13px 18px; color: rgba(255,255,255,0.55); font-size: 17px;">Keep it</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

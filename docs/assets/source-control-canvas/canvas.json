@@ -1,0 +1,26 @@
+{
+  "pages": [
+    { "id": "page-1", "name": "The design — all of this ships" },
+    { "id": "page-2", "name": "Alternatives considered" }
+  ],
+  "artboards": [
+    { "file": "Flow.dc.html", "title": "Customer flow", "x": 0, "y": 0, "w": 2200, "h": 1200, "page": "page-1" },
+    { "file": "Main.dc.html", "title": "1 · Home", "x": 0, "y": 1380, "w": 390, "h": 844, "page": "page-1" },
+    { "file": "CreateWorktree.dc.html", "title": "2 · New worktree", "x": 480, "y": 1380, "w": 390, "h": 844, "page": "page-1" },
+    { "file": "SourceControl.dc.html", "title": "3 · Source Control — Changes", "x": 960, "y": 1380, "w": 390, "h": 844, "page": "page-1" },
+    { "file": "SourceControlPR.dc.html", "title": "3 · Source Control — Pull request", "x": 1440, "y": 1380, "w": 390, "h": 844, "page": "page-1" },
+    { "file": "SourceControlCommits.dc.html", "title": "3 · Source Control — Commits", "x": 1920, "y": 1380, "w": 390, "h": 844, "page": "page-1" },
+    { "file": "RemoveWorktree.dc.html", "title": "4 · Remove", "x": 2400, "y": 1380, "w": 390, "h": 844, "page": "page-1" },
+    { "file": "DirectionA.dc.html", "title": "A · Worktree is the card (not chosen)", "x": 0, "y": 0, "w": 390, "h": 844, "page": "page-2" },
+    { "file": "DirectionC.dc.html", "title": "C · Folder card, branch on the row (not chosen)", "x": 480, "y": 0, "w": 390, "h": 844, "page": "page-2" }
+  ],
+  "annotations": [
+    { "id": "ships", "x": 0, "y": -150, "w": 640, "page": "page-1", "text": "Top: the trip, with the taps drawn. Below: every screen on its own, including Source Control's three tabs.\nThe rules this pass applied: one job per screen; one primary action per screen; no card inside a card; three type sizes (17 / 15 / 13) and the tiny monospace line only for a folder path." },
+    { "id": "home-note", "x": 0, "y": 2260, "w": 390, "page": "page-1", "text": "Home (chosen: B, flattened)\nCard = folder. Worktrees are rows: name left, ↑↓ and uncommitted right, chevron → Source Control. Agents indented under their worktree, unchanged from today. \"New worktree\" is the last row." },
+    { "id": "create-note", "x": 480, "y": 2260, "w": 390, "page": "page-1", "text": "New worktree\nRepository pre-filled from the card. Start from = the repo's default branch, changeable. Branch typed or from a GitHub issue. The sentence says exactly what will happen before it happens; one button." },
+    { "id": "sc-note", "x": 960, "y": 2260, "w": 1350, "page": "page-1", "text": "Source Control — three tabs, one job each (Orca's structure), with what Orca's phone lacks in the header of every tab: the branch's ↑↓ vs main and the agent's status.\nChanges: files with a stage checkbox and +/−; commit box pinned at the bottom with one button and \"Let Claude write it\".\nPull request: empty state says what creating will do (push first), one button, one text link.\nCommits: ahead of main with Push; behind main with Pull main in. The ··· in the header holds Remove." },
+    { "id": "remove-note", "x": 2400, "y": 2260, "w": 390, "page": "page-1", "text": "Remove\nNames what would be lost and whether an agent is still working there. Safe path first; discard spelled out with counts; amber only on the safe action." },
+    { "id": "alts", "x": 0, "y": -170, "w": 560, "page": "page-2", "text": "Considered and not chosen (owner pick 2026-09-02: B, one card per folder).\nA — worktree is the card, branch first: Orca's model; loses the folder grouping, many cards per repo.\nC — today's card with the branch on each agent row: smallest change; git state repeats per agent, a worktree with no agent has nowhere to appear, the line truncates." }
+  ],
+  "launch": { "view": "canvas", "page": "page-1" }
+}

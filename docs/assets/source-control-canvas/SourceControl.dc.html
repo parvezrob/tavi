@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; background: #0D0D0D; font-family: -apple-system, "SF Pro Text", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #E8A33D; } a:hover { color: #F2B65A; }
+    .mono { font-family: "SF Mono", ui-monospace, Menlo, monospace; }
+  </style>
+</helmet>
+<div style="width: 390px; height: 844px; background: #0D0D0D; color: rgba(255,255,255,0.92); box-sizing: border-box; display: flex; flex-direction: column;">
+
+  <div style="display: flex; align-items: center; gap: 14px; padding: 60px 16px 0 16px;">
+    <svg width="12" height="20" viewBox="0 0 12 20" fill="none" stroke="rgba(255,255,255,0.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2L2 10l8 8"/></svg>
+    <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+      <span style="font-size: 17px; font-weight: 600;">theme-improvement</span>
+      <span style="font-size: 13px; color: rgba(255,255,255,0.55);">portfolioai · ↑3 ↓1 vs main</span>
+    </div>
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="rgba(255,255,255,0.92)"><circle cx="4" cy="10" r="1.8"/><circle cx="10" cy="10" r="1.8"/><circle cx="16" cy="10" r="1.8"/></svg>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 8px; padding: 12px 16px 0 42px; font-size: 13px; color: rgba(255,255,255,0.55);">
+    <span style="width: 6px; height: 6px; border-radius: 50%; background: #8CAF8B;"></span>
+    <span>Claude Code · Done · 5 min</span>
+  </div>
+
+  <div style="display: flex; margin-top: 18px; border-bottom: 1px solid rgba(255,255,255,0.08);">
+    <div style="flex: 1; text-align: center; padding: 12px 0; font-size: 15px; font-weight: 600; color: rgba(255,255,255,0.92); border-bottom: 2px solid rgba(255,255,255,0.92); margin-bottom: -1px;">Changes</div>
+    <div style="flex: 1; text-align: center; padding: 12px 0; font-size: 15px; color: rgba(255,255,255,0.55);">Pull request</div>
+    <div style="flex: 1; text-align: center; padding: 12px 0; font-size: 15px; color: rgba(255,255,255,0.55);">Commits</div>
+  </div>
+
+  <div style="display: flex; align-items: baseline; padding: 20px 16px 6px 16px;">
+    <span style="font-size: 12px; font-weight: 600; letter-spacing: 1.1px; text-transform: uppercase; color: rgba(255,255,255,0.55); flex: 1;">2 changed</span>
+    <span style="font-size: 13px; color: rgba(255,255,255,0.55);">Stage all</span>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 14px; padding: 12px 16px;">
+    <div style="width: 22px; height: 22px; border-radius: 6px; background: rgba(255,255,255,0.92); display: flex; align-items: center; justify-content: center;"><svg width="12" height="10" viewBox="0 0 12 10" fill="none" stroke="#141414" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 5l3 3L10.5 1.5"/></svg></div>
+    <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+      <span style="font-size: 15px;">ThemeManager.swift</span>
+      <span style="font-size: 13px; color: rgba(255,255,255,0.55);">Sources/Theme</span>
+    </div>
+    <span class="mono" style="font-size: 13px; color: #8CAF8B;">+42</span>
+    <span class="mono" style="font-size: 13px; color: #C9766F;">−7</span>
+    <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="rgba(255,255,255,0.33)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 1.5L6 6l-4.5 4.5"/></svg>
+  </div>
+  <div style="height: 1px; background: rgba(255,255,255,0.08); margin-left: 52px;"></div>
+  <div style="display: flex; align-items: center; gap: 14px; padding: 12px 16px;">
+    <div style="width: 22px; height: 22px; border-radius: 6px; border: 1.5px solid rgba(255,255,255,0.25);"></div>
+    <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+      <span style="font-size: 15px;">Colors.xcassets</span>
+      <span style="font-size: 13px; color: rgba(255,255,255,0.55);">Resources · new</span>
+    </div>
+    <span class="mono" style="font-size: 13px; color: #8CAF8B;">+18</span>
+    <svg width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="rgba(255,255,255,0.33)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 1.5L6 6l-4.5 4.5"/></svg>
+  </div>
+  <div style="height: 1px; background: rgba(255,255,255,0.08); margin-left: 52px;"></div>
+
+  <div style="flex: 1;"></div>
+
+  <div style="border-top: 1px solid rgba(255,255,255,0.08); padding: 14px 16px 34px 16px; display: flex; flex-direction: column; gap: 12px;">
+    <div style="display: flex; align-items: center; justify-content: space-between; font-size: 15px; background: #1B1B1B; border-radius: 8px; padding: 12px 14px;">
+      <span style="color: rgba(255,255,255,0.92);">feat(theme): dark ramp from graphite tokens</span>
+    </div>
+    <div style="display: flex; align-items: center; justify-content: space-between;">
+      <span style="font-size: 13px; color: rgba(255,255,255,0.55);">Let Claude write it</span>
+      <div style="padding: 11px 18px; border-radius: 999px; background: #E8A33D; color: #141414; font-size: 15px; font-weight: 600;">Commit 1 file</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
