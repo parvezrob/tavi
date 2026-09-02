@@ -333,7 +333,9 @@ final class AgentDirectory {
     // waits out a silent handshake to admit it.
     private static let reconnectPolicy = ReconnectPolicy(
         initialDelay: .seconds(2),
-        maximumDelay: .seconds(30),
+        // Ten, not thirty: a person is looking at this screen, and a link
+        // that comes back should be caught within seconds (#86).
+        maximumDelay: .seconds(10),
         multiplier: 2,
         connectDeadline: .seconds(5)
     )
@@ -471,6 +473,13 @@ final class AgentDirectory {
         guard streamTask == nil, !isRevoked, let host, !credential.isEmpty else { return }
         guard let eventsURL = try? host.eventsURL() else { return }
         isRunning = true
+        // A foreground is a fresh start (#86, owner 2026-09-03 01:10: "the
+        // reconnection took a while" after the phone had been idle): the
+        // dials that count are the ones from now, so the backoff and the
+        // failed-dial count begin at zero, and the first redial after a
+        // wake-up failure is 2 s away, not 30.
+        reconnectAttempt = 0
+        consecutiveFailedDials = 0
         // Offline stays Offline until a snapshot proves otherwise. Resetting
         // it here showed "Connecting…" on every foreground for as long as
         // the handshake took to time out — for an unplugged computer, every
@@ -1038,7 +1047,9 @@ final class AgentDirectory {
         // A handshake that gets no answer must fail on its own clock, not
         // the system's minute-long default: the deadline below decides what
         // the home says, this decides when the attempt is abandoned.
-        request.timeoutInterval = 15
+        // Eight seconds: a handshake through a relay takes about one; a
+        // radio that is still waking up must fail fast so the redial runs.
+        request.timeoutInterval = 8
         let socket = NetworkWebSocketTask(request: request)
         self.socket = socket
         socket.resume()
