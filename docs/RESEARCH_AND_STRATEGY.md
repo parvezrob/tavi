@@ -374,7 +374,7 @@ Primary sources reviewed for this baseline:
 - [Anthropic: Claude Code hooks](https://code.claude.com/docs/en/hooks)
 - [GitHub: Copilot remote control](https://github.blog/news-insights/product-news/take-your-local-github-sessions-anywhere/)
 - [T3 Code repository](https://github.com/pingdotgg/t3code)
-- [Orca mobile documentation](https://www.onorca.dev/docs/mobile)
+- [Orca mobile documentation](https://www.onorca.dev/docs/mobile) — and the source-level read of its git/worktree model, the bar for Tavi's source control: [`ORCA_SOURCE_CONTROL_RESEARCH.md`](./ORCA_SOURCE_CONTROL_RESEARCH.md)
 - [Moshi documentation](https://getmoshi.app/docs)
 - [Moshi: Ghostty/Metal terminal-engine explanation](https://getmoshi.app/compare/blink)
 - [Moshi App Store release history](https://apps.apple.com/jo/app/moshi-ssh-mosh-terminal/id6757859949)
