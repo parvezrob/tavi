@@ -2,6 +2,16 @@
 
 > Append-only log of completed work sessions, newest first. Each entry is what the *next* agent needs to know about that session: what shipped, what was learned, what was left open. The live starting point is always [`current-session.md`](./current-session.md); prune entries older than a few sessions — git history keeps everything.
 
+## 2026-09-03 (small hours) — #83 git leftovers: one pass, closed (host 14c75a4, phone 5d59dd4; not yet on the phone or the Mac's service)
+
+**Host:** new `removal-sweep.ts` — `*.removing-*` folders under the roots (beside a repository, or inside `<repo>-worktrees/`) deleted on start and hourly, skipped by the picker's scan, and named by `tavi doctor` with the exact `rm -rf` (#82). `git.ts` rewritten around one `for-each-ref --format=%(ahead-behind:<ref>)` per repository (refs named in full — a `main` tag cannot win; `origin/<default>` when there is no local copy; a detached worktree measured by its HEAD), `worktree list --porcelain -z` (a newline in a path survives; a bare first record no longer crowns the next as main), `status` four at a time, `truncated` on the repository and on the answer, `{ repos: [], error }` when git is missing, `withinRoots` per worktree, the PR cache LRU, and `attachPullRequests` four at a time with an `AbortSignal` that kills the `gh` children when the 3 s budget expires (#85; `runGh` takes `{ timeoutMs, signal }`, so `gh` has one runner). `pullBase` now fetches the base's upstream first (15 s, best effort), fast-forwards the local base when nothing stands on it, else merges the fresh remote-tracking ref; the answer carries `fetched` and `from`. The removal preview lists `alsoClosed`: agents outside the worktree sharing a herdr tab with one inside (herdr has no pane close). 251 tests.
+
+**Phone:** a Title field above Create pull request, prefilled from the newest commit over the base (gh titled multi-commit PRs after the branch); the removal sheet names tab-mates by folder; "Pulled N commits from main as of the computer's last fetch" when the host did not fetch; `HomeGrouping.mergedByRoot` and the loose-agent-at-root guard (#76 edges); three straight `/api/repos` failures on a live host clear the cards to plain folders (#72); `withinRoots` decoded with a default; "detached · a1b2c3d". 146 tests.
+
+**Not done, on purpose (in the #83 close comment):** the 409 removal body's `preview` is re-read, not decoded; half-staged checkbox, 12-vs-13 pt section headers, and the group highlight mask go to #54; the sheet header's agent line stays frozen at tap time; no audit capture of push-then-remove; `scanWorkspaces` stays one level deep and `findDefaultBranch` assumes `origin`.
+
+**Process:** the simulator test run happened at the end, once, with the owner off the phone as far as the log showed; the phone install and the Mac's `service:install` were left for the owner's next cable-in.
+
 ## 2026-09-02 (night) — #73 finished and reviewed (#78, #79, #81), host 0.1.16 published, then an evening of connection drops that cleared the code
 
 **Shipped (each live-tested on the simulator and looked at):**
