@@ -15,6 +15,12 @@ enum TaviTheme {
     static let card = Color(white: 0.106)
     static let well = Color(white: 0.039)
     static let hairline = Color.white.opacity(0.08)
+    // A raised group inside a card (#74): a hair lighter than the card with
+    // a one-point highlight along its top edge — iOS 26 separates grouped
+    // content with material, not strokes, so nothing inside a card draws a
+    // hairline. The well is the sunken counterpart.
+    static let groupFill = Color.white.opacity(0.045)
+    static let groupHighlight = Color.white.opacity(0.06)
 
     static let textPrimary = Color.white.opacity(0.92)
     static let textSecondary = Color.white.opacity(0.55)

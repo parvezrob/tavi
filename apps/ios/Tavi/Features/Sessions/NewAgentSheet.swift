@@ -37,11 +37,21 @@ struct NewAgentSheet: View {
         case failed(String)
     }
 
-    init(computers: [HostFleet.Entry], onCreated: @escaping (AgentTarget) -> Void) {
+    // `startingIn`: a folder chosen before the sheet opened — the home card's
+    // "New worktree" row (#74) names its folder and computer, so the sheet
+    // skips both questions. Until #73 part 2 lands it starts an agent there
+    // rather than creating a worktree.
+    init(
+        computers: [HostFleet.Entry],
+        startingIn: (hostId: String, path: String)? = nil,
+        onCreated: @escaping (AgentTarget) -> Void
+    ) {
         self.computers = computers
         self.onCreated = onCreated
-        _chosenHostId = State(initialValue: computers.count == 1 ? computers[0].id : nil)
-        _phase = State(initialValue: computers.count == 1 ? .loading : .chooseComputer)
+        let hostId = startingIn?.hostId ?? (computers.count == 1 ? computers[0].id : nil)
+        _chosenHostId = State(initialValue: hostId)
+        _phase = State(initialValue: hostId == nil ? .chooseComputer : .loading)
+        _selectedPath = State(initialValue: startingIn?.path)
     }
 
     private var chosen: HostFleet.Entry? {

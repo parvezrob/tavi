@@ -108,21 +108,36 @@ struct WorktreeInfo: Identifiable, Equatable, Decodable {
     let behind: Int
     let locked: Bool
     let prunable: Bool
+    // The branch's open pull request per the host user's `gh` login (#74);
+    // nil when none, or when the host cannot ask.
+    let pullRequest: PullRequestRef?
 
     var id: String { path }
 
-    // "fix/foo · +3/−1 · 2 uncommitted" — the row's one line for "where is
-    // my work happening" (#59a). "Uncommitted" over git's own "dirty": more
-    // familiar to someone who doesn't speak git jargon, for the same count
-    // (owner call, 2026-09-02). Silent about anything that is zero or
-    // false: a clean worktree on the default branch says only its name.
+    // The worktree's own name on its row: the branch, or "detached".
+    var title: String { branch ?? "detached" }
+
+    // "PR #48 · ↑3 ↓1 · 2 uncommitted" — the line beneath the branch (#74;
+    // approved design, PRD §7.12). "Uncommitted" over git's own "dirty":
+    // more familiar to someone who doesn't speak git jargon (owner call,
+    // 2026-09-02). Silent about anything that is zero: a clean worktree on
+    // the default branch says "Up to date" so the row is never bare.
     var summary: String {
-        var parts = [branch ?? "detached"]
-        if ahead > 0 || behind > 0 { parts.append("+\(ahead)/−\(behind)") }
+        var parts: [String] = []
+        if let pullRequest { parts.append("PR #\(pullRequest.number)") }
+        var sync: [String] = []
+        if ahead > 0 { sync.append("↑\(ahead)") }
+        if behind > 0 { sync.append("↓\(behind)") }
+        if !sync.isEmpty { parts.append(sync.joined(separator: " ")) }
         if dirty > 0 { parts.append(dirty == 1 ? "1 uncommitted" : "\(dirty) uncommitted") }
         if locked { parts.append("locked") }
-        return parts.joined(separator: " · ")
+        return parts.isEmpty ? "Up to date" : parts.joined(separator: " · ")
     }
+}
+
+struct PullRequestRef: Equatable, Decodable {
+    let number: Int
+    let url: String
 }
 
 struct RepoInfo: Identifiable, Equatable, Decodable {
@@ -294,10 +309,10 @@ final class AgentDirectory {
     // freshness: after a reconnect the clock restarts at the replayed
     // snapshot, so it never claims more history than the phone witnessed.
     private(set) var statusObservedAt: [String: Date] = [:]
-    // Every worktree GET /api/repos reported (#59a), flattened for
-    // HomeGrouping. Empty until the first poll answers; a project with no
-    // matching entry just renders as an ordinary folder.
-    private(set) var worktrees: [WorktreeInfo] = []
+    // Every repository GET /api/repos reported, with its worktrees (#59a,
+    // #74). Empty until the first poll answers; a folder no repo claims
+    // renders as an ordinary card.
+    private(set) var repos: [RepoInfo] = []
 
     private var credential = ""
     private var host: HostEndpoint?
@@ -345,7 +360,7 @@ final class AgentDirectory {
         isRevoked = false
         isOffline = false
         latencyMilliseconds = nil
-        worktrees = []
+        repos = []
         lastRawAgents = []
         smoother.reset()
         guard let url = URL(string: hostText),
@@ -412,11 +427,10 @@ final class AgentDirectory {
                 // nothing to answer it — `isRevoked` is the one state worth
                 // skipping, a dead credential that redialing cannot fix.
                 if !self.isRevoked, case let .repos(repos) = await self.fetchRepos() {
-                    let flattened = repos.flatMap(\.worktrees)
                     // Equatable, so an unchanged answer never triggers the
                     // @Observable re-render every poll would otherwise cost
                     // the whole home for state that rarely moves.
-                    if flattened != self.worktrees { self.worktrees = flattened }
+                    if repos != self.repos { self.repos = repos }
                 }
                 try? await Task.sleep(for: Self.reposInterval)
             }

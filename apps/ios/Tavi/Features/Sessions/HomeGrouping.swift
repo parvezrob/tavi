@@ -1,34 +1,62 @@
 import Foundation
 
-// The home reads computer → project → agents (#26, #50). A project is the
-// folder an agent lives in — its cwd, nothing to name or maintain — and a
-// computer is the paired host that reported it. Every paired computer gets
-// its own group with its own connection health, in pairing order, so a
-// host that is asleep is a quiet "Offline" header and never a blank home.
+// The home reads computer → project → worktree → agents (#26, #50, #74). A
+// project is a folder: a git repository when the host knows one (its main
+// worktree's path is the card; every worktree the repository has is a
+// group inside it, wherever on disk it lives), else just the folder an
+// agent lives in. A computer is the paired host that reported it. Every
+// paired computer gets its own group with its own connection health, in
+// pairing order, so a host that is asleep is a quiet "Offline" header and
+// never a blank home.
 //
 // What needs the user is deliberately *not* rendered inside the groups: a
 // waiting agent must never sit under a project the eye has skipped, so
 // needs-you stays a flat list above everything (PRD §7.1). The project it
 // belongs to still knows about it — the header counts it — so a folder does
 // not vanish and reappear as its agent blocks and resumes.
-struct HomeProject: Identifiable, Equatable {
-    // The cwd as the host reported it, trailing slashes trimmed. Two agents
-    // in the same folder share a project; the phone does not try to be
-    // cleverer about paths than the host that produced them.
-    let path: String
-    let name: String
-    // Rendered flat above the groups, counted here.
+
+// One worktree inside a project's card (#74): the branch and its git
+// state, and the agents whose cwd sits under it. A worktree with no agent
+// still shows — it is work in progress whether or not something is
+// running there right now.
+struct HomeWorktree: Identifiable, Equatable {
+    let info: WorktreeInfo
     let needsYou: [AgentSummary]
     let active: [AgentSummary]
     let recent: [AgentSummary]
-    // Set when this project's folder is a git worktree (#59a) — the same
-    // host's GET /api/repos, matched by path. nil for an ordinary folder,
-    // or one the host hasn't reported worktree state for yet.
-    let worktree: WorktreeInfo?
+
+    var id: String { info.path }
+    var agentCount: Int { needsYou.count + active.count + recent.count }
+}
+
+struct HomeProject: Identifiable, Equatable {
+    // A repository's main worktree, or the cwd as the host reported it,
+    // trailing slashes trimmed. The phone does not try to be cleverer about
+    // paths than the host that produced them.
+    let path: String
+    let name: String
+    // Agents in this folder that no worktree claims — every agent, for a
+    // folder the host knows no repository for. Needs-you is rendered flat
+    // above the groups and counted here.
+    let needsYou: [AgentSummary]
+    let active: [AgentSummary]
+    let recent: [AgentSummary]
+    // In the host's order: the main worktree first, as git lists them.
+    let worktrees: [HomeWorktree]
 
     var id: String { path }
     var abbreviatedPath: String { path.abbreviatingHomeDirectory }
-    var agentCount: Int { needsYou.count + active.count + recent.count }
+    var isRepository: Bool { !worktrees.isEmpty }
+    var agentCount: Int {
+        needsYou.count + active.count + recent.count + worktrees.reduce(0) { $0 + $1.agentCount }
+    }
+    var needsYouCount: Int { needsYou.count + worktrees.reduce(0) { $0 + $1.needsYou.count } }
+    // Something to draw under the header: an agent row at the top level or
+    // inside a worktree. Needs-you alone does not count — it is rendered
+    // above the cards, and a card with nothing under its header is noise.
+    var hasRows: Bool {
+        !active.isEmpty || !recent.isEmpty || worktrees.contains { !$0.active.isEmpty || !$0.recent.isEmpty }
+    }
 }
 
 // One paired computer as the home renders it: identity, how the phone is
@@ -51,7 +79,7 @@ struct HomeComputer: Identifiable, Equatable {
     var agentCount: Int { projects.reduce(0) { $0 + $1.agentCount } }
     // Reachable, feed usable, still paired — nothing to explain.
     var isQuietlyIdle: Bool { hasLoaded && available && health != .revoked }
-    var waitingCount: Int { projects.reduce(0) { $0 + $1.needsYou.count } }
+    var waitingCount: Int { projects.reduce(0) { $0 + $1.needsYouCount } }
 
     // "Live · 40 ms · 8 agents · 5 waiting" — the computer in one line,
     // for its chip's spoken value, the Computers menu, and its sheet.
@@ -78,10 +106,8 @@ struct HomeHostInput: Equatable {
     let hasLoaded: Bool
     let available: Bool
     let reason: String?
-    // Every worktree this host's GET /api/repos reported (#59a), flattened
-    // across repos — grouping only needs to match one against a project's
-    // path, not which repo it belongs to.
-    let worktrees: [WorktreeInfo]
+    // Every repository this host's GET /api/repos reported (#59a, #74).
+    let repos: [RepoInfo]
 
     init(
         id: String,
@@ -92,7 +118,7 @@ struct HomeHostInput: Equatable {
         hasLoaded: Bool = true,
         available: Bool = true,
         reason: String? = nil,
-        worktrees: [WorktreeInfo] = []
+        repos: [RepoInfo] = []
     ) {
         self.id = id
         self.name = name
@@ -102,7 +128,7 @@ struct HomeHostInput: Equatable {
         self.hasLoaded = hasLoaded
         self.available = available
         self.reason = reason
-        self.worktrees = worktrees
+        self.repos = repos
     }
 }
 
@@ -147,7 +173,7 @@ enum HomeGrouping {
                 hasLoaded: host.hasLoaded,
                 available: host.available,
                 reason: host.reason,
-                projects: group(host.agents, worktrees: host.worktrees)
+                projects: group(host.agents, repos: host.repos)
             )
         }
         return HomeLayout(needsYou: needsYou, computers: computers)
@@ -172,29 +198,67 @@ enum HomeGrouping {
         return order.map { WaitingGroup(key: $0, agents: members[$0] ?? [], askingLine: asking[$0] ?? nil) }
     }
 
-    // Projects by name; agents inside a project keep the host's order. The
-    // order is deterministic and does not depend on status, so a project
-    // never jumps around the screen as its agents start and finish — the
-    // header's count says what is running.
-    static func group(_ agents: [AgentSummary], worktrees: [WorktreeInfo] = []) -> [HomeProject] {
+    // Projects by name; agents inside a project keep the host's order. An
+    // agent whose cwd sits under a known worktree files under that
+    // repository's card, in that worktree's group — an agent's cwd is
+    // routinely *inside* a worktree (this repo's own layout: host and iOS
+    // agents each in a subfolder), so containment, not equality, is the
+    // match, and the longest containing worktree wins. Everything else
+    // groups by folder as before. A repository appears only once an agent
+    // lives somewhere in it — the home is about work, not every clone on
+    // the disk — but then every worktree it has is shown, agents or not.
+    // The order is deterministic and does not depend on status, so a
+    // project never jumps around the screen as its agents start and finish
+    // — the header's count says what is running.
+    static func group(_ agents: [AgentSummary], repos: [RepoInfo] = []) -> [HomeProject] {
         var order: [String] = []
-        var members: [String: [AgentSummary]] = [:]
+        var folderAgents: [String: [AgentSummary]] = [:]
+        var repoOf: [String: RepoInfo] = [:]
+        var worktreeAgents: [String: [AgentSummary]] = [:]
 
         for agent in agents {
             let path = projectPath(of: agent.cwd)
-            if members[path] == nil { order.append(path) }
-            members[path, default: []].append(agent)
+            if let (repo, worktree) = repoAndWorktree(containing: path, in: repos) {
+                let key = projectPath(of: repo.root)
+                if repoOf[key] == nil {
+                    order.append(key)
+                    repoOf[key] = repo
+                }
+                worktreeAgents[projectPath(of: worktree.path), default: []].append(agent)
+            } else {
+                if folderAgents[path] == nil { order.append(path) }
+                folderAgents[path, default: []].append(agent)
+            }
         }
+
         return order
-            .map { path in
-                let agents = members[path] ?? []
+            .map { key in
+                if let repo = repoOf[key] {
+                    return HomeProject(
+                        path: key,
+                        name: repo.name,
+                        needsYou: [],
+                        active: [],
+                        recent: [],
+                        worktrees: repo.worktrees.map { info in
+                            let members = worktreeAgents[projectPath(of: info.path)] ?? []
+                            return HomeWorktree(
+                                info: info,
+                                needsYou: members.filter { $0.homeSection == .needsYou },
+                                active: members.filter { $0.homeSection == .active },
+                                recent: members.filter { $0.homeSection == .recent }
+                            )
+                        }
+                    )
+                }
+                let members = folderAgents[key] ?? []
                 return HomeProject(
-                    path: path,
-                    name: projectName(of: path),
-                    needsYou: agents.filter { $0.homeSection == .needsYou },
-                    active: agents.filter { $0.homeSection == .active },
-                    recent: agents.filter { $0.homeSection == .recent },
-                    worktree: worktree(containing: path, in: worktrees)
+                    path: key,
+                    name: projectName(of: key),
+                    needsYou: members.filter { $0.homeSection == .needsYou },
+                    active: members.filter { $0.homeSection == .active },
+                    recent: members.filter { $0.homeSection == .recent },
+                    worktrees: []
                 )
             }
             .sorted { lhs, rhs in
@@ -204,20 +268,23 @@ enum HomeGrouping {
             }
     }
 
-    // The worktree a project's folder lives under, or nil. An agent's cwd is
-    // routinely *inside* a worktree rather than at its root — this repo's
-    // own layout, host and iOS agents each in their own subfolder, is the
-    // ordinary case — so containment, not equality, is the match; the
-    // longest (most specific) containing worktree wins when more than one
-    // qualifies, so a linked worktree beats the main one it was born from
-    // whenever both are somehow candidates.
-    static func worktree(containing path: String, in worktrees: [WorktreeInfo]) -> WorktreeInfo? {
-        worktrees
-            .filter { worktree in
+    // The repository and worktree a folder lives under, or nil. Longest
+    // containing worktree path wins, so a nested worktree beats the one it
+    // was born from whenever both are candidates.
+    static func repoAndWorktree(containing path: String, in repos: [RepoInfo]) -> (RepoInfo, WorktreeInfo)? {
+        var best: (RepoInfo, WorktreeInfo)?
+        var bestLength = -1
+        for repo in repos {
+            for worktree in repo.worktrees {
                 let root = projectPath(of: worktree.path)
-                return path == root || path.hasPrefix(root + "/")
+                guard path == root || path.hasPrefix(root + "/") else { continue }
+                if root.count > bestLength {
+                    best = (repo, worktree)
+                    bestLength = root.count
+                }
             }
-            .max { projectPath(of: $0.path).count < projectPath(of: $1.path).count }
+        }
+        return best
     }
 
     static func projectPath(of cwd: String) -> String {

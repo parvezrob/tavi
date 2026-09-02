@@ -21,8 +21,8 @@ struct HomeGroupingTests {
         )
     }
 
-    private func host(_ id: String, name: String, agents: [AgentSummary], health: HostHealth = .live, worktrees: [WorktreeInfo] = []) -> HomeHostInput {
-        HomeHostInput(id: id, name: name, agents: agents.map { var a = $0; a.hostId = id; return a }, health: health, worktrees: worktrees)
+    private func host(_ id: String, name: String, agents: [AgentSummary], health: HostHealth = .live, repos: [RepoInfo] = []) -> HomeHostInput {
+        HomeHostInput(id: id, name: name, agents: agents.map { var a = $0; a.hostId = id; return a }, health: health, repos: repos)
     }
 
     private func worktree(
@@ -32,9 +32,18 @@ struct HomeGroupingTests {
         dirty: Int = 0,
         ahead: Int = 0,
         behind: Int = 0,
-        locked: Bool = false
+        locked: Bool = false,
+        pullRequest: Int? = nil
     ) -> WorktreeInfo {
-        WorktreeInfo(path: path, branch: branch, head: "abc1234", isMain: isMain, dirty: dirty, ahead: ahead, behind: behind, locked: locked, prunable: false)
+        WorktreeInfo(
+            path: path, branch: branch, head: "abc1234", isMain: isMain, dirty: dirty, ahead: ahead, behind: behind,
+            locked: locked, prunable: false,
+            pullRequest: pullRequest.map { PullRequestRef(number: $0, url: "https://github.com/x/y/pull/\($0)") }
+        )
+    }
+
+    private func repo(_ root: String, _ worktrees: [WorktreeInfo]) -> RepoInfo {
+        RepoInfo(root: root, name: URL(fileURLWithPath: root).lastPathComponent, defaultBranch: "main", worktrees: worktrees)
     }
 
     @Test
@@ -169,53 +178,50 @@ struct HomeGroupingTests {
         #expect(!layout.isEmpty)
     }
 
-    // #59a: a project's folder carries its worktree state when the host
-    // reported one for that path; an ordinary folder (no matching path in
-    // GET /api/repos) renders exactly as before.
+    // #74: an agent under a known worktree files under its repository's
+    // card, in that worktree's group; every worktree the repository has is
+    // shown, agents or not; a folder no repo claims renders as before.
     @Test
-    func projectsCarryWorktreeStateWhenTheHostReportsOne() {
-        let layout = HomeGrouping.layout(hosts: [
-            host("mac", name: "MacBook", agents: [
-                agent("1", status: "working", cwd: "/Users/dev/Projects/app-fix-foo"),
-                agent("2", status: "idle", cwd: "/Users/dev/Projects/plain"),
-            ], worktrees: [
-                worktree("/Users/dev/Projects/app-fix-foo", branch: "fix/foo", isMain: false, dirty: 2, ahead: 3, behind: 1),
-                worktree("/Users/dev/Projects/app"),
-            ]),
+    func agentsFileUnderTheirRepositoryAndWorktree() {
+        let tavi = repo("/Users/dev/Projects/tavi", [
+            worktree("/Users/dev/Projects/tavi", branch: "main"),
+            worktree("/Users/dev/Projects/tavi-59-demo", branch: "demo/59", isMain: false, dirty: 1, ahead: 1),
+            worktree("/Users/dev/Projects/tavi-idle", branch: "idle/branch", isMain: false),
         ])
+        let projects = HomeGrouping.group([
+            agent("1", status: "working", cwd: "/Users/dev/Projects/tavi/apps/ios"),
+            agent("2", status: "done", cwd: "/Users/dev/Projects/tavi-59-demo"),
+            agent("3", status: "idle", cwd: "/Users/dev/Projects/plain"),
+        ], repos: [tavi])
 
-        let projects = layout.computers[0].projects
-        let withWorktree = projects.first { $0.path == "/Users/dev/Projects/app-fix-foo" }
-        #expect(withWorktree?.worktree?.branch == "fix/foo")
-        #expect(withWorktree?.worktree?.summary == "fix/foo · +3/−1 · 2 uncommitted")
-
-        let plain = projects.first { $0.path == "/Users/dev/Projects/plain" }
-        #expect(plain?.worktree == nil)
-    }
-
-    // An agent's cwd is routinely *inside* a worktree, not at its root —
-    // this repo's own layout (apps/ios, apps/host as separate agent
-    // folders under one worktree) is the ordinary case. Containment, not
-    // equality, must find the worktree.
-    @Test
-    func aProjectBelowAWorktreeRootStillFindsIt() {
-        let projects = HomeGrouping.group(
-            [agent("1", status: "working", cwd: "/Users/dev/tavi/apps/ios")],
-            worktrees: [worktree("/Users/dev/tavi", branch: "main")]
-        )
-        #expect(projects[0].worktree?.branch == "main")
+        #expect(projects.map(\.name) == ["plain", "tavi"])
+        let card = projects[1]
+        #expect(card.path == "/Users/dev/Projects/tavi")
+        #expect(card.isRepository)
+        #expect(card.worktrees.map(\.info.branch) == ["main", "demo/59", "idle/branch"])
+        #expect(card.worktrees[0].active.map(\.id) == ["1"])
+        #expect(card.worktrees[1].recent.map(\.id) == ["2"])
+        #expect(card.worktrees[2].agentCount == 0)
+        #expect(card.agentCount == 2)
+        #expect(card.active.isEmpty && card.recent.isEmpty)
+        // The card has nothing at its top level but must still render:
+        // its rows live inside the worktrees.
+        #expect(card.hasRows)
+        let plain = projects[0]
+        #expect(!plain.isRepository)
+        #expect(plain.recent.map(\.id) == ["3"])
     }
 
     // A folder that merely shares a prefix with a worktree path is not
-    // inside it: "/Users/dev/tavi-docs" must not match the worktree at
-    // "/Users/dev/tavi".
+    // inside it: "/Users/dev/tavi-docs" must not match "/Users/dev/tavi".
     @Test
-    func aFolderThatOnlySharesAPathPrefixDoesNotMatch() {
+    func aFolderThatOnlySharesAPathPrefixIsNotInTheRepository() {
         let projects = HomeGrouping.group(
             [agent("1", status: "working", cwd: "/Users/dev/tavi-docs")],
-            worktrees: [worktree("/Users/dev/tavi", branch: "main")]
+            repos: [repo("/Users/dev/tavi", [worktree("/Users/dev/tavi")])]
         )
-        #expect(projects[0].worktree == nil)
+        #expect(!projects[0].isRepository)
+        #expect(projects[0].path == "/Users/dev/tavi-docs")
     }
 
     // Two candidate worktrees, one nested under the other: the more
@@ -224,20 +230,37 @@ struct HomeGroupingTests {
     func theMostSpecificContainingWorktreeWins() {
         let projects = HomeGrouping.group(
             [agent("1", status: "working", cwd: "/Users/dev/tavi/nested/deep")],
-            worktrees: [
+            repos: [repo("/Users/dev/tavi", [
                 worktree("/Users/dev/tavi", branch: "main"),
-                worktree("/Users/dev/tavi/nested", branch: "fix/foo"),
-            ]
+                worktree("/Users/dev/tavi/nested", branch: "fix/foo", isMain: false),
+            ])]
         )
-        #expect(projects[0].worktree?.branch == "fix/foo")
+        #expect(projects[0].worktrees[1].active.map(\.id) == ["1"])
+        #expect(projects[0].worktrees[0].agentCount == 0)
+    }
+
+    // A waiting agent inside a worktree is counted by the card and the
+    // computer, and rendered only in the flat needs-you list.
+    @Test
+    func aWaitingAgentInAWorktreeIsCountedNotRepeated() {
+        let layout = HomeGrouping.layout(hosts: [
+            host("mac", name: "MacBook", agents: [agent("b", status: "blocked", cwd: "/p/tavi/apps/host")],
+                 repos: [repo("/p/tavi", [worktree("/p/tavi")])]),
+        ])
+        #expect(layout.needsYou.map(\.id) == ["b"])
+        #expect(layout.computers[0].waitingCount == 1)
+        #expect(layout.computers[0].projects[0].needsYouCount == 1)
+        #expect(layout.computers[0].projects[0].worktrees[0].needsYou.map(\.id) == ["b"])
     }
 
     @Test
-    func worktreeSummaryCoversCleanDetachedAndLockedStates() {
-        #expect(worktree("/w", branch: "main").summary == "main")
-        #expect(worktree("/w", branch: nil).summary == "detached")
-        #expect(worktree("/w", branch: "fix", ahead: 2, behind: 0).summary == "fix · +2/−0")
-        #expect(worktree("/w", branch: "fix", locked: true).summary == "fix · locked")
+    func worktreeSummaryCoversEveryState() {
+        #expect(worktree("/w", branch: "main").summary == "Up to date")
+        #expect(worktree("/w", branch: nil).title == "detached")
+        #expect(worktree("/w", branch: "fix", dirty: 2, ahead: 3, behind: 1).summary == "↑3 ↓1 · 2 uncommitted")
+        #expect(worktree("/w", branch: "fix", ahead: 2).summary == "↑2")
+        #expect(worktree("/w", branch: "fix", dirty: 1, pullRequest: 48).summary == "PR #48 · 1 uncommitted")
+        #expect(worktree("/w", branch: "fix", locked: true).summary == "locked")
     }
 
     @Test

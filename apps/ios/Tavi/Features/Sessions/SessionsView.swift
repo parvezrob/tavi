@@ -121,11 +121,12 @@ struct SessionsView: View {
                 )
             }
             .sheet(isPresented: $showingNewAgent, onDismiss: {
+                newWorktreeIn = nil
                 guard let created = createdAgent else { return }
                 createdAgent = nil
                 openAgent(hostId: created.hostId, paneID: created.paneId)
             }) {
-                NewAgentSheet(computers: fleet.entries) { created in
+                NewAgentSheet(computers: fleet.entries, startingIn: newWorktreeIn) { created in
                     createdAgent = created
                 }
             }
@@ -304,7 +305,7 @@ struct SessionsView: View {
                 // show here; a header pointing upward was noise (owner,
                 // 2026-09-02 — supersedes the #26 "keeps its header" rule).
                 computer.projects
-                    .filter { !$0.active.isEmpty || !$0.recent.isEmpty }
+                    .filter(\.hasRows)
                     .map { HomeProjectItem(computer: computer, project: $0) }
             }
 
@@ -378,7 +379,11 @@ struct SessionsView: View {
                             observedAt: { fleet.directory(for: $0.hostId)?.statusObservedAt[$0.id] },
                             onOpen: { openAgent($0) },
                             onShowFiles: { filesAgent = $0 },
-                            onShowPreview: { previewAgent = $0 }
+                            onShowPreview: { previewAgent = $0 },
+                            onNewWorktree: { project in
+                                newWorktreeIn = (hostId: item.computer.id, path: project.path)
+                                showingNewAgent = true
+                            }
                         )
                     }
                 }
@@ -448,6 +453,12 @@ struct SessionsView: View {
         fleet.host(for: hostId)?.displayName
     }
 
+    // A repository card's "New worktree" row (#74) opens the New Agent
+    // sheet already pointed at that folder on that computer. Until #73
+    // part 2 lands, that starts an agent in the folder rather than
+    // creating a worktree.
+    @State private var newWorktreeIn: (hostId: String, path: String)?
+
     private var homeLayout: HomeLayout {
         HomeGrouping.layout(hosts: fleet.entries.map { entry in
             HomeHostInput(
@@ -459,7 +470,7 @@ struct SessionsView: View {
                 hasLoaded: entry.directory.hasLoaded,
                 available: entry.directory.available,
                 reason: entry.directory.reason,
-                worktrees: entry.directory.worktrees
+                repos: entry.directory.repos
             )
         })
     }
