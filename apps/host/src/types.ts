@@ -38,6 +38,11 @@ export interface HerdrAgentInfo {
   // The agent's own session identifier when herdr knows it (for claude,
   // the Claude Code session UUID) — the join key for hook events.
   sessionRef?: string | undefined;
+  // What herdr's own screen detection says is running in the pane, when it
+  // differs from `agent` (#66): a Terminal Tavi reported as "shell" that
+  // now shows Claude's prompt has agent "shell" and detectedAgent "claude"
+  // until Tavi hands the pane back to herdr's detection.
+  detectedAgent?: string | undefined;
 }
 
 export interface HerdrAgentsResult {

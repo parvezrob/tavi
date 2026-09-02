@@ -105,6 +105,11 @@ export interface HerdrAgentSource {
   attachCommand(paneId: string): AttachCommand;
   readAgent(paneId: string, lines: number): Promise<HerdrPreviewResult>;
   readDialog(paneId: string): Promise<HerdrDialogResult>;
+  // Terminal panes Tavi reported as "shell" (#66). Optional: a source that
+  // cannot do these leaves such panes labelled as they are.
+  releaseShellAuthority?(paneId: string): Promise<void>;
+  reportShellPane?(paneId: string): Promise<void>;
+  paneExists?(paneId: string): Promise<boolean>;
   decideAgent(paneId: string, decision: DialogDecision): Promise<HerdrDecisionResult>;
   promptAgent(paneId: string, text: string): Promise<HerdrPromptResult>;
   createTab(request: HerdrTabRequest): Promise<HerdrTabResult>;
@@ -264,6 +269,41 @@ export class HerdrService implements HerdrAgentSource {
       return undefined;
     } catch {
       return undefined;
+    }
+  }
+
+  // Verified live (2026-09-02, #66): pane.report_agent {source:"tavi",
+  // agent:"shell", state:"idle"} lists a plain pane as a Terminal; herdr then
+  // ignores its own detection for that pane. pane.release_agent with the
+  // same source and label drops the report, and herdr's detection labels
+  // the pane on its own within ~3 s (a running claude reads agent "claude",
+  // status from the screen). When that agent exits, the pane leaves
+  // agent.list entirely — reporting shell again brings the Terminal back.
+  async reportShellPane(paneId: string): Promise<void> {
+    await this.request("pane.report_agent", {
+      pane_id: paneId,
+      source: "tavi",
+      agent: SHELL_KIND,
+      state: "idle",
+    });
+  }
+
+  async releaseShellAuthority(paneId: string): Promise<void> {
+    await this.request("pane.release_agent", {
+      pane_id: paneId,
+      source: "tavi",
+      agent: SHELL_KIND,
+    });
+  }
+
+  // pane.get answers { type: "pane_info", pane } for a live pane and an
+  // error for one that is gone.
+  async paneExists(paneId: string): Promise<boolean> {
+    try {
+      const result = asRecord(await this.request("pane.get", { pane_id: paneId }));
+      return asRecord(result.pane).pane_id === paneId;
+    } catch {
+      return false;
     }
   }
 
@@ -465,16 +505,12 @@ export class HerdrService implements HerdrAgentSource {
       }
       if (request.agent === SHELL_KIND) {
         // Nothing to launch — the pane already is a shell. Report it as an
-        // agent so herdr lists it and lets the pty bridge attach; verified
-        // live that herdr keeps the reported state rather than overriding
-        // it from screen detection, so a terminal stays honestly "idle".
+        // agent so herdr lists it and lets the pty bridge attach. Herdr
+        // keeps the reported label over its own detection for the pane's
+        // life, so when an agent later starts inside, the events feed hands
+        // the pane back (#66, releaseShellAuthority).
         try {
-          await this.request("pane.report_agent", {
-            pane_id: paneId,
-            source: "tavi",
-            agent: SHELL_KIND,
-            state: "idle",
-          });
+          await this.reportShellPane(paneId);
         } catch (reportError) {
           await this.request("tab.close", { tab_id: tabId }).catch(() => undefined);
           throw reportError;
@@ -567,12 +603,21 @@ export class HerdrService implements HerdrAgentSource {
 
 function parseAgent(agent: Record<string, unknown>): HerdrAgentInfo {
   const status = typeof agent.agent_status === "string" ? agent.agent_status : "unknown";
-  const sessionRef = asString(asRecord(agent.agent_session).value);
+  const session = asRecord(agent.agent_session);
+  const sessionRef = asString(session.value);
+  const detectedAgent = asString(session.agent);
+  const label = asString(agent.agent);
+  // Herdr reads "idle after having worked" as done, and a Terminal that
+  // hosted an agent (#66) inherits that when Tavi reports it as shell again.
+  // A shell has no task to finish: it is idle. (Verified live 2026-09-02:
+  // report state idle → agent_status "done" once the pane had been working.)
+  const normalized = label === SHELL_KIND && status === "done" ? "idle" : status;
   return {
     ...(sessionRef ? { sessionRef } : {}),
+    ...(detectedAgent && detectedAgent !== label ? { detectedAgent } : {}),
     id: asString(agent.pane_id),
-    agent: asString(agent.agent),
-    status: AGENT_STATUSES.includes(status as AgentStatus) ? (status as AgentStatus) : "unknown",
+    agent: label,
+    status: AGENT_STATUSES.includes(normalized as AgentStatus) ? (normalized as AgentStatus) : "unknown",
     cwd: asString(agent.cwd),
     title: asString(agent.terminal_title_stripped) || asString(agent.terminal_title),
     workspaceId: asString(agent.workspace_id),

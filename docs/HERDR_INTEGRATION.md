@@ -23,6 +23,9 @@ Host-side implementation: `apps/host/src/herdr.ts` (request/response) and `apps/
 | `workspace.list` | `{}` | `{type: "workspace_list", workspaces: [{workspace_id, number, label, focused, pane_count, tab_count, active_tab_id, agent_status}]}` |
 | `tab.list` | `{}` | `{type: "tab_list", tabs: [{tab_id, workspace_id, number, label, focused, pane_count, agent_status}]}` — all tabs across workspaces; group client-side |
 | `tab.close` | `{tab_id}` | `{type: "ok"}` |
+| `pane.report_agent` | `{pane_id, source, agent, state}` | ack — see "Reported agents" |
+| `pane.release_agent` | `{pane_id, source, agent}` | ack — drops that source's report (#66) |
+| `pane.get` | `{pane_id}` | `{type: "pane_info", pane: {pane_id, agent, agent_status, agent_session?, ...}}`; error `pane_not_found` when gone |
 | `events.subscribe` | `{subscriptions: [...]}` | `{type: "subscription_started"}`, then a stream of `{data, event}` lines on the same connection |
 
 CLI attach used by the terminal bridge: `herdr agent attach <pane_id> --takeover` — always with the flag (2026-09-02): herdr keeps a departed client registered for a moment, so a fresh attach right after a drop or after the host disposed the retained pty was refused with "already has an attached client" and the phone showed a live Claude session as ended (owner, robin-PC). Tavi is the only external attach client a pane has, so taking over is always right.
@@ -48,7 +51,9 @@ CLI attach used by the terminal bridge: `herdr agent attach <pane_id> --takeover
 ## Reported agents (plain terminals)
 
 - herdr will not attach a pane that has no agent (`agent.attach` → `agent_not_found`) and has no shell kind. `pane.report_agent {pane_id, source, agent, state}` lets Tavi declare one: a pane reported as `agent: "shell", state: "idle", source: "tavi"` lists in `agent.list` with that kind and status, and `agent attach` / the host pty bridge accept it. Verified live 2026-08-31.
-- herdr keeps a reported state: running commands in the pane did not flip `idle` to `working`/`done`, and the events feed carries the reported kind. A terminal therefore reads honestly as idle. Not yet verified: what happens if a real agent is later started by hand inside a reported pane.
+- herdr keeps a reported state: running commands in the pane did not flip `idle` to `working`/`done`, and the events feed carries the reported kind. A terminal therefore reads honestly as idle.
+- **A report pins the label for the pane's life (#66, verified live 2026-09-02).** Start `claude` inside a reported Terminal and herdr *does* detect it — `agent_session.agent = "claude"`, title "Claude Code", `herdr agent explain` names the rule — but `agent` stays `"shell"` and `agent_status` stays the reported `idle`; re-reporting as `claude` does not help. `pane.release_agent {pane_id, source: "tavi", agent: "shell"}` drops the report and herdr's own detection labels the pane within ~2–4 s (`agent: "claude"`, status from the screen: idle/working/done/blocked). In between the pane is in **no list at all** (a 2 s gap). When the detected agent exits, the pane leaves `agent.list` while still existing (`pane.get` answers); reporting shell again brings the Terminal back. The host's events feed does both (`herdr-events.ts reconcileShellPanes`), carries the last known row through the gap, and the terminal upgrade retries `findAgent` for 3 s so a reconnect in the gap is not a 404. `agent.list` items carry `agent_session.agent` — Tavi exposes it as `detectedAgent` only when it differs from `agent`.
+- **`report_agent state: idle` after the pane has worked reads back as `done`.** A Terminal that hosted an agent would say "done" forever; the host maps `done` → `idle` for `agent: "shell"` (a shell has no task to finish). `state: working` does apply.
 
 
 ## Rendering a pane from snapshots instead of attaching (#44 step-2 spike, 2026-09-01)

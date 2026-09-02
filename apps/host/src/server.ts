@@ -209,7 +209,14 @@ export async function createTaviServer(options: TaviServerOptions) {
         socket.destroy();
         return;
       }
-      const lookup = await herdr.findAgent(paneId);
+      // A Terminal being handed to herdr's detection (#66) is unlisted for
+      // a second or two; a reconnect landing in that window must not read
+      // as "pane gone" — that failure is permanent on the phone.
+      let lookup = await herdr.findAgent(paneId);
+      for (let attempt = 0; attempt < 3 && lookup.available && !lookup.agent; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        lookup = await herdr.findAgent(paneId);
+      }
       if (!lookup.available) {
         socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
         socket.destroy();

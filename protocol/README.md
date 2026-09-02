@@ -142,7 +142,7 @@ Renames a Herdr tab (#55) — the user's own name for the task the pane is doing
 { "label": "ship the fix" }
 ```
 
-`label` is trimmed and must be 1–120 characters after trimming (`400` otherwise). The host wraps `tab.rename`; Herdr owns the truth, and the applied label reaches every client through the agents feed — each agent in `GET /api/agents` (and the events snapshots) carries the tab's current label as `tabLabel` when the tab has one. Clients decide which labels are user-meaningful; Herdr's defaults (bare numbers, `tavi <kind>` on phone-created tabs) are not identity.
+`label` is trimmed and must be 1–120 characters after trimming (`400` otherwise). The host wraps `tab.rename`; Herdr owns the truth, and the applied label reaches every client through the agents feed — each agent in `GET /api/agents` (and the events snapshots) carries the tab's current label as `tabLabel` when the tab has one. An agent may also carry `detectedAgent` (optional, informational): what Herdr's own screen detection sees running in the pane when that differs from `agent` — only a Terminal the host reported as `shell` shows it, for the seconds before the host hands the pane back to detection (#66). Clients decide which labels are user-meaningful; Herdr's defaults (bare numbers, `tavi <kind>` on phone-created tabs) are not identity.
 
 | Status | Meaning |
 | --- | --- |
