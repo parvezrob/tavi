@@ -61,7 +61,13 @@ export async function saveUpload(options: {
   if (options.body.length > MAX_UPLOAD_BYTES) return { ok: false, status: 413, error: "Images are limited to 10 MB." };
 
   const resolved = await resolveWithinRoots(".", options.cwd, options.roots);
-  if (!resolved.ok) return { ok: false, status: resolved.status, error: resolved.error, ...(resolved.outsideRoots ? { outsideRoots: true as const } : {}) };
+  if (!resolved.ok)
+    return {
+      ok: false,
+      status: resolved.status,
+      error: resolved.error,
+      ...(resolved.outsideRoots ? { outsideRoots: true as const } : {}),
+    };
   let folderStat;
   try {
     folderStat = await fs.stat(resolved.path);
@@ -125,7 +131,10 @@ async function excludeFromGit(folder: string): Promise<void> {
     const existing = await fs.readFile(excludePath, "utf8").catch(() => "");
     if (existing.split("\n").some((line) => line.trim() === EXCLUDE_LINE)) return;
     await fs.mkdir(path.dirname(excludePath), { recursive: true });
-    await fs.appendFile(excludePath, `${existing.length > 0 && !existing.endsWith("\n") ? "\n" : ""}# Tavi: images attached from the phone (#88)\n${EXCLUDE_LINE}\n`);
+    await fs.appendFile(
+      excludePath,
+      `${existing.length > 0 && !existing.endsWith("\n") ? "\n" : ""}# Tavi: images attached from the phone (#88)\n${EXCLUDE_LINE}\n`,
+    );
   } catch {
     // The upload itself succeeded; a missing exclude line is not worth a refusal.
   }

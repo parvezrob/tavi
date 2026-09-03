@@ -22,12 +22,7 @@ import {
   TERMINAL_PROTOCOL_V2,
 } from "./protocol.js";
 import type { DialogDecision, HerdrAgentSource, TerminalSize } from "./herdr.js";
-import {
-  isWithinRoots,
-  mergeRecentProjects,
-  normalizeProjectPath,
-  ProjectHistory,
-} from "./projects.js";
+import { isWithinRoots, mergeRecentProjects, normalizeProjectPath, ProjectHistory } from "./projects.js";
 import type { AttachCommand, HostInfo, ServerTerminalMessage, WorkspaceInfo } from "./types.js";
 import { InputError, safeSessionId } from "./validation.js";
 import { scanWorkspaces } from "./workspaces.js";
@@ -39,9 +34,26 @@ import { configureGh, type GhRunner } from "./gh.js";
 import { configureTailscale, connectionPath, type TailscaleRunner } from "./tailscale.js";
 import { readUploadBody, saveUpload } from "./uploads.js";
 import { createPullRequest, linkPullRequest, listIssues, pullRequestStatus } from "./pull-requests.js";
-import { commitStaged, currentBranch, pullBase, pushBranch, stageFiles, worktreeLog, worktreeStatus, writeCommitMessage } from "./source-control.js";
+import {
+  commitStaged,
+  currentBranch,
+  pullBase,
+  pushBranch,
+  stageFiles,
+  worktreeLog,
+  worktreeStatus,
+  writeCommitMessage,
+} from "./source-control.js";
 import { MAX_RAW_BYTES, listDirectory, readTextContent, resolveWithinRoots, statFile } from "./files.js";
-import { PreviewRegistry, TICKET_COOKIE, defaultDiscoveryDeps, listProjectServers, stopProjectServer, validPort, type DiscoveryDeps } from "./preview.js";
+import {
+  PreviewRegistry,
+  TICKET_COOKIE,
+  defaultDiscoveryDeps,
+  listProjectServers,
+  stopProjectServer,
+  validPort,
+  type DiscoveryDeps,
+} from "./preview.js";
 import { createReadStream } from "node:fs";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -366,12 +378,25 @@ interface RouteContext {
   tailscale?: TailscaleRunner | undefined;
 }
 
-async function routeRequest(
-  request: IncomingMessage,
-  response: ServerResponse,
-  context: RouteContext,
-): Promise<void> {
-  const { config, herdr, listWorkspaces, attention, projects, agentKinds, devices, pairing, authorized, update, previews, doorReady, discovery, pullRequests, gh, tailscale } = context;
+async function routeRequest(request: IncomingMessage, response: ServerResponse, context: RouteContext): Promise<void> {
+  const {
+    config,
+    herdr,
+    listWorkspaces,
+    attention,
+    projects,
+    agentKinds,
+    devices,
+    pairing,
+    authorized,
+    update,
+    previews,
+    doorReady,
+    discovery,
+    pullRequests,
+    gh,
+    tailscale,
+  } = context;
   const ghDeps = gh ? { gh } : {};
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
@@ -389,7 +414,9 @@ async function routeRequest(
     const secret = typeof record.secret === "string" ? record.secret : "";
     const deviceName = typeof record.deviceName === "string" ? record.deviceName : "";
     if (!pairing.redeem(secret)) {
-      sendJson(response, 401, { error: "That pairing code is not valid any more. Run `tavi pair` on the Mac for a fresh one." });
+      sendJson(response, 401, {
+        error: "That pairing code is not valid any more. Run `tavi pair` on the Mac for a fresh one.",
+      });
       return;
     }
     const { device, credential } = devices.add(deviceName);
@@ -500,8 +527,16 @@ async function routeRequest(
   // reachable from the configured roots, with every worktree git itself
   // knows about — "where is my work happening" in one call.
   if (url.pathname === "/api/repos" && request.method === "GET") {
-    const answer = await listReposCached(config.roots, pullRequests ? { pullRequests } : {}, url.searchParams.get("fresh") === "1");
-    sendJson(response, 200, { repos: answer.repos, truncated: answer.truncated, ...(answer.error ? { error: answer.error } : {}) });
+    const answer = await listReposCached(
+      config.roots,
+      pullRequests ? { pullRequests } : {},
+      url.searchParams.get("fresh") === "1",
+    );
+    sendJson(response, 200, {
+      repos: answer.repos,
+      truncated: answer.truncated,
+      ...(answer.error ? { error: answer.error } : {}),
+    });
     return;
   }
 
@@ -521,7 +556,10 @@ async function routeRequest(
       { allowOutsideRoots: record.allowOutsideRoots === true },
     );
     if (!result.ok) {
-      sendJson(response, result.status, { error: result.error, ...(result.outsideRoots ? { outsideRoots: true } : {}) });
+      sendJson(response, result.status, {
+        error: result.error,
+        ...(result.outsideRoots ? { outsideRoots: true } : {}),
+      });
       return;
     }
     projects.remember(result.worktree.path);
@@ -536,12 +574,18 @@ async function routeRequest(
   if (url.pathname === "/api/worktrees/status" && request.method === "GET") {
     const target = await resolveWithinRoots(url.searchParams.get("path") ?? "", "/", config.roots);
     if (!target.ok) {
-      sendJson(response, target.status, { error: target.error, ...(target.outsideRoots ? { outsideRoots: true } : {}) });
+      sendJson(response, target.status, {
+        error: target.error,
+        ...(target.outsideRoots ? { outsideRoots: true } : {}),
+      });
       return;
     }
     const result = await worktreeStatus(target.path);
     if (!result.ok) {
-      sendJson(response, result.status, { error: result.error, ...(result.notRepository ? { notRepository: true } : {}) });
+      sendJson(response, result.status, {
+        error: result.error,
+        ...(result.notRepository ? { notRepository: true } : {}),
+      });
       return;
     }
     sendJson(response, 200, result.status);
@@ -565,7 +609,10 @@ async function routeRequest(
   if (url.pathname === "/api/worktrees/removal" && request.method === "GET") {
     const target = await resolveWithinRoots(url.searchParams.get("path") ?? "", "/", config.roots);
     if (!target.ok) {
-      sendJson(response, target.status, { error: target.error, ...(target.outsideRoots ? { outsideRoots: true } : {}) });
+      sendJson(response, target.status, {
+        error: target.error,
+        ...(target.outsideRoots ? { outsideRoots: true } : {}),
+      });
       return;
     }
     const result = await previewRemoval(target.path, removalDeps);
@@ -577,10 +624,16 @@ async function routeRequest(
     const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
     const target = await resolveWithinRoots(typeof record.path === "string" ? record.path : "", "/", config.roots);
     if (!target.ok) {
-      sendJson(response, target.status, { error: target.error, ...(target.outsideRoots ? { outsideRoots: true } : {}) });
+      sendJson(response, target.status, {
+        error: target.error,
+        ...(target.outsideRoots ? { outsideRoots: true } : {}),
+      });
       return;
     }
-    const confirm = typeof record.confirm === "object" && record.confirm !== null ? (record.confirm as Record<string, unknown>) : null;
+    const confirm =
+      typeof record.confirm === "object" && record.confirm !== null
+        ? (record.confirm as Record<string, unknown>)
+        : null;
     if (!confirm || typeof confirm.uncommitted !== "number" || typeof confirm.unpushed !== "number") {
       sendJson(response, 400, { error: "confirm must carry the uncommitted and unpushed counts you were shown." });
       return;
@@ -596,7 +649,10 @@ async function routeRequest(
       removalDeps,
     );
     if (!result.ok) {
-      sendJson(response, result.status, { error: result.error, ...(result.preview ? { preview: result.preview } : {}) });
+      sendJson(response, result.status, {
+        error: result.error,
+        ...(result.preview ? { preview: result.preview } : {}),
+      });
       return;
     }
     projects.forget(result.removed.path);
@@ -610,7 +666,10 @@ async function routeRequest(
   if (url.pathname === "/api/repos/issues" && request.method === "GET") {
     const target = await resolveWithinRoots(url.searchParams.get("repo") ?? "", "/", config.roots);
     if (!target.ok) {
-      sendJson(response, target.status, { error: target.error, ...(target.outsideRoots ? { outsideRoots: true } : {}) });
+      sendJson(response, target.status, {
+        error: target.error,
+        ...(target.outsideRoots ? { outsideRoots: true } : {}),
+      });
       return;
     }
     const result = await listIssues(target.path, ghDeps);
@@ -623,7 +682,10 @@ async function routeRequest(
   if (url.pathname === "/api/worktrees/pull-request" && request.method === "GET") {
     const target = await resolveWithinRoots(url.searchParams.get("path") ?? "", "/", config.roots);
     if (!target.ok) {
-      sendJson(response, target.status, { error: target.error, ...(target.outsideRoots ? { outsideRoots: true } : {}) });
+      sendJson(response, target.status, {
+        error: target.error,
+        ...(target.outsideRoots ? { outsideRoots: true } : {}),
+      });
       return;
     }
     const result = await pullRequestStatus(target.path, ghDeps);
@@ -636,13 +698,20 @@ async function routeRequest(
     const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
     const target = await resolveWithinRoots(typeof record.path === "string" ? record.path : "", "/", config.roots);
     if (!target.ok) {
-      sendJson(response, target.status, { error: target.error, ...(target.outsideRoots ? { outsideRoots: true } : {}) });
+      sendJson(response, target.status, {
+        error: target.error,
+        ...(target.outsideRoots ? { outsideRoots: true } : {}),
+      });
       return;
     }
     if (pullRequestWrite[1]) {
       const result = await linkPullRequest(target.path, { number: record.number, url: record.url }, ghDeps);
       if (result.ok) await forgetPullRequestBadge(target.path);
-      sendJson(response, result.ok ? 200 : result.status, result.ok ? { pullRequest: result.pullRequest } : { error: result.error });
+      sendJson(
+        response,
+        result.ok ? 200 : result.status,
+        result.ok ? { pullRequest: result.pullRequest } : { error: result.error },
+      );
       return;
     }
     const result = await createPullRequest(
@@ -655,7 +724,11 @@ async function routeRequest(
       ghDeps,
     );
     if (result.ok) await forgetPullRequestBadge(target.path);
-    sendJson(response, result.ok ? 201 : result.status, result.ok ? { pullRequest: result.pullRequest, pushed: result.pushed } : { error: result.error });
+    sendJson(
+      response,
+      result.ok ? 201 : result.status,
+      result.ok ? { pullRequest: result.pullRequest, pushed: result.pushed } : { error: result.error },
+    );
     return;
   }
 
@@ -664,7 +737,10 @@ async function routeRequest(
   if (url.pathname === "/api/worktrees/log" && request.method === "GET") {
     const target = await resolveWithinRoots(url.searchParams.get("path") ?? "", "/", config.roots);
     if (!target.ok) {
-      sendJson(response, target.status, { error: target.error, ...(target.outsideRoots ? { outsideRoots: true } : {}) });
+      sendJson(response, target.status, {
+        error: target.error,
+        ...(target.outsideRoots ? { outsideRoots: true } : {}),
+      });
       return;
     }
     const result = await worktreeLog(target.path);
@@ -672,37 +748,59 @@ async function routeRequest(
     return;
   }
 
-  const sourceControlWrite = url.pathname.match(/^\/api\/worktrees\/(stage|unstage|commit|commit-message|push|pull-base)$/);
+  const sourceControlWrite = url.pathname.match(
+    /^\/api\/worktrees\/(stage|unstage|commit|commit-message|push|pull-base)$/,
+  );
   if (sourceControlWrite && request.method === "POST") {
     const action = sourceControlWrite[1] as "stage" | "unstage" | "commit" | "commit-message" | "push" | "pull-base";
     const body = await readJsonBody(request);
     const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
     const target = await resolveWithinRoots(typeof record.path === "string" ? record.path : "", "/", config.roots);
     if (!target.ok) {
-      sendJson(response, target.status, { error: target.error, ...(target.outsideRoots ? { outsideRoots: true } : {}) });
+      sendJson(response, target.status, {
+        error: target.error,
+        ...(target.outsideRoots ? { outsideRoots: true } : {}),
+      });
       return;
     }
     if (action === "stage" || action === "unstage") {
-      const files = record.files === "all" ? "all" : Array.isArray(record.files) && record.files.every((f) => typeof f === "string") ? (record.files as string[]) : undefined;
+      const files =
+        record.files === "all"
+          ? "all"
+          : Array.isArray(record.files) && record.files.every((f) => typeof f === "string")
+            ? (record.files as string[])
+            : undefined;
       if (!files) {
         sendJson(response, 400, { error: 'files must be a list of repository paths, or "all".' });
         return;
       }
       const result = await stageFiles(target.path, files, action);
       if (result.ok) invalidateRepos();
-      sendJson(response, result.ok ? 200 : result.status, result.ok ? { staged: result.staged } : { error: result.error });
+      sendJson(
+        response,
+        result.ok ? 200 : result.status,
+        result.ok ? { staged: result.staged } : { error: result.error },
+      );
       return;
     }
     if (action === "commit") {
       const result = await commitStaged(target.path, typeof record.message === "string" ? record.message : "");
       if (result.ok) invalidateRepos();
-      sendJson(response, result.ok ? 201 : result.status, result.ok ? { commit: result.commit } : { error: result.error });
+      sendJson(
+        response,
+        result.ok ? 201 : result.status,
+        result.ok ? { commit: result.commit } : { error: result.error },
+      );
       return;
     }
     if (action === "push") {
       const result = await pushBranch(target.path);
       if (result.ok) invalidateRepos();
-      sendJson(response, result.ok ? 201 : result.status, result.ok ? { pushed: result.pushed, upstream: result.upstream } : { error: result.error });
+      sendJson(
+        response,
+        result.ok ? 201 : result.status,
+        result.ok ? { pushed: result.pushed, upstream: result.upstream } : { error: result.error },
+      );
       return;
     }
     if (action === "pull-base") {
@@ -711,12 +809,18 @@ async function routeRequest(
       sendJson(
         response,
         result.ok ? (result.merged > 0 ? 201 : 200) : result.status,
-        result.ok ? { merged: result.merged, fastForward: result.fastForward, sha: result.sha } : { error: result.error },
+        result.ok
+          ? { merged: result.merged, fastForward: result.fastForward, sha: result.sha }
+          : { error: result.error },
       );
       return;
     }
     const result = await writeCommitMessage(target.path, { shell: config.shell });
-    sendJson(response, result.ok ? 200 : result.status, result.ok ? { message: result.message } : { error: result.error });
+    sendJson(
+      response,
+      result.ok ? 200 : result.status,
+      result.ok ? { message: result.message } : { error: result.error },
+    );
     return;
   }
 
@@ -963,7 +1067,9 @@ async function routeRequest(
   }
 
   if (url.pathname === "/api/update" && request.method === "POST") {
-    const outcome = update ? await update() : { status: "skipped", reason: "this host does not manage its own updates" };
+    const outcome = update
+      ? await update()
+      : { status: "skipped", reason: "this host does not manage its own updates" };
     sendJson(response, 200, outcome);
     return;
   }
@@ -994,9 +1100,7 @@ async function routeRequest(
       sendJson(response, 200, {
         ...result,
         agents: result.agents.map((agent) =>
-          attention.isBlocked(agent.sessionRef)
-            ? { ...agent, status: "blocked", authority: "claude-hook" }
-            : agent,
+          attention.isBlocked(agent.sessionRef) ? { ...agent, status: "blocked", authority: "claude-hook" } : agent,
         ),
       });
       return;
@@ -1018,10 +1122,18 @@ async function routeRequest(
     }
     const result = await listChanges(cwd.path);
     if (!result.ok) {
-      sendJson(response, result.status, { error: result.error, ...(result.notRepository ? { notRepository: true } : {}) });
+      sendJson(response, result.status, {
+        error: result.error,
+        ...(result.notRepository ? { notRepository: true } : {}),
+      });
       return;
     }
-    sendJson(response, 200, { repository: result.repository, branch: result.branch ?? null, files: result.files, truncated: result.truncated });
+    sendJson(response, 200, {
+      repository: result.repository,
+      branch: result.branch ?? null,
+      files: result.files,
+      truncated: result.truncated,
+    });
     return;
   }
 
@@ -1050,7 +1162,12 @@ async function routeRequest(
       sendJson(response, 413, { error: "Images are limited to 10 MB." });
       return;
     }
-    const saved = await saveUpload({ cwd: cwdParam, roots: config.roots, contentType: request.headers["content-type"], body });
+    const saved = await saveUpload({
+      cwd: cwdParam,
+      roots: config.roots,
+      contentType: request.headers["content-type"],
+      body,
+    });
     if (!saved.ok) {
       sendJson(response, saved.status, { error: saved.error, ...(saved.outsideRoots ? { outsideRoots: true } : {}) });
       return;
@@ -1059,13 +1176,20 @@ async function routeRequest(
     return;
   }
 
-  const filesRoute = url.pathname === "/api/files" || url.pathname === "/api/files/stat" || url.pathname === "/api/files/content" || url.pathname === "/api/files/raw";
+  const filesRoute =
+    url.pathname === "/api/files" ||
+    url.pathname === "/api/files/stat" ||
+    url.pathname === "/api/files/content" ||
+    url.pathname === "/api/files/raw";
   if (filesRoute && request.method === "GET") {
     const cwdParam = url.searchParams.get("cwd") ?? "";
     const target = url.searchParams.get("path") ?? ".";
     const resolved = await resolveWithinRoots(target, path.isAbsolute(cwdParam) ? cwdParam : "/", config.roots);
     if (!resolved.ok) {
-      sendJson(response, resolved.status, { error: resolved.error, ...(resolved.outsideRoots ? { outsideRoots: true } : {}) });
+      sendJson(response, resolved.status, {
+        error: resolved.error,
+        ...(resolved.outsideRoots ? { outsideRoots: true } : {}),
+      });
       return;
     }
     if (url.pathname === "/api/files/stat") {
@@ -1084,7 +1208,12 @@ async function routeRequest(
     if (url.pathname === "/api/files/content") {
       const result = await readTextContent(resolved.path);
       if (!result.ok) {
-        sendJson(response, result.status, { error: result.error, preview: result.preview, size: result.size, mime: result.mime });
+        sendJson(response, result.status, {
+          error: result.error,
+          preview: result.preview,
+          size: result.size,
+          mime: result.mime,
+        });
         return;
       }
       sendJson(response, 200, { ...result.content, relativePath: resolved.relativePath });
@@ -1094,11 +1223,21 @@ async function routeRequest(
     // everything else go through /content, which knows how to refuse.
     const info = await statFile(resolved.path);
     if (info.preview !== "image" && info.preview !== "pdf") {
-      sendJson(response, 415, { error: "Only images and PDFs are served raw.", preview: info.preview, size: info.size, mime: info.mime });
+      sendJson(response, 415, {
+        error: "Only images and PDFs are served raw.",
+        preview: info.preview,
+        size: info.size,
+        mime: info.mime,
+      });
       return;
     }
     if (info.size > MAX_RAW_BYTES) {
-      sendJson(response, 413, { error: "This file is too large to preview on the phone.", preview: info.preview, size: info.size, mime: info.mime });
+      sendJson(response, 413, {
+        error: "This file is too large to preview on the phone.",
+        preview: info.preview,
+        size: info.size,
+        mime: info.mime,
+      });
       return;
     }
     response.writeHead(200, {
@@ -1107,7 +1246,9 @@ async function routeRequest(
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     });
-    createReadStream(resolved.path).on("error", () => response.destroy()).pipe(response);
+    createReadStream(resolved.path)
+      .on("error", () => response.destroy())
+      .pipe(response);
     return;
   }
 
@@ -1130,7 +1271,10 @@ async function routeRequest(
       sendJson(response, 200, { available: false, reason: found.reason, servers: [] });
       return;
     }
-    sendJson(response, 200, { available: true, servers: found.servers.map(({ port, command, cwd: serverCwd }) => ({ port, command, cwd: serverCwd })) });
+    sendJson(response, 200, {
+      available: true,
+      servers: found.servers.map(({ port, command, cwd: serverCwd }) => ({ port, command, cwd: serverCwd })),
+    });
     return;
   }
   if (url.pathname === "/api/preview" && request.method === "POST") {
@@ -1142,16 +1286,29 @@ async function routeRequest(
       return;
     }
     if (!(await doorReady())) {
-      sendJson(response, 409, { error: "This computer's preview door is not set up. Run `npx tavi-host pair` on it once; it adds the door.", doorMissing: true });
+      sendJson(response, 409, {
+        error: "This computer's preview door is not set up. Run `npx tavi-host pair` on it once; it adds the door.",
+        doorMissing: true,
+      });
       return;
     }
-    const opened = await previews.open({ deviceId: deviceIdOf(request, config, devices), port: record.port, cwd: cwd.path });
+    const opened = await previews.open({
+      deviceId: deviceIdOf(request, config, devices),
+      port: record.port,
+      cwd: cwd.path,
+    });
     if (!opened.ok) {
       sendJson(response, opened.status, { error: opened.error });
       return;
     }
     const { preview, ticket } = opened.opened;
-    sendJson(response, 201, { id: preview.id, port: preview.port, doorPort: config.previewDoorPort, cookieName: TICKET_COOKIE, ticket });
+    sendJson(response, 201, {
+      id: preview.id,
+      port: preview.port,
+      doorPort: config.previewDoorPort,
+      cookieName: TICKET_COOKIE,
+      ticket,
+    });
     return;
   }
   if (url.pathname === "/api/preview/stop" && request.method === "POST") {
@@ -1213,7 +1370,13 @@ function withOwnPortsExcluded(
   config: HostConfig,
 ): DiscoveryDeps & { kill?: (pid: number) => void } {
   const base = discovery ?? defaultDiscoveryDeps();
-  return { ...base, exclude: { pids: base.exclude?.pids ?? [], ports: [...(base.exclude?.ports ?? []), config.port, config.previewPort] } };
+  return {
+    ...base,
+    exclude: {
+      pids: base.exclude?.pids ?? [],
+      ports: [...(base.exclude?.ports ?? []), config.port, config.previewPort],
+    },
+  };
 }
 
 // The host's own token acts as one pseudo-device; a paired phone is itself.
@@ -1223,11 +1386,7 @@ function deviceIdOf(request: IncomingMessage, config: HostConfig, devices: Devic
   return devices.authorize(token ?? "")?.id ?? "unknown";
 }
 
-function spawnAttachmentTerminal(
-  attach: AttachCommand,
-  config: HostConfig,
-  spawnTerminal: typeof pty.spawn,
-): pty.IPty {
+function spawnAttachmentTerminal(attach: AttachCommand, config: HostConfig, spawnTerminal: typeof pty.spawn): pty.IPty {
   const env = { ...process.env };
   delete env.npm_config_prefix;
   delete env.NPM_CONFIG_PREFIX;
@@ -1557,8 +1716,6 @@ function offersTerminalProtocol(request: IncomingMessage): boolean {
   const value = request.headers["sec-websocket-protocol"];
   const header = Array.isArray(value) ? value.join(",") : value;
   return (
-    header
-      ?.split(",")
-      .some((protocol) => [TERMINAL_PROTOCOL, TERMINAL_PROTOCOL_V2].includes(protocol.trim())) ?? false
+    header?.split(",").some((protocol) => [TERMINAL_PROTOCOL, TERMINAL_PROTOCOL_V2].includes(protocol.trim())) ?? false
   );
 }

@@ -26,11 +26,7 @@ test("install replaces the legacy curl command and keeps foreign hooks", () => {
   const legacyTavi = {
     hooks: [{ type: "command", command: "curl -s http://127.0.0.1:4820/api/hooks/claude" }],
   };
-  writeFileSync(
-    settingsPath,
-    JSON.stringify({ hooks: { Notification: [foreign, legacyTavi] } }),
-    "utf8",
-  );
+  writeFileSync(settingsPath, JSON.stringify({ hooks: { Notification: [foreign, legacyTavi] } }), "utf8");
 
   const { changed } = installClaudeHooks(config, settingsPath);
   rmSync(directory, { recursive: true, force: true });
@@ -58,48 +54,42 @@ test("relay posts stdin to the host with the token from the config file", async 
   const home = mkdtempSync(path.join(tmpdir(), "tavi-relay-home-"));
   context.after(() => rmSync(home, { recursive: true, force: true }));
   mkdirSync(path.join(home, ".tavi"), { recursive: true });
-  writeFileSync(
-    path.join(home, ".tavi", "config.json"),
-    JSON.stringify({ token: "relay-secret" }),
-    "utf8",
-  );
+  writeFileSync(path.join(home, ".tavi", "config.json"), JSON.stringify({ token: "relay-secret" }), "utf8");
 
-  const received = await new Promise<{ authorization: string; body: string; stdout: string }>(
-    (resolve, reject) => {
-      const server = createServer((request, response) => {
-        const chunks: Buffer[] = [];
-        request.on("data", (chunk) => chunks.push(chunk));
-        request.on("end", () => {
-          response.writeHead(200).end("{}");
-          server.close();
-          resolve({
-            authorization: String(request.headers.authorization),
-            body: Buffer.concat(chunks).toString("utf8"),
-            stdout,
-          });
-        });
-      });
-      let stdout = "";
-      server.listen(0, "127.0.0.1", () => {
-        const address = server.address();
-        const port = typeof address === "object" && address ? address.port : 0;
-        const relay = spawn(
-          process.execPath,
-          ["--import", "tsx", path.join(import.meta.dirname, "claude-hook-relay.ts"), String(port)],
-          { env: { ...process.env, HOME: home } },
-        );
-        relay.stdout.on("data", (chunk) => {
-          stdout += chunk.toString("utf8");
-        });
-        relay.on("error", reject);
-        relay.stdin.end('{"hook_event_name":"PermissionRequest","session_id":"abc"}');
-      });
-      setTimeout(() => {
+  const received = await new Promise<{ authorization: string; body: string; stdout: string }>((resolve, reject) => {
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk) => chunks.push(chunk));
+      request.on("end", () => {
+        response.writeHead(200).end("{}");
         server.close();
-        reject(new Error("relay never reached the host"));
-      }, 10_000).unref();
-    },
-  );
+        resolve({
+          authorization: String(request.headers.authorization),
+          body: Buffer.concat(chunks).toString("utf8"),
+          stdout,
+        });
+      });
+    });
+    let stdout = "";
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      const relay = spawn(
+        process.execPath,
+        ["--import", "tsx", path.join(import.meta.dirname, "claude-hook-relay.ts"), String(port)],
+        { env: { ...process.env, HOME: home } },
+      );
+      relay.stdout.on("data", (chunk) => {
+        stdout += chunk.toString("utf8");
+      });
+      relay.on("error", reject);
+      relay.stdin.end('{"hook_event_name":"PermissionRequest","session_id":"abc"}');
+    });
+    setTimeout(() => {
+      server.close();
+      reject(new Error("relay never reached the host"));
+    }, 10_000).unref();
+  });
 
   assert.equal(received.authorization, "Bearer relay-secret");
   assert.match(received.body, /PermissionRequest/);

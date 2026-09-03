@@ -38,10 +38,7 @@ test("parses claude hook payload field names", () => {
 test("permission notification blocks and lifecycle events resolve", () => {
   const overlay = new AttentionOverlay();
 
-  assert.equal(
-    overlay.report({ event: "Notification", sessionId: "sess-1", message: "needs your permission" }),
-    true,
-  );
+  assert.equal(overlay.report({ event: "Notification", sessionId: "sess-1", message: "needs your permission" }), true);
   assert.equal(overlay.isBlocked("sess-1"), true);
 
   // Idle reminders are not act-now facts.

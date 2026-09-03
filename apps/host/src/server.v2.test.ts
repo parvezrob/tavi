@@ -30,9 +30,7 @@ const config: HostConfig = {
   previewDoorPort: 8443,
 };
 
-type V2Event =
-  | { kind: "control"; message: ServerTerminalMessage }
-  | { kind: "output"; offset: number; data: string };
+type V2Event = { kind: "control"; message: ServerTerminalMessage } | { kind: "output"; offset: number; data: string };
 
 test("v2 negotiates, streams binary output frames, and keeps the pty across reconnects for resume", async () => {
   const harness = new TerminalHarness();
@@ -166,9 +164,7 @@ test("herdr agents are attachable terminal targets with honest failure modes", a
         ? { available: true as const, workspaces: [] }
         : { available: false as const, reason: "The Herdr server is not running." },
     closeTab: async () =>
-      herdrUp
-        ? { closed: true as const }
-        : { closed: false as const, reason: "The Herdr server is not running." },
+      herdrUp ? { closed: true as const } : { closed: false as const, reason: "The Herdr server is not running." },
     renameTab: async (_tabId: string, label: string) =>
       herdrUp
         ? { renamed: true as const, label }
@@ -199,9 +195,7 @@ test("herdr agents are attachable terminal targets with honest failure modes", a
         ? { available: true as const, preview: `preview of ${paneId} (${lines} lines)` }
         : { available: false as const, reason: "The Herdr server is not running." },
     readDialog: async () =>
-      herdrUp
-        ? { present: false as const }
-        : { available: false as const, reason: "The Herdr server is not running." },
+      herdrUp ? { present: false as const } : { available: false as const, reason: "The Herdr server is not running." },
     decideAgent: async () =>
       herdrUp
         ? { decided: true as const, sent: "Enter" }
@@ -459,18 +453,12 @@ class TerminalHarness {
     return server;
   }
 
-  async openSocket(
-    server: Server,
-    query = "",
-    path = "/api/agents/fixture/terminal",
-  ): Promise<V2Socket> {
+  async openSocket(server: Server, query = "", path = "/api/agents/fixture/terminal"): Promise<V2Socket> {
     const address = server.address() as AddressInfo;
     const suffix = query ? `?${query}` : "";
-    const websocket = new WebSocket(
-      `ws://127.0.0.1:${address.port}${path}${suffix}`,
-      [TERMINAL_PROTOCOL_V2],
-      { headers: { Authorization: `Bearer ${config.token}` } },
-    );
+    const websocket = new WebSocket(`ws://127.0.0.1:${address.port}${path}${suffix}`, [TERMINAL_PROTOCOL_V2], {
+      headers: { Authorization: `Bearer ${config.token}` },
+    });
     const socket = new V2Socket(websocket);
     await once(websocket, "open");
     assert.equal(websocket.protocol, TERMINAL_PROTOCOL_V2);

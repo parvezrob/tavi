@@ -17,6 +17,7 @@
   "files": [
     "dist",
     "!dist/**/*.test.*",
+    "!dist/testing",
     "scripts/ensure-node-pty.mjs",
     "LICENSE"
   ],
@@ -36,7 +37,9 @@
     "dev": "tsx watch src/index.ts",
     "devices": "node dist/index.js devices",
     "doctor": "node dist/index.js doctor",
+    "format": "biome format --write .",
     "hooks:install": "node dist/index.js install-claude-hooks",
+    "lint": "biome ci .",
     "pair": "node dist/index.js pair",
     "postinstall": "node scripts/ensure-node-pty.mjs",
     "prepublishOnly": "npm run build && npm test",
@@ -52,6 +55,7 @@
     "ws": "^8.21.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.12",
     "@types/node": "^24.3.0",
     "@types/qrcode-terminal": "^0.12.2",
     "@types/ws": "^8.18.1",

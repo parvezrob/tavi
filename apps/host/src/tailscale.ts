@@ -49,7 +49,12 @@ export function tailscaleBinary(): Promise<string | null> {
   resolved = (async () => {
     const onPath = await new Promise<string | null>((resolve) => {
       execFile(shell, ["-lc", "command -v tailscale"], { timeout: 10_000 }, (error, stdout) => {
-        const found = String(stdout ?? "").trim().split("\n").pop()?.trim() ?? "";
+        const found =
+          String(stdout ?? "")
+            .trim()
+            .split("\n")
+            .pop()
+            ?.trim() ?? "";
         resolve(!error && found.startsWith("/") ? found : null);
       });
     });
@@ -74,7 +79,11 @@ export function tailscaleBinary(): Promise<string | null> {
 const defaultRunner: TailscaleRunner = async (args) => {
   const binary = await tailscaleBinary();
   if (!binary) throw new Error("tailscale is not installed");
-  const { stdout } = await execFileAsync(binary, args, { timeout: STATUS_TIMEOUT_MS, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
+  const { stdout } = await execFileAsync(binary, args, {
+    timeout: STATUS_TIMEOUT_MS,
+    encoding: "utf8",
+    maxBuffer: 4 * 1024 * 1024,
+  });
   return { stdout };
 };
 
@@ -107,9 +116,7 @@ export function describePeerPath(status: unknown, address: string): ConnectionPa
   const record = status as { Self?: unknown; Peer?: Record<string, unknown> };
   if (hasAddress(record.Self, address)) return { path: "direct" };
   const peers = record.Peer && typeof record.Peer === "object" ? Object.values(record.Peer) : [];
-  const peer = peers.find((entry) => hasAddress(entry, address)) as
-    | { CurAddr?: unknown; Relay?: unknown }
-    | undefined;
+  const peer = peers.find((entry) => hasAddress(entry, address)) as { CurAddr?: unknown; Relay?: unknown } | undefined;
   if (!peer) return { path: "unknown" };
   if (typeof peer.CurAddr === "string" && peer.CurAddr.length > 0) return { path: "direct" };
   if (typeof peer.Relay === "string" && peer.Relay.length > 0) return { path: "relay", relay: peer.Relay };

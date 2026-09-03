@@ -2,7 +2,16 @@
 import { AttentionOverlay, AttentionReconciler, AttentiveAgentEvents } from "./attention.js";
 import { homedir } from "node:os";
 import { removeCommandLink } from "./command-link.js";
-import { bootstrap, BootstrapError, defaultDeps, diagnose, doorReady, durablePackageRoot, formatChecks, serviceEntrypoint } from "./bootstrap.js";
+import {
+  bootstrap,
+  BootstrapError,
+  defaultDeps,
+  diagnose,
+  doorReady,
+  durablePackageRoot,
+  formatChecks,
+  serviceEntrypoint,
+} from "./bootstrap.js";
 import { PreviewRegistry, createPreviewDoor } from "./preview.js";
 import { installClaudeHooks, removeClaudeHooks } from "./claude-hooks.js";
 import { uninstallHerdrService } from "./herdr-service.js";
@@ -101,7 +110,9 @@ if (command === "uninstall") {
       if (!tailscale) return [];
       try {
         const { stdout } = await execFileAsync(tailscale, ["serve", "status", "--json"], { timeout: 10_000 });
-        const status = JSON.parse(stdout) as { Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }> };
+        const status = JSON.parse(stdout) as {
+          Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }>;
+        };
         return Object.entries(status.Web ?? {}).flatMap(([host, site]) =>
           Object.values(site.Handlers ?? {}).map((handler): [string, string] => [host, handler.Proxy ?? ""]),
         );
@@ -131,7 +142,9 @@ if (process.argv[2] === "pair") {
     process.exit(0);
   } catch (error) {
     if (error instanceof BootstrapError) {
-      console.error(`Not ready to pair yet.\n${error.message}\n\nFix the above (or answer yes next time) and run \`tavi pair\` again; \`tavi doctor\` shows every check.`);
+      console.error(
+        `Not ready to pair yet.\n${error.message}\n\nFix the above (or answer yes next time) and run \`tavi pair\` again; \`tavi doctor\` shows every check.`,
+      );
     } else {
       console.error(describeFailure(error));
     }
@@ -178,7 +191,9 @@ if (command === "update") {
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      const health = await fetch(`http://${config.bindHost}:${config.port}/api/health`, { signal: AbortSignal.timeout(1500) }).catch(() => undefined);
+      const health = await fetch(`http://${config.bindHost}:${config.port}/api/health`, {
+        signal: AbortSignal.timeout(1500),
+      }).catch(() => undefined);
       const body = health?.ok ? ((await health.json().catch(() => ({}))) as { version?: string }) : {};
       if (body.version === outcome.to) {
         console.log(` done. Tavi ${outcome.to} is running.`);
@@ -193,7 +208,16 @@ if (command === "update") {
   process.exit(outcome.status === "failed" ? 1 : 0);
 }
 
-const KNOWN = ["token", "install-service", "uninstall-service", "uninstall", "pair", "devices", "install-claude-hooks", "update"];
+const KNOWN = [
+  "token",
+  "install-service",
+  "uninstall-service",
+  "uninstall",
+  "pair",
+  "devices",
+  "install-claude-hooks",
+  "update",
+];
 if (command !== undefined && !KNOWN.includes(command)) {
   console.error(`Unknown command: ${command}\n\n${USAGE}`);
   process.exit(2);
@@ -211,10 +235,7 @@ if (process.argv[2] === "install-claude-hooks") {
 
 const herdr = new HerdrService({ socketPath: config.herdrSocket });
 const attention = new AttentionOverlay();
-const agentEvents = new AttentiveAgentEvents(
-  new HerdrEventFeed(herdr, { socketPath: config.herdrSocket }),
-  attention,
-);
+const agentEvents = new AttentiveAgentEvents(new HerdrEventFeed(herdr, { socketPath: config.herdrSocket }), attention);
 // Hook-reported blocks are checked against the screen so an Esc'd or
 // abandoned dialog cannot pin "Needs you" (see AttentionReconciler).
 const reconciler = new AttentionReconciler({
@@ -267,7 +288,12 @@ const server = await createTaviServer({
   update: async () =>
     updater
       ? updater.checkNow()
-      : { status: "skipped", reason: managed ? "automatic updates are off (TAVI_AUTO_UPDATE=off)" : "this host runs from a checkout or global install; update it there" },
+      : {
+          status: "skipped",
+          reason: managed
+            ? "automatic updates are off (TAVI_AUTO_UPDATE=off)"
+            : "this host runs from a checkout or global install; update it there",
+        },
 });
 server.on("close", () => reconciler.stop());
 server.on("error", (error: NodeJS.ErrnoException) => {
@@ -286,7 +312,9 @@ server.on("error", (error: NodeJS.ErrnoException) => {
 door.on("error", (error: NodeJS.ErrnoException) => {
   // The main server's EADDRINUSE handler above explains a second copy; a
   // busy preview port alone only costs previews, so say so and carry on.
-  console.error(`Dev-server previews are off: the preview port ${config.previewPort} is busy (${error.code ?? error.message}). Set TAVI_PREVIEW_PORT to a free port.`);
+  console.error(
+    `Dev-server previews are off: the preview port ${config.previewPort} is busy (${error.code ?? error.message}). Set TAVI_PREVIEW_PORT to a free port.`,
+  );
 });
 door.listen(config.previewPort, "127.0.0.1");
 server.listen(config.port, config.bindHost, () => {

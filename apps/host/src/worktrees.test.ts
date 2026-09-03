@@ -10,7 +10,13 @@ import { awaitPendingDeletes, createWorktree, previewRemoval, removeWorktree, wo
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf8",
-    env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "t",
+      GIT_AUTHOR_EMAIL: "t@t",
+      GIT_COMMITTER_NAME: "t",
+      GIT_COMMITTER_EMAIL: "t@t",
+    },
   });
 }
 
@@ -29,16 +35,26 @@ function repo(): { dir: string; parent: string } {
 }
 
 test("worktreePath sits beside the repository, one folder per repo, slash → dash", () => {
-  assert.equal(worktreePath("/Users/me/Projects/app", "fix/login redirect"), "/Users/me/Projects/app-worktrees/fix-login-redirect");
+  assert.equal(
+    worktreePath("/Users/me/Projects/app", "fix/login redirect"),
+    "/Users/me/Projects/app-worktrees/fix-login-redirect",
+  );
   // Punctuation never leaves a leading dash or a run of them (owner saw
   // "(test)worktree" become "-test-worktree").
-  assert.equal(worktreePath("/Users/me/Projects/app", "(test)worktree"), "/Users/me/Projects/app-worktrees/test-worktree");
+  assert.equal(
+    worktreePath("/Users/me/Projects/app", "(test)worktree"),
+    "/Users/me/Projects/app-worktrees/test-worktree",
+  );
   assert.equal(worktreePath("/Users/me/Projects/app", "--- ---"), "/Users/me/Projects/app-worktrees/worktree");
 });
 
 test("createWorktree adds the branch off the default base, sets the configs, copies .env (#75)", async () => {
   const { dir, parent } = repo();
-  const result = await createWorktree({ repo: path.join(dir, "src-does-not-matter", ".."), branch: "fix/foo" }, [parent], { allowOutsideRoots: false });
+  const result = await createWorktree(
+    { repo: path.join(dir, "src-does-not-matter", ".."), branch: "fix/foo" },
+    [parent],
+    { allowOutsideRoots: false },
+  );
   assert.ok(result.ok, JSON.stringify(result));
   const created = result.worktree;
   assert.equal(created.path, path.join(parent, "repo-worktrees", "fix-foo"));
@@ -68,7 +84,9 @@ test("createWorktree refuses an existing branch, a bad name, a missing base, and
   assert.equal(flag.ok, false);
   if (!flag.ok) assert.equal(flag.status, 400);
 
-  const base = await createWorktree({ repo: dir, branch: "fix/bar", base: "nope" }, [parent], { allowOutsideRoots: false });
+  const base = await createWorktree({ repo: dir, branch: "fix/bar", base: "nope" }, [parent], {
+    allowOutsideRoots: false,
+  });
   assert.equal(base.ok, false);
   if (!base.ok) assert.equal(base.status, 400);
 
@@ -113,30 +131,54 @@ async function removable(): Promise<{ dir: string; parent: string; wt: string }>
 }
 
 function agent(cwd: string, tabId: string): HerdrAgentInfo {
-  return { id: `p-${tabId}`, agent: "claude", status: "done", cwd, title: "", workspaceId: "w", tabId, focused: false, revision: 1, authority: "herdr" } as HerdrAgentInfo;
+  return {
+    id: `p-${tabId}`,
+    agent: "claude",
+    status: "done",
+    cwd,
+    title: "",
+    workspaceId: "w",
+    tabId,
+    focused: false,
+    revision: 1,
+    authority: "herdr",
+  } as HerdrAgentInfo;
 }
 
 test("removal preview names the uncommitted files, the unpushed commits, the agents inside, and whether the branch is merged", async () => {
   const { dir, wt } = await removable();
   // One agent in the worktree, one in the main checkout, one whose cwd is gone.
-  const preview = await previewRemoval(wt, { agents: async () => [agent(wt, "t1"), agent(dir, "t2"), agent(path.join(wt, "vanished"), "t3")] });
+  const preview = await previewRemoval(wt, {
+    agents: async () => [agent(wt, "t1"), agent(dir, "t2"), agent(path.join(wt, "vanished"), "t3")],
+  });
   assert.ok(preview.ok, JSON.stringify(preview));
   assert.equal(preview.preview.branch, "feat/gone");
   assert.equal(preview.preview.isMain, false);
   assert.equal(preview.preview.uncommitted.files, 1);
   assert.equal(preview.preview.uncommitted.additions, 1);
   assert.deepEqual(preview.preview.unpushed, { commits: 1, upstream: null, remote: "origin" });
-  assert.deepEqual(preview.preview.agents.map((a) => a.tabId), ["t1"]);
+  assert.deepEqual(
+    preview.preview.agents.map((a) => a.tabId),
+    ["t1"],
+  );
   assert.deepEqual(preview.preview.alsoClosed, []);
   assert.equal(preview.preview.branchMerged, false);
   assert.equal(preview.preview.locked, false);
 
   // herdr closes tabs: an agent elsewhere that shares tab t1 with the one
   // inside goes down too, and the preview names it (#83).
-  const shared = await previewRemoval(wt, { agents: async () => [agent(wt, "t1"), agent(dir, "t1"), agent(dir, "t2")] });
+  const shared = await previewRemoval(wt, {
+    agents: async () => [agent(wt, "t1"), agent(dir, "t1"), agent(dir, "t2")],
+  });
   assert.ok(shared.ok);
-  assert.deepEqual(shared.preview.agents.map((a) => a.tabId), ["t1"]);
-  assert.deepEqual(shared.preview.alsoClosed.map((a) => [a.tabId, a.cwd]), [["t1", dir]]);
+  assert.deepEqual(
+    shared.preview.agents.map((a) => a.tabId),
+    ["t1"],
+  );
+  assert.deepEqual(
+    shared.preview.alsoClosed.map((a) => [a.tabId, a.cwd]),
+    [["t1", dir]],
+  );
 
   const main = await previewRemoval(dir);
   assert.ok(main.ok);
@@ -172,7 +214,11 @@ test("removal counts a detached worktree's orphan commits, refuses a locked work
   assert.ok(existsSync(locked.wt));
   assert.equal(git(locked.dir, "worktree", "list").split("\n").filter(Boolean).length, 2);
   // "Unlock and remove" lifts the lock first, then removes as usual.
-  const unlocked = await removeWorktree(locked.wt, { confirm: { uncommitted: 1, unpushed: 1 }, deleteBranch: true, unlock: true });
+  const unlocked = await removeWorktree(locked.wt, {
+    confirm: { uncommitted: 1, unpushed: 1 },
+    deleteBranch: true,
+    unlock: true,
+  });
   assert.ok(unlocked.ok, JSON.stringify(unlocked));
   await awaitPendingDeletes();
   assert.equal(existsSync(locked.wt), false);
@@ -248,7 +294,13 @@ test("push-then-remove pushes, closes the agents, moves the folder aside, deregi
   const result = await removeWorktree(
     wt,
     { confirm: { uncommitted: 1, unpushed: 1 }, pushFirst: true },
-    { agents: async () => [agent(wt, "t1"), agent(wt, "t1"), agent(wt, "t3")], closeTab: async (tabId) => { closed.push(tabId); return true; } },
+    {
+      agents: async () => [agent(wt, "t1"), agent(wt, "t1"), agent(wt, "t3")],
+      closeTab: async (tabId) => {
+        closed.push(tabId);
+        return true;
+      },
+    },
   );
   assert.ok(result.ok, JSON.stringify(result));
   assert.equal(result.removed.pushed, 1);

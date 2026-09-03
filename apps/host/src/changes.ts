@@ -68,9 +68,7 @@ export interface FileDiff {
   binary: boolean;
 }
 
-export type FileDiffResult =
-  | { ok: true; diff: FileDiff }
-  | { ok: false; status: 400 | 403 | 404 | 503; error: string };
+export type FileDiffResult = { ok: true; diff: FileDiff } | { ok: false; status: 400 | 403 | 404 | 503; error: string };
 
 // One file's working-tree change against HEAD: staged and unstaged in one
 // view, untracked files as an all-additions diff. `relativePath` is what
@@ -84,7 +82,11 @@ export async function diffFile(cwd: string, relativePath: string): Promise<FileD
     return { ok: false, status: 400, error: "path must be relative to the repository." };
   }
   if (looksLikeASecret(normalized)) {
-    return { ok: false, status: 403, error: "This file looks like it holds credentials, so Tavi does not show its changes." };
+    return {
+      ok: false,
+      status: 403,
+      error: "This file looks like it holds credentials, so Tavi does not show its changes.",
+    };
   }
   try {
     // Tracked (staged and/or unstaged): one diff against HEAD.
@@ -128,7 +130,8 @@ async function repositoryRoot(cwd: string): Promise<RootResult> {
   try {
     const { stdout } = await git(cwd, ["rev-parse", "--show-toplevel"]);
     const root = stdout.trim();
-    if (!root) return { ok: false, status: 404, error: "This folder is not inside a git repository.", notRepository: true };
+    if (!root)
+      return { ok: false, status: 404, error: "This folder is not inside a git repository.", notRepository: true };
     return { ok: true, path: root };
   } catch (error) {
     const message = describeGitError(error);
@@ -138,7 +141,12 @@ async function repositoryRoot(cwd: string): Promise<RootResult> {
     if (/ENOENT/.test(message) && /git/.test(message)) {
       return { ok: false, status: 404, error: "git is not installed on this computer.", notRepository: true };
     }
-    return { ok: false, status: 404, error: `This folder cannot be read as a git repository: ${message}`, notRepository: true };
+    return {
+      ok: false,
+      status: 404,
+      error: `This folder cannot be read as a git repository: ${message}`,
+      notRepository: true,
+    };
   }
 }
 
@@ -215,4 +223,3 @@ async function numstats(repository: string): Promise<Map<string, { additions: nu
   }
   return result;
 }
-

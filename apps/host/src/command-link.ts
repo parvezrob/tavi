@@ -35,7 +35,10 @@ export interface CommandLinkStatus {
 // without anyone editing a profile. Otherwise ~/.local/bin, which most Linux
 // shells add when it exists, and say so if this one does not.
 export function chooseBinDir(env: NodeJS.ProcessEnv, homeDir: string): CommandLinkPlan {
-  const onPath = (env.PATH ?? "").split(path.delimiter).filter(Boolean).map((entry) => path.resolve(entry));
+  const onPath = (env.PATH ?? "")
+    .split(path.delimiter)
+    .filter(Boolean)
+    .map((entry) => path.resolve(entry));
   for (const candidate of ["/opt/homebrew/bin", "/usr/local/bin"]) {
     if (onPath.includes(candidate) && writable(candidate)) {
       return { binDir: candidate, path: path.join(candidate, COMMAND_NAME), onPath: true };
@@ -77,7 +80,9 @@ export function isOurCommandLink(file: string): boolean {
 
 // Where the shim may live on this machine, for status and removal.
 export function commandLinkCandidates(homeDir: string): string[] {
-  return ["/opt/homebrew/bin", "/usr/local/bin", path.join(homeDir, ".local", "bin")].map((dir) => path.join(dir, COMMAND_NAME));
+  return ["/opt/homebrew/bin", "/usr/local/bin", path.join(homeDir, ".local", "bin")].map((dir) =>
+    path.join(dir, COMMAND_NAME),
+  );
 }
 
 export function commandLinkStatus(options: {
@@ -101,7 +106,12 @@ export function commandLinkStatus(options: {
       fix: pathHint(dir),
     };
   }
-  return { needed: true, ok: false, detail: `The \`${COMMAND_NAME}\` command is not set up.`, fix: "Run `npx tavi-host pair` again; it adds the command." };
+  return {
+    needed: true,
+    ok: false,
+    detail: `The \`${COMMAND_NAME}\` command is not set up.`,
+    fix: "Run `npx tavi-host pair` again; it adds the command.",
+  };
 }
 
 export function pathHint(dir: string): string {

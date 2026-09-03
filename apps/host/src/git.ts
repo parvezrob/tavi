@@ -52,7 +52,11 @@ export interface PullRequestRef {
 // How a pull request is looked up for a branch; injectable so tests need
 // no `gh`. The default shells out to `gh pr list`. The signal fires when
 // the pass's budget runs out: a lookup that can stop should.
-export type PullRequestLookup = (repository: string, branch: string, signal?: AbortSignal) => Promise<PullRequestRef | null>;
+export type PullRequestLookup = (
+  repository: string,
+  branch: string,
+  signal?: AbortSignal,
+) => Promise<PullRequestRef | null>;
 
 export interface ListReposOptions {
   pullRequests?: PullRequestLookup;
@@ -104,7 +108,9 @@ export async function listRepos(roots: string[], options: ListReposOptions = {})
       break;
     }
     try {
-      const commonDir = (await git(workspace.path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).stdout.trim();
+      const commonDir = (
+        await git(workspace.path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+      ).stdout.trim();
       if (!commonDir || seen.has(commonDir)) continue;
       seen.add(commonDir);
 
@@ -164,7 +170,11 @@ export function invalidateRepos(): void {
   reposCache = null;
 }
 
-export async function listReposCached(roots: string[], options: ListReposOptions = {}, fresh = false): Promise<ReposAnswer> {
+export async function listReposCached(
+  roots: string[],
+  options: ListReposOptions = {},
+  fresh = false,
+): Promise<ReposAnswer> {
   const key = roots.join("\0");
   const now = monotonicNow();
   const refresh = (): Promise<ReposAnswer> => {
@@ -231,8 +241,7 @@ export function parseWorktreeList(raw: string): WorktreeInfo[] {
       else if (line.startsWith("branch ")) {
         const ref = line.slice("branch ".length);
         branch = ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : ref;
-      }
-      else if (line === "bare") bare = true;
+      } else if (line === "bare") bare = true;
       else if (line.startsWith("locked")) locked = true;
       else if (line.startsWith("prunable")) prunable = true;
     }
@@ -265,7 +274,11 @@ export function parseWorktreeList(raw: string): WorktreeInfo[] {
 // default is named as a full ref — a tag called `main` must not win — and
 // when there is no local copy, its remote-tracking ref stands in. A
 // detached worktree is compared by its HEAD (#72).
-async function attachAheadBehind(repository: string, worktrees: WorktreeInfo[], defaultBranch: string | null): Promise<void> {
+async function attachAheadBehind(
+  repository: string,
+  worktrees: WorktreeInfo[],
+  defaultBranch: string | null,
+): Promise<void> {
   if (!defaultBranch) return;
   const target = (await refExists(repository, `refs/heads/${defaultBranch}`))
     ? `refs/heads/${defaultBranch}`
@@ -273,7 +286,11 @@ async function attachAheadBehind(repository: string, worktrees: WorktreeInfo[], 
       ? `refs/remotes/origin/${defaultBranch}`
       : null;
   if (!target) return;
-  const branches = [...new Set(worktrees.flatMap((worktree) => (worktree.branch && worktree.branch !== defaultBranch ? [worktree.branch] : [])))];
+  const branches = [
+    ...new Set(
+      worktrees.flatMap((worktree) => (worktree.branch && worktree.branch !== defaultBranch ? [worktree.branch] : [])),
+    ),
+  ];
   const counts = new Map<string, [number, number]>();
   if (branches.length > 0) {
     try {
@@ -285,7 +302,10 @@ async function attachAheadBehind(repository: string, worktrees: WorktreeInfo[], 
       for (const line of stdout.split("\n")) {
         const [ref, pair] = line.split("\0");
         if (!ref?.startsWith("refs/heads/")) continue;
-        const [ahead = 0, behind = 0] = (pair ?? "").trim().split(/\s+/).map((value) => Number.parseInt(value, 10) || 0);
+        const [ahead = 0, behind = 0] = (pair ?? "")
+          .trim()
+          .split(/\s+/)
+          .map((value) => Number.parseInt(value, 10) || 0);
         counts.set(ref.slice("refs/heads/".length), [ahead, behind]);
       }
     } catch {
@@ -322,7 +342,9 @@ async function attachPullRequests(
   const candidates = worktrees.filter((worktree) => worktree.branch && worktree.branch !== defaultBranch);
   if (candidates.length === 0) return;
   const controller = new AbortController();
-  const expired = new Promise<null>((resolve) => controller.signal.addEventListener("abort", () => resolve(null), { once: true }));
+  const expired = new Promise<null>((resolve) =>
+    controller.signal.addEventListener("abort", () => resolve(null), { once: true }),
+  );
   const timer = setTimeout(() => controller.abort(), PR_PASS_BUDGET_MS);
   timer.unref();
   let next = 0;
@@ -361,7 +383,11 @@ const GH_TIMEOUT_MS = 5_000;
 type PullRequestCacheEntry = { at: number; ttl: number; value: Promise<PullRequestRef | null> };
 const pullRequestCache = new Map<string, PullRequestCacheEntry>();
 
-export function cachedPullRequestLookup(repository: string, branch: string, signal?: AbortSignal): Promise<PullRequestRef | null> {
+export function cachedPullRequestLookup(
+  repository: string,
+  branch: string,
+  signal?: AbortSignal,
+): Promise<PullRequestRef | null> {
   const key = `${repository}\0${branch}`;
   const now = monotonicNow();
   const hit = pullRequestCache.get(key);
@@ -396,7 +422,11 @@ function monotonicNow(): number {
   return Number(process.hrtime.bigint() / 1_000_000n);
 }
 
-async function ghPullRequest(repository: string, branch: string, signal?: AbortSignal): Promise<{ value: PullRequestRef | null; failed: boolean }> {
+async function ghPullRequest(
+  repository: string,
+  branch: string,
+  signal?: AbortSignal,
+): Promise<{ value: PullRequestRef | null; failed: boolean }> {
   try {
     const { stdout } = await runGh(
       repository,
@@ -461,9 +491,17 @@ export async function findDefaultBranch(mainWorktreePath: string): Promise<strin
 // repository with thousands of stale branches does not turn one poll into
 // a megabyte, and said so when cut. Empty when git cannot list (a repo
 // with no commits yet).
-async function listBranches(repository: string, defaultBranch: string | null): Promise<{ names: string[]; truncated: boolean }> {
+async function listBranches(
+  repository: string,
+  defaultBranch: string | null,
+): Promise<{ names: string[]; truncated: boolean }> {
   try {
-    const { stdout } = await git(repository, ["for-each-ref", "--format=%(refname:short)", "--sort=refname", "refs/heads/"]);
+    const { stdout } = await git(repository, [
+      "for-each-ref",
+      "--format=%(refname:short)",
+      "--sort=refname",
+      "refs/heads/",
+    ]);
     const names = stdout.split("\n").filter((name) => name.length > 0);
     const others = names.filter((name) => name !== defaultBranch);
     const rest = others.slice(0, MAX_BRANCHES);
@@ -487,11 +525,18 @@ export async function refExists(repository: string, ref: string): Promise<boolea
 // ahead/behind helper (#83; source-control.ts and pull-requests.ts share
 // it). 0/0 when either side is missing or they are the same ref, and when
 // a side does not resolve (a remote-only default with no local copy).
-export async function aheadBehind(repository: string, left: string | null, right: string | null): Promise<[number, number]> {
+export async function aheadBehind(
+  repository: string,
+  left: string | null,
+  right: string | null,
+): Promise<[number, number]> {
   if (!left || !right || left === right) return [0, 0];
   try {
     const { stdout } = await git(repository, ["rev-list", "--left-right", "--count", `${left}...${right}`]);
-    const [ahead, behind] = stdout.trim().split(/\s+/).map((value) => Number.parseInt(value, 10) || 0);
+    const [ahead, behind] = stdout
+      .trim()
+      .split(/\s+/)
+      .map((value) => Number.parseInt(value, 10) || 0);
     return [ahead ?? 0, behind ?? 0];
   } catch {
     return [0, 0];

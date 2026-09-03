@@ -54,7 +54,11 @@ test("revoking one phone leaves the others paired", () => {
 
 test("last-seen is recorded but not on every request", () => {
   let tick = 0;
-  const registry = new DeviceRegistry(scratch(), () => new Date(1_700_000_000_000 + tick), () => {});
+  const registry = new DeviceRegistry(
+    scratch(),
+    () => new Date(1_700_000_000_000 + tick),
+    () => {},
+  );
   const { credential } = registry.add("phone");
 
   registry.authorize(credential);

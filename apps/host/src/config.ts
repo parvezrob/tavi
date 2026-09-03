@@ -41,10 +41,7 @@ interface StoredConfig {
   token: string;
 }
 
-type TokenFileState =
-  | { status: "missing" }
-  | { status: "valid"; token: string }
-  | { status: "invalid" };
+type TokenFileState = { status: "missing" } | { status: "valid"; token: string } | { status: "invalid" };
 
 export interface HostConfig {
   bindHost: string;
@@ -85,9 +82,7 @@ export function loadConfig(options: LoadConfigOptions = {}): HostConfig {
   const stateDir = explicitStateDirectory
     ? path.resolve(explicitStateDirectory)
     : path.join(homeDirectory, DEFAULT_STATE_DIRECTORY);
-  const legacyStateDir = explicitStateDirectory
-    ? undefined
-    : path.join(homeDirectory, LEGACY_STATE_DIRECTORY);
+  const legacyStateDir = explicitStateDirectory ? undefined : path.join(homeDirectory, LEGACY_STATE_DIRECTORY);
   if (legacyStateDir) migrateLegacyStateDirectory(legacyStateDir, stateDir, report);
   const rawPort = Number.parseInt(read("PORT") || "8787", 10);
   const previewPort = portOr(read("PREVIEW_PORT"), 8788);
@@ -107,8 +102,7 @@ export function loadConfig(options: LoadConfigOptions = {}): HostConfig {
     port: Number.isFinite(rawPort) && rawPort > 0 && rawPort < 65_536 ? rawPort : 8787,
     token: read("TOKEN") || getOrCreateToken(stateDir, legacyStateDir),
     shell: read("SHELL") || env.SHELL || (operatingSystem === "win32" ? "powershell.exe" : "/bin/sh"),
-    herdrSocket:
-      read("HERDR_SOCKET") || path.join(homeDirectory, ".config", "herdr", "herdr.sock"),
+    herdrSocket: read("HERDR_SOCKET") || path.join(homeDirectory, ".config", "herdr", "herdr.sock"),
     roots: configuredRoots?.length ? configuredRoots : defaultRoots(homeDirectory),
     stateDir,
     machineName: read("MACHINE_NAME") || machineHostname.split(".")[0] || machineHostname,
@@ -254,9 +248,7 @@ function syncDirectory(directory: string): void {
 }
 
 function defaultRoots(homeDirectory: string): string[] {
-  const candidates = ["Code", "Projects", "Developer", "Documents"].map((name) =>
-    path.join(homeDirectory, name),
-  );
+  const candidates = ["Code", "Projects", "Developer", "Documents"].map((name) => path.join(homeDirectory, name));
   return candidates.filter(existsSync);
 }
 

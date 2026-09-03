@@ -111,5 +111,8 @@ test("requires at least two options", () => {
 test("no option is marked selected when the arrow is absent", () => {
   const text = ["   1. Yes", "   2. No", "", " Enter to confirm · Esc to cancel"].join("\n");
   const dialog = parsePermissionDialog(text);
-  assert.equal(dialog?.options.every((option) => !option.selected), true);
+  assert.equal(
+    dialog?.options.every((option) => !option.selected),
+    true,
+  );
 });

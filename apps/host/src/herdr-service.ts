@@ -97,7 +97,9 @@ export async function uninstallHerdrService(options: HerdrServiceOptions = {}): 
   const execute = options.execute ?? defaultExecute;
   if (operatingSystem === "linux") return uninstallSystemdUnit(HERDR_UNIT, { homeDirectory, execute });
   const plist = path.join(homeDirectory, "Library", "LaunchAgents", `${HERDR_LABEL}.plist`);
-  await execute("launchctl", ["bootout", `gui/${options.userId ?? process.getuid?.() ?? 501}/${HERDR_LABEL}`]).catch(() => undefined);
+  await execute("launchctl", ["bootout", `gui/${options.userId ?? process.getuid?.() ?? 501}/${HERDR_LABEL}`]).catch(
+    () => undefined,
+  );
   await rm(plist, { force: true });
   return [plist];
 }
@@ -117,7 +119,12 @@ async function defaultExecute(command: string, args: string[]): Promise<void> {
   const { execFile } = await import("node:child_process");
   await new Promise<void>((resolve, reject) => {
     execFile(command, args, (error, _stdout, stderr) => {
-      if (error) reject(new Error(`\`${[command, ...args].join(" ")}\` failed${stderr ? `: ${stderr.trim()}` : ""}`, { cause: error }));
+      if (error)
+        reject(
+          new Error(`\`${[command, ...args].join(" ")}\` failed${stderr ? `: ${stderr.trim()}` : ""}`, {
+            cause: error,
+          }),
+        );
       else resolve();
     });
   });

@@ -1,6 +1,13 @@
 import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
-import { createServer, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import {
+  createServer,
+  request as httpRequest,
+  type IncomingHttpHeaders,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import { connect } from "node:net";
 import type { Duplex } from "node:stream";
 import { promises as fs } from "node:fs";
@@ -53,9 +60,7 @@ export interface OpenedPreview {
   ticket: string;
 }
 
-export type OpenResult =
-  | { ok: true; opened: OpenedPreview }
-  | { ok: false; status: 400 | 409 | 429; error: string };
+export type OpenResult = { ok: true; opened: OpenedPreview } | { ok: false; status: 400 | 409 | 429; error: string };
 
 export interface PreviewRegistryOptions {
   now?: () => number;
@@ -217,7 +222,17 @@ export interface PreviewDoorOptions {
   target?: (preview: Preview) => { host: string; port: number };
 }
 
-const HOP_BY_HOP = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade", "proxy-connection"]);
+const HOP_BY_HOP = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "proxy-connection",
+]);
 
 export function createPreviewDoor(options: PreviewDoorOptions): Server {
   const { registry } = options;
@@ -226,7 +241,12 @@ export function createPreviewDoor(options: PreviewDoorOptions): Server {
   const server = createServer((request, response) => {
     const preview = registry.admit(ticketFrom(request.headers.cookie));
     if (!preview) {
-      refuse(response, 401, "Open this from Tavi", "This page is a private preview. Open it from the Tavi app on your phone, where the agent's terminal is.");
+      refuse(
+        response,
+        401,
+        "Open this from Tavi",
+        "This page is a private preview. Open it from the Tavi app on your phone, where the agent's terminal is.",
+      );
       return;
     }
     const upstream = target(preview);
@@ -251,7 +271,12 @@ export function createPreviewDoor(options: PreviewDoorOptions): Server {
         response.destroy();
         return;
       }
-      refuse(response, 502, `Nothing is answering on localhost:${preview.port}`, "The dev server this preview was showing has stopped or is not accepting connections. Start it again in the agent's terminal, then reopen the preview.");
+      refuse(
+        response,
+        502,
+        `Nothing is answering on localhost:${preview.port}`,
+        "The dev server this preview was showing has stopped or is not accepting connections. Start it again in the agent's terminal, then reopen the preview.",
+      );
     });
     request.pipe(proxied);
     request.on("aborted", () => proxied.destroy());
@@ -326,7 +351,11 @@ export function ticketFrom(cookieHeader: string | undefined): string | undefined
 // very machine: Host and Origin say `localhost:<port>` (Vite's and Next's
 // allowed-host checks refuse anything else), our ticket cookie is gone
 // (the dev app never learns it), the rest passes as-is.
-export function forwardHeaders(incoming: IncomingHttpHeaders, port: number, upgrade: boolean): Record<string, string | string[]> {
+export function forwardHeaders(
+  incoming: IncomingHttpHeaders,
+  port: number,
+  upgrade: boolean,
+): Record<string, string | string[]> {
   const headers: Record<string, string | string[]> = {};
   for (const [name, value] of Object.entries(incoming)) {
     if (value === undefined) continue;
@@ -397,7 +426,10 @@ function refuse(response: ServerResponse, status: number, title: string, body: s
 }
 
 function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] ?? char);
+  return text.replace(
+    /[&<>"']/g,
+    (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] ?? char,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -410,9 +442,7 @@ export interface ListeningServer {
   cwd: string;
 }
 
-export type CandidatesResult =
-  | { available: true; servers: ListeningServer[] }
-  | { available: false; reason: string };
+export type CandidatesResult = { available: true; servers: ListeningServer[] } | { available: false; reason: string };
 
 export interface DiscoveryDeps {
   // Never offered: this host process and its own ports (the host runs from
@@ -449,13 +479,23 @@ export function defaultDiscoveryDeps(): DiscoveryDeps {
 // wildcard TCP port whose working directory is this project (or a parent of
 // it — a monorepo's root dev server counts for the app inside it), and
 // inside the configured roots either way.
-export async function listProjectServers(cwd: string, roots: readonly string[], deps: DiscoveryDeps = defaultDiscoveryDeps()): Promise<CandidatesResult> {
+export async function listProjectServers(
+  cwd: string,
+  roots: readonly string[],
+  deps: DiscoveryDeps = defaultDiscoveryDeps(),
+): Promise<CandidatesResult> {
   let listeners: string;
   try {
     listeners = await deps.listListeners();
   } catch (error) {
     const code = (error as { code?: string }).code;
-    return { available: false, reason: code === "ENOENT" ? "lsof is not installed on this computer, so Tavi cannot find dev servers by itself. Type the port instead." : "Tavi could not list this computer's open ports. Type the port instead." };
+    return {
+      available: false,
+      reason:
+        code === "ENOENT"
+          ? "lsof is not installed on this computer, so Tavi cannot find dev servers by itself. Type the port instead."
+          : "Tavi could not list this computer's open ports. Type the port instead.",
+    };
   }
   const candidates = parseListeners(listeners);
   if (candidates.length === 0) return { available: true, servers: [] };
@@ -548,7 +588,8 @@ export async function stopProjectServer(
   if (!found.available) return { ok: false, status: 503, error: found.reason };
   const server = found.servers.find((candidate) => candidate.port === port);
   if (!server) return { ok: false, status: 404, error: `No server of this project is listening on localhost:${port}.` };
-  if (server.pid <= 1 || server.pid === process.pid) return { ok: false, status: 404, error: "That process is not one Tavi will stop." };
+  if (server.pid <= 1 || server.pid === process.pid)
+    return { ok: false, status: 404, error: "That process is not one Tavi will stop." };
   (deps.kill ?? ((pid: number) => process.kill(pid, "SIGTERM")))(server.pid);
   return { ok: true, pid: server.pid, command: server.command };
 }

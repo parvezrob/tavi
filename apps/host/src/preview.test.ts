@@ -27,7 +27,10 @@ import {
 
 test("open needs a listening port; the ticket comes back once and admits until closed", async () => {
   let clock = 1_000;
-  const registry = new PreviewRegistry({ now: () => clock, probe: async (port) => (port === 5173 ? "127.0.0.1" : undefined) });
+  const registry = new PreviewRegistry({
+    now: () => clock,
+    probe: async (port) => (port === 5173 ? "127.0.0.1" : undefined),
+  });
 
   const missing = await registry.open({ deviceId: "d1", port: 9, cwd: "/p" });
   assert.equal(missing.ok, false);
@@ -107,7 +110,11 @@ test("the dev server sees a localhost browser: host/origin/referer rewritten, ti
   assert.equal(headers["x-forwarded-host"], "mac.tail.ts.net:8443");
   assert.equal(headers["x-forwarded-proto"], "https");
 
-  const upgrade = forwardHeaders({ host: "h", connection: "Upgrade", upgrade: "websocket", cookie: `${TICKET_COOKIE}=s` }, 5173, true);
+  const upgrade = forwardHeaders(
+    { host: "h", connection: "Upgrade", upgrade: "websocket", cookie: `${TICKET_COOKIE}=s` },
+    5173,
+    true,
+  );
   assert.equal(upgrade.connection, "Upgrade");
   assert.equal(upgrade.upgrade, "websocket");
   assert.equal(upgrade.cookie, undefined);
@@ -142,7 +149,9 @@ test("the door refuses without a ticket, proxies HTTP with absolute paths, and p
   });
   const wss = new WebSocketServer({ server: devServer });
   wss.on("connection", (socket, request) => {
-    socket.on("message", (data) => socket.send(`pong:${data} host=${request.headers.host} origin=${request.headers.origin ?? "-"}`));
+    socket.on("message", (data) =>
+      socket.send(`pong:${data} host=${request.headers.host} origin=${request.headers.origin ?? "-"}`),
+    );
   });
   await listen(devServer);
   const devPort = () => (devServer.address() as AddressInfo).port;
@@ -183,7 +192,9 @@ test("the door refuses without a ticket, proxies HTTP with absolute paths, and p
     const badTicket = await fetch(`${origin}/`, { headers: { cookie: `${TICKET_COOKIE}=nope` } });
     assert.equal(badTicket.status, 401);
 
-    const socket = new WebSocket(`${origin.replace("http", "ws")}/hmr`, { headers: { cookie, origin: "https://mac.ts.net:8443" } });
+    const socket = new WebSocket(`${origin.replace("http", "ws")}/hmr`, {
+      headers: { cookie, origin: "https://mac.ts.net:8443" },
+    });
     await once(socket, "open");
     socket.send("hi");
     const [reply] = (await once(socket, "message")) as [Buffer];
@@ -246,10 +257,13 @@ test("lsof output → loopback listeners; LAN-only binds are not previewable", (
   assert.equal(loopbackPort("192.168.1.20:3001"), undefined);
   assert.equal(loopbackPort("[::]:4000"), 4000);
   assert.equal(loopbackPort("0.0.0.0:80"), 80);
-  assert.deepEqual([...parseCwds("p4242\nfcwd\nn/Users/me/app\np4300\nfcwd\nn/Users/me/app/api\n")], [
-    [4242, "/Users/me/app"],
-    [4300, "/Users/me/app/api"],
-  ]);
+  assert.deepEqual(
+    [...parseCwds("p4242\nfcwd\nn/Users/me/app\np4300\nfcwd\nn/Users/me/app/api\n")],
+    [
+      [4242, "/Users/me/app"],
+      [4300, "/Users/me/app/api"],
+    ],
+  );
 });
 
 test("project servers: cwd inside the project or a parent of it, inside roots; one row per port", async () => {

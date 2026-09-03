@@ -114,6 +114,8 @@ function statExists(file: string): boolean {
 }
 
 test("VERSION matches the published package version", () => {
-  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+    version: string;
+  };
   assert.equal(VERSION, packageJson.version);
 });

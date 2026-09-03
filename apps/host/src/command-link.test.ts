@@ -34,7 +34,10 @@ test("the shim execs the runtime's current version through env node, marked as o
   assert.equal(written, path.join(h, ".local", "bin", "tavi"));
   const source = readFileSync(written, "utf8");
   assert.ok(source.startsWith("#!/bin/sh\n"));
-  assert.match(source, /exec \/usr\/bin\/env node ".*\/runtime\/current\/node_modules\/tavi-host\/dist\/index\.js" "\$@"/);
+  assert.match(
+    source,
+    /exec \/usr\/bin\/env node ".*\/runtime\/current\/node_modules\/tavi-host\/dist\/index\.js" "\$@"/,
+  );
   assert.equal(source, commandLinkSource(layout));
   assert.ok(statSync(written).mode & 0o111, "not executable");
   assert.ok(isOurCommandLink(written));

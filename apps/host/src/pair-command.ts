@@ -46,7 +46,9 @@ export async function runPairCommand(config: HostConfig, publicUrl: string): Pro
   // With a callback the library hands the drawing to it instead of printing.
   const drawing = await new Promise<string>((resolve) => qrcode.generate(payload, { small: true }, resolve));
   console.log(drawing);
-  console.log(`The phone will show ${body.host.name} with fingerprint ${body.host.fingerprint} — check they match, then confirm.`);
+  console.log(
+    `The phone will show ${body.host.name} with fingerprint ${body.host.fingerprint} — check they match, then confirm.`,
+  );
   console.log(`This code works once, for a few minutes.\n`);
   console.log("No camera? Type this into the app instead:");
   console.log(`  ${payload}\n`);

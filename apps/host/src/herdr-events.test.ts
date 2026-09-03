@@ -211,18 +211,14 @@ async function startScriptedHerdr(context: TestContext, socketPath: string): Pro
         };
         buffered = buffered.slice(lineEnd + 1);
         if (request.method === "ping") {
-          socket.write(
-            `${JSON.stringify({ id: request.id, result: { type: "pong", protocol: 17 } })}\n`,
-          );
+          socket.write(`${JSON.stringify({ id: request.id, result: { type: "pong", protocol: 17 } })}\n`);
         } else if (request.method === "agent.list") {
           socket.write(
             `${JSON.stringify({ id: request.id, result: { type: "agent_list", agents: scripted.agents } })}\n`,
           );
         } else if (request.method === "tab.list") {
           // Real herdr always answers tab.list (the label join, #55).
-          socket.write(
-            `${JSON.stringify({ id: request.id, result: { type: "tab_list", tabs: [] } })}\n`,
-          );
+          socket.write(`${JSON.stringify({ id: request.id, result: { type: "tab_list", tabs: [] } })}\n`);
         } else if (request.method === "pane.release_agent" || request.method === "pane.report_agent") {
           scripted.authorityCalls.push({ method: request.method, params: request.params });
           socket.write(`${JSON.stringify({ id: request.id, result: { type: "ok" } })}\n`);
@@ -234,14 +230,10 @@ async function startScriptedHerdr(context: TestContext, socketPath: string): Pro
               : `${JSON.stringify({ id: request.id, error: { code: "pane_not_found", message: "gone" } })}\n`,
           );
         } else if (request.method === "events.subscribe") {
-          scripted.subscriptions.push(
-            (request.params.subscriptions as Array<Record<string, unknown>>) ?? [],
-          );
+          scripted.subscriptions.push((request.params.subscriptions as Array<Record<string, unknown>>) ?? []);
           eventSockets.add(socket);
           socket.once("close", () => eventSockets.delete(socket));
-          socket.write(
-            `${JSON.stringify({ id: request.id, result: { type: "subscription_started" } })}\n`,
-          );
+          socket.write(`${JSON.stringify({ id: request.id, result: { type: "subscription_started" } })}\n`);
         }
         lineEnd = buffered.indexOf("\n");
       }

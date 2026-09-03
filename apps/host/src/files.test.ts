@@ -4,13 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import {
-  listDirectory,
-  looksLikeASecret,
-  readTextContent,
-  resolveWithinRoots,
-  statFile,
-} from "./files.js";
+import { listDirectory, looksLikeASecret, readTextContent, resolveWithinRoots, statFile } from "./files.js";
 
 function scratch(): { root: string; outside: string } {
   const base = mkdtempSync(path.join(tmpdir(), "tavi-files-"));
@@ -20,7 +14,7 @@ function scratch(): { root: string; outside: string } {
   mkdirSync(outside, { recursive: true });
   writeFileSync(path.join(root, "app", "README.md"), "# App\n\nhello\n");
   writeFileSync(path.join(root, "app", "src", "main.ts"), "export const x = 1;\n");
-  writeFileSync(path.join(outside, "settings.json"), "{\"token\":\"nope\"}\n");
+  writeFileSync(path.join(outside, "settings.json"), '{"token":"nope"}\n');
   return { root, outside };
 }
 
@@ -37,7 +31,12 @@ test("a path outside the roots is refused by name, whether or not it exists", as
   const { root, outside } = scratch();
   const cwd = path.join(root, "app");
   const real = await resolveWithinRoots(path.join(outside, "settings.json"), cwd, [root]);
-  assert.deepEqual(real, { ok: false, status: 403, error: "That file is outside your project folders.", outsideRoots: true });
+  assert.deepEqual(real, {
+    ok: false,
+    status: 403,
+    error: "That file is outside your project folders.",
+    outsideRoots: true,
+  });
   const missing = await resolveWithinRoots(path.join(outside, "nope.txt"), cwd, [root]);
   assert.equal(missing.ok, false);
   assert.equal((missing as { status: number }).status, 403);
@@ -100,7 +99,10 @@ test("text content is served with its encoding; binary and secrets are refused w
   assert.equal((secret as { status: number }).status, 403);
   assert.equal((secret as { preview: string }).preview, "secret");
 
-  writeFileSync(path.join(cwd, "utf16.txt"), Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from("hi\n", "utf16le")]));
+  writeFileSync(
+    path.join(cwd, "utf16.txt"),
+    Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from("hi\n", "utf16le")]),
+  );
   const utf16 = await readTextContent(path.join(cwd, "utf16.txt"));
   assert.ok(utf16.ok);
   assert.equal(utf16.content.encoding, "utf-16le");
@@ -153,7 +155,16 @@ test("listing outside a repository dims nothing", async () => {
 });
 
 test("the secrets rule is by name", () => {
-  for (const name of [".env", ".env.local", "id_rsa", "id_ed25519.pub", "server.pem", "aws-credentials.json", "client_secret.json", ".npmrc"]) {
+  for (const name of [
+    ".env",
+    ".env.local",
+    "id_rsa",
+    "id_ed25519.pub",
+    "server.pem",
+    "aws-credentials.json",
+    "client_secret.json",
+    ".npmrc",
+  ]) {
     assert.ok(looksLikeASecret(`/x/${name}`), name);
   }
   for (const name of ["README.md", "environment.ts", "keys.md", "main.swift"]) {

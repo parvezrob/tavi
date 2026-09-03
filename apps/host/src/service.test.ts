@@ -50,7 +50,8 @@ test("waits for the old instance to leave launchd before bootstrapping the new o
   const prints = commands.filter((command) => command === `print gui/501/${CURRENT_LABEL}`);
   assert.ok(prints.length >= 2, `expected repeated polling, saw ${prints.length} print(s)`);
   assert.ok(
-    commands.indexOf(`bootstrap gui/501 ${fixture.plist(CURRENT_LABEL)}`) > commands.lastIndexOf(`print gui/501/${CURRENT_LABEL}`),
+    commands.indexOf(`bootstrap gui/501 ${fixture.plist(CURRENT_LABEL)}`) >
+      commands.lastIndexOf(`print gui/501/${CURRENT_LABEL}`),
     "bootstrap must come after the last poll",
   );
   assert.deepEqual(fixture.loaded(), [CURRENT_LABEL]);
@@ -81,7 +82,10 @@ test("gives up with a clear message when the old instance never exits", async (c
     () => installService(fixture.config, fixture.options),
     /still running .*launchctl bootout gui\/501\/com\.farfield\.tavi\.host/,
   );
-  assert.equal(fixture.launchctl().some((command) => command.startsWith("bootstrap")), false);
+  assert.equal(
+    fixture.launchctl().some((command) => command.startsWith("bootstrap")),
+    false,
+  );
 });
 
 test("restores the legacy service if the Tavi service cannot bootstrap", async (context) => {

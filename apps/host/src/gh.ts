@@ -38,7 +38,12 @@ export function ghBinary(): Promise<string | null> {
   resolvedAt = now;
   resolved = new Promise((resolve) => {
     execFile(shell, ["-lc", "command -v gh"], { timeout: 10_000 }, (error, stdout) => {
-      const found = String(stdout ?? "").trim().split("\n").pop()?.trim() ?? "";
+      const found =
+        String(stdout ?? "")
+          .trim()
+          .split("\n")
+          .pop()
+          ?.trim() ?? "";
       const path = !error && found.startsWith("/") ? found : null;
       // A hit is kept for good; a miss is asked again later.
       if (path) resolvedAt = -1;
@@ -74,12 +79,19 @@ export function describeGhFailure(error: unknown): string {
   if (/gh auth login|not logged in|authentication required|HTTP 401|Bad credentials/i.test(text)) {
     return "gh on this computer is not logged in to GitHub. Run gh auth login there.";
   }
-  if (/not a git repository|no git remotes|could not determine base repo|none of the git remotes|does not appear to be a git repository/i.test(text)) {
+  if (
+    /not a git repository|no git remotes|could not determine base repo|none of the git remotes|does not appear to be a git repository/i.test(
+      text,
+    )
+  ) {
     return "This repository has no GitHub remote, so there is nothing to open a pull request on.";
   }
   if (code === "ETIMEDOUT" || /SIGTERM|timed out|Could not resolve host|connect: network is unreachable/i.test(text)) {
     return "GitHub could not be reached from this computer.";
   }
-  const first = stderr.split("\n").map((line) => line.trim()).filter(Boolean)[0];
+  const first = stderr
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)[0];
   return first ? `gh said: ${first}` : `gh could not answer: ${message}`;
 }

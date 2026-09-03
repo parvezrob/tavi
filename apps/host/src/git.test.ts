@@ -4,7 +4,14 @@ import { mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { invalidateRepos, listRepos, listReposCached, parseWorktreeList, type ListReposOptions, type RepoInfo } from "./git.js";
+import {
+  invalidateRepos,
+  listRepos,
+  listReposCached,
+  parseWorktreeList,
+  type ListReposOptions,
+  type RepoInfo,
+} from "./git.js";
 
 // Tests never shell out to the developer's real `gh`.
 const noPullRequests = { pullRequests: async () => null };
@@ -12,7 +19,13 @@ const noPullRequests = { pullRequests: async () => null };
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf8",
-    env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "t",
+      GIT_AUTHOR_EMAIL: "t@t",
+      GIT_COMMITTER_NAME: "t",
+      GIT_COMMITTER_EMAIL: "t@t",
+    },
   });
 }
 
@@ -69,14 +82,19 @@ test("parseWorktreeList reads main, linked, and detached records", () => {
 });
 
 test("parseWorktreeList reads locked and prunable flags", () => {
-  const raw = ["worktree /repo", "HEAD aaaaaaa", "branch refs/heads/main", "locked stale", "prunable gone", ""].join("\n");
+  const raw = ["worktree /repo", "HEAD aaaaaaa", "branch refs/heads/main", "locked stale", "prunable gone", ""].join(
+    "\n",
+  );
   const [worktree] = parseWorktreeList(raw);
   assert.equal(worktree?.locked, true);
   assert.equal(worktree?.prunable, true);
 });
 
 test("parseWorktreeList reads the -z form, keeps a newline inside a path, and does not crown a bare record's neighbour (#72)", () => {
-  const raw = ["worktree /repo\0HEAD aaaaaaa\0branch refs/heads/main\0", "worktree /odd\nname\0HEAD bbbbbbb\0detached\0"].join("\0");
+  const raw = [
+    "worktree /repo\0HEAD aaaaaaa\0branch refs/heads/main\0",
+    "worktree /odd\nname\0HEAD bbbbbbb\0detached\0",
+  ].join("\0");
   const worktrees = parseWorktreeList(raw);
   assert.deepEqual(
     worktrees.map((w) => [w.path, w.branch, w.isMain]),
@@ -87,8 +105,14 @@ test("parseWorktreeList reads the -z form, keeps a newline inside a path, and do
   );
   // A bare repository's first record is the repository itself: skipped,
   // and the linked checkout after it is not "main".
-  const bare = ["worktree /repo.git\0HEAD aaaaaaa\0bare\0", "worktree /repo-fix\0HEAD bbbbbbb\0branch refs/heads/fix\0"].join("\0");
-  assert.deepEqual(parseWorktreeList(bare).map((w) => [w.path, w.isMain]), [["/repo-fix", false]]);
+  const bare = [
+    "worktree /repo.git\0HEAD aaaaaaa\0bare\0",
+    "worktree /repo-fix\0HEAD bbbbbbb\0branch refs/heads/fix\0",
+  ].join("\0");
+  assert.deepEqual(
+    parseWorktreeList(bare).map((w) => [w.path, w.isMain]),
+    [["/repo-fix", false]],
+  );
 });
 
 test("listRepos reports the main worktree, a linked worktree, dirty count, ahead/behind, and whether each is inside the roots", async () => {
@@ -193,13 +217,17 @@ test("listRepos asks the pull-request lookup once per branch and carries its ans
   ).find((r) => r.root === dir);
   // The default branch is never asked about: it has no PR of its own.
   assert.deepEqual(asked, ["feat/pr"]);
-  assert.deepEqual(found?.worktrees.find((w) => w.branch === "feat/pr")?.pullRequest, { number: 48, url: "https://github.com/x/y/pull/48" });
+  assert.deepEqual(found?.worktrees.find((w) => w.branch === "feat/pr")?.pullRequest, {
+    number: 48,
+    url: "https://github.com/x/y/pull/48",
+  });
   assert.equal(found?.worktrees.find((w) => w.isMain)?.pullRequest, null);
 });
 
 test("listRepos asks about pull requests a few at a time and tells the stragglers to stop when the budget runs out (#85)", async () => {
   const { dir, parent } = repo();
-  for (let index = 0; index < 6; index += 1) git(dir, "worktree", "add", "-b", `feat/${index}`, path.join(parent, `feat-${index}`), "main");
+  for (let index = 0; index < 6; index += 1)
+    git(dir, "worktree", "add", "-b", `feat/${index}`, path.join(parent, `feat-${index}`), "main");
   let inFlight = 0;
   let mostInFlight = 0;
   let aborted = 0;
@@ -254,7 +282,10 @@ test("listRepos says so when git is not installed, instead of listing nothing (#
 test("listRepos flags a branch list cut at the cap (#72)", async () => {
   const { dir, parent } = repo();
   const head = git(dir, "rev-parse", "HEAD").trim();
-  const refs = Array.from({ length: 205 }, (_, index) => `create refs/heads/stale/${String(index).padStart(3, "0")} ${head}\n`).join("");
+  const refs = Array.from(
+    { length: 205 },
+    (_, index) => `create refs/heads/stale/${String(index).padStart(3, "0")} ${head}\n`,
+  ).join("");
   execFileSync("git", ["-C", dir, "update-ref", "--stdin"], { input: refs });
   const found = (await repos([parent])).find((r) => r.root === dir);
   assert.equal(found?.truncated, true);
@@ -296,8 +327,14 @@ test("listRepos skips an unreadable repository instead of failing the whole list
   rmSync(path.join(broken, ".git", "HEAD"));
 
   const found = await repos([parent, good.parent]);
-  assert.equal(found.some((r) => r.root === broken), false);
-  assert.ok(found.some((r) => r.root === good.dir), "the healthy repository is still reported");
+  assert.equal(
+    found.some((r) => r.root === broken),
+    false,
+  );
+  assert.ok(
+    found.some((r) => r.root === good.dir),
+    "the healthy repository is still reported",
+  );
 });
 
 test("listReposCached serves the last answer at once, refreshes behind it, and forgets it on invalidate", async () => {
@@ -306,7 +343,15 @@ test("listReposCached serves the last answer at once, refreshes behind it, and f
   execFileSync("git", ["init", "-q", "-b", "main", dir]);
   writeFileSync(path.join(dir, "a.txt"), "a\n");
   execFileSync("git", ["-C", dir, "add", "."]);
-  execFileSync("git", ["-C", dir, "commit", "-q", "-m", "init"], { env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+  execFileSync("git", ["-C", dir, "commit", "-q", "-m", "init"], {
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "t",
+      GIT_AUTHOR_EMAIL: "t@t",
+      GIT_COMMITTER_NAME: "t",
+      GIT_COMMITTER_EMAIL: "t@t",
+    },
+  });
   const noPr = { pullRequests: async () => null };
   invalidateRepos();
   const first = (await listReposCached([parent], noPr)).repos;

@@ -130,10 +130,10 @@ export class ProjectHistory {
     const resolved = path.resolve(directory);
     const key = comparisonKey(resolved);
     const kept = this.list().filter((entry) => comparisonKey(entry.path) !== key);
-    const recent: StoredProject[] = [
-      { path: resolved, lastUsedAt: this.now().toISOString() },
-      ...kept,
-    ].slice(0, MAX_REMEMBERED);
+    const recent: StoredProject[] = [{ path: resolved, lastUsedAt: this.now().toISOString() }, ...kept].slice(
+      0,
+      MAX_REMEMBERED,
+    );
     this.write(recent);
   }
 

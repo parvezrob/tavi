@@ -39,26 +39,41 @@ export interface UpdaterDeps {
   log: (message: string) => void;
 }
 
-export function defaultUpdaterDeps(input: { currentVersion: string; layout: RuntimeLayout; restart: () => void; log?: (message: string) => void }): UpdaterDeps {
+export function defaultUpdaterDeps(input: {
+  currentVersion: string;
+  layout: RuntimeLayout;
+  restart: () => void;
+  log?: (message: string) => void;
+}): UpdaterDeps {
   return {
     currentVersion: input.currentVersion,
     layout: input.layout,
     log: input.log ?? ((message) => console.log(message)),
     restart: input.restart,
     fetchLatest: async () => {
-      const response = await fetch(`${REGISTRY}/${PACKAGE_NAME}/latest`, { signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
+      const response = await fetch(`${REGISTRY}/${PACKAGE_NAME}/latest`, { signal: AbortSignal.timeout(10_000) }).catch(
+        () => undefined,
+      );
       if (!response?.ok) return undefined;
       const body = (await response.json().catch(() => ({}))) as { version?: unknown };
       return typeof body.version === "string" ? body.version : undefined;
     },
     install: async (version, prefix) => {
-      await execFileAsync(npmPath(), ["install", "--prefix", prefix, "--no-audit", "--no-fund", "--loglevel=error", `${PACKAGE_NAME}@${version}`], {
-        timeout: 300_000,
-        env: { ...process.env, PATH: process.env.PATH || "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" },
-      });
+      await execFileAsync(
+        npmPath(),
+        ["install", "--prefix", prefix, "--no-audit", "--no-fund", "--loglevel=error", `${PACKAGE_NAME}@${version}`],
+        {
+          timeout: 300_000,
+          env: { ...process.env, PATH: process.env.PATH || "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" },
+        },
+      );
     },
     verify: async (packageRoot) => {
-      const { stdout } = await execFileAsync(process.execPath, [path.join(packageRoot, "dist", "index.js"), "--version"], { timeout: 20_000 });
+      const { stdout } = await execFileAsync(
+        process.execPath,
+        [path.join(packageRoot, "dist", "index.js"), "--version"],
+        { timeout: 20_000 },
+      );
       return stdout.trim();
     },
   };
@@ -86,14 +101,22 @@ export async function checkAndApply(deps: UpdaterDeps): Promise<UpdateOutcome> {
     }
     const reported = await deps.verify(packageRoot);
     if (reported !== latest) {
-      return { status: "failed", reason: `the downloaded copy reports version ${reported || "(nothing)"}, expected ${latest}` };
+      return {
+        status: "failed",
+        reason: `the downloaded copy reports version ${reported || "(nothing)"}, expected ${latest}`,
+      };
     }
   } catch (error) {
     return { status: "failed", reason: describe(error) };
   }
 
   const previous = currentVersion(deps.layout);
-  writePending(deps.layout, { version: latest, attempts: 0, startedAt: new Date().toISOString(), ...(previous ? { previous } : {}) });
+  writePending(deps.layout, {
+    version: latest,
+    attempts: 0,
+    startedAt: new Date().toISOString(),
+    ...(previous ? { previous } : {}),
+  });
   switchCurrent(deps.layout, latest);
   pruneVersions(deps.layout, [latest, ...(previous ? [previous] : [])]);
   deps.log(`Tavi ${latest} installed; restarting.`);
@@ -117,7 +140,10 @@ export interface UpdaterSchedule {
   setTimer?: (fn: () => void, ms: number) => { unref?: () => void };
 }
 
-export function startUpdater(deps: UpdaterDeps, schedule: UpdaterSchedule = {}): { checkNow: () => Promise<UpdateOutcome>; stop: () => void } {
+export function startUpdater(
+  deps: UpdaterDeps,
+  schedule: UpdaterSchedule = {},
+): { checkNow: () => Promise<UpdateOutcome>; stop: () => void } {
   const initial = schedule.initialDelayMs ?? 2 * 60_000;
   const interval = schedule.intervalMs ?? 24 * 60 * 60_000;
   const retry = schedule.retryMs ?? 60 * 60_000;
@@ -143,7 +169,12 @@ export function startUpdater(deps: UpdaterDeps, schedule: UpdaterSchedule = {}):
     });
   };
   setTimer(tick, initial).unref?.();
-  return { checkNow, stop: () => { stopped = true; } };
+  return {
+    checkNow,
+    stop: () => {
+      stopped = true;
+    },
+  };
 }
 
 function jitter(ms: number): number {

@@ -149,12 +149,16 @@ export class DeviceRegistry {
       // Failing closed here would lock every phone out because of a disk
       // hiccup; failing open would let anyone in. Neither: no devices
       // authorize until the file is readable again, and the log says why.
-      this.report(`Tavi could not read the paired devices (${this.file}): ${read.reason}. No paired phone can connect until this is fixed.`);
+      this.report(
+        `Tavi could not read the paired devices (${this.file}): ${read.reason}. No paired phone can connect until this is fixed.`,
+      );
       return [];
     }
     const stored = read.value as { version?: unknown; devices?: unknown };
     if (stored?.version !== DEVICES_SCHEMA_VERSION || !Array.isArray(stored.devices)) {
-      this.report(`Ignoring a paired-devices list written by another version (${this.file}): expected version ${DEVICES_SCHEMA_VERSION}.`);
+      this.report(
+        `Ignoring a paired-devices list written by another version (${this.file}): expected version ${DEVICES_SCHEMA_VERSION}.`,
+      );
       return [];
     }
     return stored.devices.filter(

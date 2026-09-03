@@ -11,13 +11,7 @@ import type { HostConfig } from "./config.js";
 // (issue #32); the relay reads it from ~/.tavi/config.json at fire time,
 // stays silent on stdout (UserPromptSubmit stdout would become model
 // context), and times out fast so a down host can never stall Claude.
-const HOOK_EVENTS = [
-  "Notification",
-  "PermissionRequest",
-  "PostToolUse",
-  "Stop",
-  "UserPromptSubmit",
-] as const;
+const HOOK_EVENTS = ["Notification", "PermissionRequest", "PostToolUse", "Stop", "UserPromptSubmit"] as const;
 // Both markers identify Tavi-owned entries: the relay filename for current
 // installs, the endpoint path for pre-relay curl commands being replaced.
 const HOOK_MARKERS = ["claude-hook-relay.js", "/api/hooks/claude"];
@@ -42,9 +36,7 @@ export function installClaudeHooks(
 
   const command = claudeHookCommand(config);
   const hooks =
-    typeof settings.hooks === "object" && settings.hooks !== null
-      ? (settings.hooks as Record<string, unknown>)
-      : {};
+    typeof settings.hooks === "object" && settings.hooks !== null ? (settings.hooks as Record<string, unknown>) : {};
   let changed = false;
 
   for (const event of HOOK_EVENTS) {
@@ -71,7 +63,10 @@ export function installClaudeHooks(
 export function removeClaudeHooks(settingsPath = path.join(homedir(), ".claude", "settings.json")): boolean {
   if (!existsSync(settingsPath)) return false;
   const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as Record<string, unknown>;
-  const hooks = typeof settings.hooks === "object" && settings.hooks !== null ? (settings.hooks as Record<string, unknown>) : undefined;
+  const hooks =
+    typeof settings.hooks === "object" && settings.hooks !== null
+      ? (settings.hooks as Record<string, unknown>)
+      : undefined;
   if (!hooks) return false;
   let changed = false;
   for (const event of Object.keys(hooks)) {

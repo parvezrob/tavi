@@ -1,0 +1,28 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.12/schema.json",
+  "files": {
+    "includes": ["src/**/*.ts", "scripts/**/*.mjs"]
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "lineWidth": 120
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "suspicious": {
+        // The host's five sites are deliberate: `counter += 1` inside a template literal and one lazy cache init.
+        "noAssignInExpressions": "off"
+      }
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        // Import order is not part of this tree's style; sorting it would churn every file for no rule.
+        "organizeImports": "off"
+      }
+    }
+  }
+}

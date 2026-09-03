@@ -31,7 +31,13 @@ export type StatusResult =
 
 export async function worktreeStatus(worktreePath: string): Promise<StatusResult> {
   const changes = await listChanges(worktreePath);
-  if (!changes.ok) return { ok: false, status: changes.status, error: changes.error, ...(changes.notRepository ? { notRepository: true as const } : {}) };
+  if (!changes.ok)
+    return {
+      ok: false,
+      status: changes.status,
+      error: changes.error,
+      ...(changes.notRepository ? { notRepository: true as const } : {}),
+    };
   const branch = changes.branch ?? null;
   const base = await baseBranch(worktreePath, branch);
   const [ahead, behind] = await aheadBehind(worktreePath, branch, base);
@@ -55,7 +61,11 @@ export type StageResult = { ok: true; staged: number } | { ok: false; status: 40
 // `files: "all"` stages (or unstages) everything git status lists. A path
 // is relative to the repository and may not leave it — the same rule the
 // diff route enforces before git sees a path.
-export async function stageFiles(worktreePath: string, files: string[] | "all", direction: "stage" | "unstage"): Promise<StageResult> {
+export async function stageFiles(
+  worktreePath: string,
+  files: string[] | "all",
+  direction: "stage" | "unstage",
+): Promise<StageResult> {
   let targets: string[];
   if (files === "all") {
     const changes = await listChanges(worktreePath);
@@ -104,13 +114,19 @@ export async function commitStaged(worktreePath: string, message: string): Promi
     return { ok: false, status: 400, error: "That commit message is too long." };
   }
   const stagedFiles = await stagedPaths(worktreePath);
-  if (stagedFiles.length === 0) return { ok: false, status: 409, error: "Nothing is staged. Stage a file, then commit." };
+  if (stagedFiles.length === 0)
+    return { ok: false, status: 409, error: "Nothing is staged. Stage a file, then commit." };
   try {
     await git(worktreePath, ["commit", "--quiet", "-m", trimmed]);
   } catch (error) {
     const reason = describeGitError(error);
     if (/Please tell me who you are|Author identity unknown|empty ident/i.test(reason)) {
-      return { ok: false, status: 409, error: "git does not know who you are on this computer. Set user.name and user.email in git config there, then commit again." };
+      return {
+        ok: false,
+        status: 409,
+        error:
+          "git does not know who you are on this computer. Set user.name and user.email in git config there, then commit again.",
+      };
     }
     return { ok: false, status: 503, error: `git could not commit: ${reason}` };
   }
@@ -150,7 +166,10 @@ export async function writeCommitMessage(worktreePath: string, deps: MessageWrit
   let diff = "";
   if (shown.length > 0) {
     try {
-      diff = (await git(worktreePath, ["diff", "--cached", "--", ...shown], MAX_DIFF_FOR_MESSAGE + 1)).stdout.slice(0, MAX_DIFF_FOR_MESSAGE);
+      diff = (await git(worktreePath, ["diff", "--cached", "--", ...shown], MAX_DIFF_FOR_MESSAGE + 1)).stdout.slice(
+        0,
+        MAX_DIFF_FOR_MESSAGE,
+      );
     } catch (error) {
       return { ok: false, status: 503, error: `git could not read the staged diff: ${describeGitError(error)}` };
     }
@@ -164,7 +183,11 @@ export async function writeCommitMessage(worktreePath: string, deps: MessageWrit
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     if (/not installed|ENOENT|command not found/i.test(reason)) {
-      return { ok: false, status: 503, error: "Claude Code is not installed on this computer, so it cannot write the message. Type one instead." };
+      return {
+        ok: false,
+        status: 503,
+        error: "Claude Code is not installed on this computer, so it cannot write the message. Type one instead.",
+      };
     }
     return { ok: false, status: 503, error: `Claude could not write a message: ${reason}` };
   }
@@ -221,8 +244,12 @@ export async function worktreeLog(worktreePath: string): Promise<LogResult> {
   }
   const base = await baseBranch(worktreePath, branch);
   const [ahead, behind] = await Promise.all([
-    branch && base && branch !== base ? readLog(worktreePath, `${base}..${branch}`) : Promise.resolve({ commits: [], truncated: false }),
-    branch && base && branch !== base ? readLog(worktreePath, `${branch}..${base}`) : Promise.resolve({ commits: [], truncated: false }),
+    branch && base && branch !== base
+      ? readLog(worktreePath, `${base}..${branch}`)
+      : Promise.resolve({ commits: [], truncated: false }),
+    branch && base && branch !== base
+      ? readLog(worktreePath, `${branch}..${base}`)
+      : Promise.resolve({ commits: [], truncated: false }),
   ]);
   const upstream = branch ? await upstreamInfo(worktreePath, branch) : null;
   const remote = branch ? await pushRemote(worktreePath, branch) : null;
@@ -243,7 +270,12 @@ export async function worktreeLog(worktreePath: string): Promise<LogResult> {
 
 async function readLog(worktreePath: string, range: string): Promise<{ commits: CommitSummary[]; truncated: boolean }> {
   try {
-    const { stdout } = await git(worktreePath, ["log", `--max-count=${MAX_LOG_COMMITS + 1}`, "--format=%H%x00%s%x00%an%x00%aI%x1e", range]);
+    const { stdout } = await git(worktreePath, [
+      "log",
+      `--max-count=${MAX_LOG_COMMITS + 1}`,
+      "--format=%H%x00%s%x00%an%x00%aI%x1e",
+      range,
+    ]);
     const commits: CommitSummary[] = [];
     for (const record of stdout.split("\x1e")) {
       const [sha = "", summary = "", author = "", when = ""] = record.replace(/^\n/, "").split("\0");
@@ -257,10 +289,15 @@ async function readLog(worktreePath: string, range: string): Promise<{ commits: 
 
 export async function upstreamInfo(worktreePath: string, branch: string): Promise<UpstreamInfo | null> {
   try {
-    const name = (await git(worktreePath, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${branch}@{upstream}`])).stdout.trim();
+    const name = (
+      await git(worktreePath, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${branch}@{upstream}`])
+    ).stdout.trim();
     if (!name) return null;
     const { stdout } = await git(worktreePath, ["rev-list", "--left-right", "--count", `${branch}...${name}`]);
-    const [ahead = 0, behind = 0] = stdout.trim().split(/\s+/).map((value) => Number.parseInt(value, 10) || 0);
+    const [ahead = 0, behind = 0] = stdout
+      .trim()
+      .split(/\s+/)
+      .map((value) => Number.parseInt(value, 10) || 0);
     return { name, ahead, behind };
   } catch {
     // No upstream configured, or it was deleted on the remote.
@@ -273,7 +310,10 @@ export async function upstreamInfo(worktreePath: string, branch: string): Promis
 export async function pushRemote(worktreePath: string, branch: string): Promise<string | null> {
   let remotes: string[];
   try {
-    remotes = (await git(worktreePath, ["remote"])).stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+    remotes = (await git(worktreePath, ["remote"])).stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
   } catch {
     return null;
   }
@@ -290,7 +330,9 @@ export async function pushRemote(worktreePath: string, branch: string): Promise<
   return remotes.length === 1 ? (remotes[0] ?? null) : null;
 }
 
-export type PushResult = { ok: true; pushed: number; upstream: string } | { ok: false; status: 409 | 503; error: string };
+export type PushResult =
+  | { ok: true; pushed: number; upstream: string }
+  | { ok: false; status: 409 | 503; error: string };
 
 const PUSH_TIMEOUT_MS = 90_000;
 
@@ -304,18 +346,26 @@ export async function pushBranch(worktreePath: string): Promise<PushResult> {
   } catch (error) {
     return { ok: false, status: 503, error: `git could not read that worktree: ${describeGitError(error)}` };
   }
-  if (!branch) return { ok: false, status: 409, error: "This worktree is not on a branch, so there is nothing to push." };
+  if (!branch)
+    return { ok: false, status: 409, error: "This worktree is not on a branch, so there is nothing to push." };
   const upstream = await upstreamInfo(worktreePath, branch);
   if (upstream && upstream.ahead === 0) {
     return { ok: false, status: 409, error: `${upstream.name} already has everything on ${branch}.` };
   }
   const remote = await pushRemote(worktreePath, branch);
   if (!upstream && !remote) {
-    return { ok: false, status: 409, error: "This repository has no remote to push to. Add one on the computer (git remote add origin …), then push again." };
+    return {
+      ok: false,
+      status: 409,
+      error:
+        "This repository has no remote to push to. Add one on the computer (git remote add origin …), then push again.",
+    };
   }
   // What goes up: the commits the upstream lacks, or on a first push every
   // commit the branch has over its base.
-  const pushed = upstream ? upstream.ahead : (await aheadBehind(worktreePath, branch, await baseBranch(worktreePath, branch)))[0];
+  const pushed = upstream
+    ? upstream.ahead
+    : (await aheadBehind(worktreePath, branch, await baseBranch(worktreePath, branch)))[0];
   // Always name the remote and the refspec: a bare `git push` obeys
   // `push.default`, and `matching` would publish every branch that has a
   // namesake on the remote (#81 review).
@@ -328,13 +378,25 @@ export async function pushBranch(worktreePath: string): Promise<PushResult> {
   } catch (error) {
     const reason = describeGitError(error);
     if (/non-fast-forward|fetch first|rejected/i.test(reason)) {
-      return { ok: false, status: 409, error: `${upstream?.name ?? remote} has commits this branch does not. Pull them in on the computer first, then push again.` };
+      return {
+        ok: false,
+        status: 409,
+        error: `${upstream?.name ?? remote} has commits this branch does not. Pull them in on the computer first, then push again.`,
+      };
     }
     if (/Permission denied|Authentication failed|could not read Username|publickey|403/i.test(reason)) {
-      return { ok: false, status: 503, error: `The remote refused the push: git on the computer is not signed in to it. (${firstLine(reason)})` };
+      return {
+        ok: false,
+        status: 503,
+        error: `The remote refused the push: git on the computer is not signed in to it. (${firstLine(reason)})`,
+      };
     }
     if (/Could not resolve host|Connection timed out|Network is unreachable|ETIMEDOUT|SIGTERM/i.test(reason)) {
-      return { ok: false, status: 503, error: `The remote could not be reached from the computer. (${firstLine(reason)})` };
+      return {
+        ok: false,
+        status: 503,
+        error: `The remote could not be reached from the computer. (${firstLine(reason)})`,
+      };
     }
     return { ok: false, status: 503, error: `git could not push: ${firstLine(reason)}` };
   }
@@ -379,7 +441,8 @@ export async function pullBase(worktreePath: string): Promise<PullBaseResult> {
   } catch (error) {
     return { ok: false, status: 503, error: `git could not read that worktree: ${describeGitError(error)}` };
   }
-  if (!branch) return { ok: false, status: 409, error: "This worktree is not on a branch, so there is nothing to merge into." };
+  if (!branch)
+    return { ok: false, status: 409, error: "This worktree is not on a branch, so there is nothing to merge into." };
   const base = await baseBranch(worktreePath, branch);
   if (!base || base === branch) return { ok: false, status: 409, error: "This branch has no base branch to pull in." };
   const refreshed = await refreshBase(worktreePath, base);
@@ -394,7 +457,11 @@ export async function pullBase(worktreePath: string): Promise<PullBaseResult> {
   } catch (error) {
     const reason = describeGitError(error);
     if (/would be overwritten|uncommitted changes|unmerged files|not possible because you have/i.test(reason)) {
-      return { ok: false, status: 409, error: `Uncommitted changes on ${branch} would be overwritten by ${base}. Commit or stash them first.` };
+      return {
+        ok: false,
+        status: 409,
+        error: `Uncommitted changes on ${branch} would be overwritten by ${base}. Commit or stash them first.`,
+      };
     }
     const conflicts = await conflictedFiles(worktreePath);
     // Whatever stopped the merge — a conflict, a killed merge driver, the
@@ -405,12 +472,20 @@ export async function pullBase(worktreePath: string): Promise<PullBaseResult> {
     } catch {
       aborted = !(await mergeInProgress(worktreePath));
     }
-    const restored = aborted ? "nothing was changed here" : "the merge is still half-done there — finish or abort it on the computer";
+    const restored = aborted
+      ? "nothing was changed here"
+      : "the merge is still half-done there — finish or abort it on the computer";
     if (conflicts.length > 0 || /CONFLICT|Automatic merge failed/i.test(reason)) {
-      const named = conflicts.slice(0, 5).join(", ") + (conflicts.length > 5 ? ` and ${conflicts.length - 5} more` : "");
-      return { ok: false, status: 409, error: `${base} conflicts with ${branch}${named ? ` in ${named}` : ""}. Resolve that on the computer; ${restored}.` };
+      const named =
+        conflicts.slice(0, 5).join(", ") + (conflicts.length > 5 ? ` and ${conflicts.length - 5} more` : "");
+      return {
+        ok: false,
+        status: 409,
+        error: `${base} conflicts with ${branch}${named ? ` in ${named}` : ""}. Resolve that on the computer; ${restored}.`,
+      };
     }
-    const killed = /SIGTERM|ETIMEDOUT/i.test(error instanceof Error ? error.message : "") && !/fatal:|error:/i.test(reason);
+    const killed =
+      /SIGTERM|ETIMEDOUT/i.test(error instanceof Error ? error.message : "") && !/fatal:|error:/i.test(reason);
     if (killed) return { ok: false, status: 503, error: `Merging ${base} took too long and was stopped; ${restored}.` };
     return { ok: false, status: 503, error: `git could not merge ${base}: ${firstLine(reason)}; ${restored}.` };
   }
@@ -435,7 +510,10 @@ export async function pullBase(worktreePath: string): Promise<PullBaseResult> {
 async function refreshBase(worktreePath: string, base: string): Promise<{ ref: string; fetched: boolean }> {
   let upstream: string | null = null;
   try {
-    upstream = (await git(worktreePath, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${base}@{upstream}`])).stdout.trim() || null;
+    upstream =
+      (
+        await git(worktreePath, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${base}@{upstream}`])
+      ).stdout.trim() || null;
   } catch {
     upstream = null;
   }
@@ -489,7 +567,12 @@ async function headSha(worktreePath: string): Promise<string> {
 }
 
 function firstLine(text: string): string {
-  return text.split("\n").map((line) => line.trim()).filter((line) => line && !/^(To |remote: *$|!\s)/.test(line))[0] ?? text.trim();
+  return (
+    text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line && !/^(To |remote: *$|!\s)/.test(line))[0] ?? text.trim()
+  );
 }
 
 // `claude -p <prompt>` with the diff on stdin, resolved on the login-shell
@@ -527,7 +610,12 @@ function resolveOnLoginPath(shell: string, name: string): Promise<string | null>
   if (!/^[a-z][a-z0-9-]*$/.test(name)) return Promise.resolve(null);
   return new Promise((resolve) => {
     execFile(shell, ["-lc", `command -v ${name}`], { timeout: 10_000 }, (error, stdout) => {
-      const found = String(stdout ?? "").trim().split("\n").pop()?.trim() ?? "";
+      const found =
+        String(stdout ?? "")
+          .trim()
+          .split("\n")
+          .pop()
+          ?.trim() ?? "";
       resolve(!error && found.startsWith("/") ? found : null);
     });
   });
@@ -557,7 +645,14 @@ export async function baseBranch(worktreePath: string, branch: string | null): P
 
 function normalizeRelative(file: string): string | null {
   const normalized = path.posix.normalize(file.replaceAll("\\", "/"));
-  if (!normalized || normalized === "." || normalized === ".." || normalized.startsWith("../") || path.isAbsolute(normalized) || normalized.includes("\0")) {
+  if (
+    !normalized ||
+    normalized === "." ||
+    normalized === ".." ||
+    normalized.startsWith("../") ||
+    path.isAbsolute(normalized) ||
+    normalized.includes("\0")
+  ) {
     return null;
   }
   return normalized;

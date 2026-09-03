@@ -3,7 +3,13 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { describeSweep, isRemovalLeftover, leftoverName, listRemovalLeftovers, sweepRemovalLeftovers } from "./removal-sweep.js";
+import {
+  describeSweep,
+  isRemovalLeftover,
+  leftoverName,
+  listRemovalLeftovers,
+  sweepRemovalLeftovers,
+} from "./removal-sweep.js";
 import { scanWorkspaces } from "./workspaces.js";
 
 function root(): string {
@@ -25,7 +31,8 @@ test("the sweep deletes leftovers beside a repository and inside its worktrees f
   const inside = path.join(base, "app-worktrees", "fix-foo.removing-zz9");
   const keep = path.join(base, "app-worktrees", "fix-bar");
   const deeper = path.join(base, "unrelated", "x.removing-abc");
-  for (const folder of [beside, inside, keep, deeper, path.join(base, "app", ".git")]) mkdirSync(folder, { recursive: true });
+  for (const folder of [beside, inside, keep, deeper, path.join(base, "app", ".git")])
+    mkdirSync(folder, { recursive: true });
   writeFileSync(path.join(beside, "file.txt"), "leftover\n");
 
   assert.deepEqual(await listRemovalLeftovers([base, "/definitely/not/here"]), [inside, beside].sort());
@@ -41,7 +48,9 @@ test("the sweep deletes leftovers beside a repository and inside its worktrees f
   assert.equal(existsSync(keep), true);
   // Two levels under a root that is not a worktrees folder is not swept.
   assert.equal(existsSync(deeper), true);
-  assert.deepEqual(describeSweep(report), [`tavi: deleted 2 folders left by removed worktrees: ${[inside, beside].sort().join(", ")}`]);
+  assert.deepEqual(describeSweep(report), [
+    `tavi: deleted 2 folders left by removed worktrees: ${[inside, beside].sort().join(", ")}`,
+  ]);
   assert.deepEqual(describeSweep({ removed: [], stranded: [] }), []);
   assert.deepEqual(describeSweep({ removed: [], stranded: [{ path: beside, error: "EPERM" }] }), [
     `tavi: could not delete ${beside} (left by a removed worktree): EPERM`,

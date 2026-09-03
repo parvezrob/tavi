@@ -4,7 +4,15 @@ import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { commitStaged, pullBase, pushBranch, stageFiles, worktreeLog, worktreeStatus, writeCommitMessage } from "./source-control.js";
+import {
+  commitStaged,
+  pullBase,
+  pushBranch,
+  stageFiles,
+  worktreeLog,
+  worktreeStatus,
+  writeCommitMessage,
+} from "./source-control.js";
 
 const identity = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
 
@@ -43,7 +51,10 @@ test("status lists changes with the branch, base, ahead/behind, and the staged c
   assert.equal(result.status.base, "main");
   assert.equal(result.status.ahead, 1);
   assert.equal(result.status.behind, 0);
-  assert.deepEqual(result.status.files.map((f) => [f.path, f.staged]).sort(), [["a.txt", false], ["c.txt", true]]);
+  assert.deepEqual(result.status.files.map((f) => [f.path, f.staged]).sort(), [
+    ["a.txt", false],
+    ["c.txt", true],
+  ]);
   assert.equal(result.status.staged, 1);
 });
 
@@ -77,7 +88,10 @@ test("stage, unstage, and commit exactly the staged set; refusals are sentences"
 
   const after = await worktreeStatus(dir);
   assert.ok(after.ok);
-  assert.deepEqual(after.status.files.map((f) => f.path), ["b.txt"]);
+  assert.deepEqual(
+    after.status.files.map((f) => f.path),
+    ["b.txt"],
+  );
   assert.equal(after.status.staged, 0);
 });
 
@@ -123,8 +137,14 @@ test("log lists the commits ahead of and behind the base, newest first, with the
   assert.ok(result.ok, JSON.stringify(result));
   assert.equal(result.log.branch, "feat/x");
   assert.equal(result.log.base, "main");
-  assert.deepEqual(result.log.ahead.map((c) => c.summary), ["feat: add c", "feat: add b"]);
-  assert.deepEqual(result.log.behind.map((c) => c.summary), ["chore: main moved"]);
+  assert.deepEqual(
+    result.log.ahead.map((c) => c.summary),
+    ["feat: add c", "feat: add b"],
+  );
+  assert.deepEqual(
+    result.log.behind.map((c) => c.summary),
+    ["chore: main moved"],
+  );
   assert.equal(result.log.ahead[0]?.author, "t");
   assert.match(result.log.ahead[0]?.sha ?? "", /^[0-9a-f]{40}$/);
   assert.match(result.log.ahead[0]?.when ?? "", /^\d{4}-\d{2}-\d{2}T/);
@@ -314,7 +334,12 @@ test("commit message comes from the model with secrets left out of the diff, and
   assert.match(seen, /\+two/);
   assert.doesNotMatch(seen, /hunter2/);
 
-  const missing = await writeCommitMessage(dir, { shell: "/bin/sh", runClaude: async () => { throw new Error("claude is not installed"); } });
+  const missing = await writeCommitMessage(dir, {
+    shell: "/bin/sh",
+    runClaude: async () => {
+      throw new Error("claude is not installed");
+    },
+  });
   assert.equal(missing.ok, false);
   if (!missing.ok) assert.match(missing.error, /not installed/);
 });

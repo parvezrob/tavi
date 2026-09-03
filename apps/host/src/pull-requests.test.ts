@@ -95,7 +95,9 @@ test("status: gh missing or logged out is a sentence beside an empty answer", as
   assert.equal(missing.status.gh.ok, false);
   if (!missing.status.gh.ok) assert.match(missing.status.gh.reason, /not installed/);
 
-  const loggedOut = await pullRequestStatus(dir, { gh: fakeGh(() => ghError("To get started with GitHub CLI, please run:  gh auth login")).gh });
+  const loggedOut = await pullRequestStatus(dir, {
+    gh: fakeGh(() => ghError("To get started with GitHub CLI, please run:  gh auth login")).gh,
+  });
   assert.ok(loggedOut.ok);
   if (!loggedOut.status.gh.ok) assert.match(loggedOut.status.gh.reason, /not logged in/);
 });
@@ -119,7 +121,18 @@ test("create pushes the branch first, then opens the pull request against the ba
   assert.equal(result.pullRequest.checks, "passing");
   assert.equal(git(dir, "rev-parse", "--abbrev-ref", "feat/x@{upstream}").trim(), "origin/feat/x");
   const create = calls.find((call) => call[1] === "create");
-  assert.deepEqual(create, ["pr", "create", "--head", "feat/x", "--base", "main", "--title", "feat: add b and c", "--body", "Two files."]);
+  assert.deepEqual(create, [
+    "pr",
+    "create",
+    "--head",
+    "feat/x",
+    "--base",
+    "main",
+    "--title",
+    "feat: add b and c",
+    "--body",
+    "Two files.",
+  ]);
 
   const again = await createPullRequest(dir, {}, { gh });
   assert.equal(again.ok, false);
@@ -131,13 +144,22 @@ test("create pushes the branch first, then opens the pull request against the ba
 
 test("create with no title lets gh fill it, and says when gh is not signed in", async () => {
   const dir = branched();
-  const { gh, calls } = fakeGh((args) => (args[1] === "create" ? "https://github.com/o/r/pull/13\n" : args[1] === "view" ? { ...pr12, number: 13 } : []));
+  const { gh, calls } = fakeGh((args) =>
+    args[1] === "create" ? "https://github.com/o/r/pull/13\n" : args[1] === "view" ? { ...pr12, number: 13 } : [],
+  );
   const result = await createPullRequest(dir, { draft: true }, { gh });
   assert.ok(result.ok, JSON.stringify(result));
-  assert.deepEqual(calls.find((call) => call[1] === "create"), ["pr", "create", "--head", "feat/x", "--base", "main", "--fill", "--draft"]);
+  assert.deepEqual(
+    calls.find((call) => call[1] === "create"),
+    ["pr", "create", "--head", "feat/x", "--base", "main", "--fill", "--draft"],
+  );
 
   const other = branched();
-  const refused = await createPullRequest(other, {}, { gh: fakeGh((args) => (args[1] === "create" ? ghError("gh auth login required") : [])).gh });
+  const refused = await createPullRequest(
+    other,
+    {},
+    { gh: fakeGh((args) => (args[1] === "create" ? ghError("gh auth login required") : [])).gh },
+  );
   assert.equal(refused.ok, false);
   if (!refused.ok) {
     assert.equal(refused.status, 503);
@@ -172,8 +194,16 @@ test("link remembers a pull request in the branch's config after gh confirms it,
 
 test("issues come back newest first with gh's trouble beside them", async () => {
   const dir = branched();
-  const listed = await listIssues(dir, { gh: fakeGh(() => [{ number: 7, title: "Login redirect loops" }, { number: 3, title: "Typo" }]).gh });
-  assert.deepEqual(listed.issues, [{ number: 7, title: "Login redirect loops" }, { number: 3, title: "Typo" }]);
+  const listed = await listIssues(dir, {
+    gh: fakeGh(() => [
+      { number: 7, title: "Login redirect loops" },
+      { number: 3, title: "Typo" },
+    ]).gh,
+  });
+  assert.deepEqual(listed.issues, [
+    { number: 7, title: "Login redirect loops" },
+    { number: 3, title: "Typo" },
+  ]);
   const broken = await listIssues(dir, { gh: fakeGh(() => ghError("", "ENOENT")).gh });
   assert.deepEqual(broken.issues, []);
   assert.equal(broken.gh.ok, false);

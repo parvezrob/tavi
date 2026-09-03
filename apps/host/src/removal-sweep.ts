@@ -67,8 +67,12 @@ export async function sweepRemovalLeftovers(roots: readonly string[]): Promise<S
 // nothing to do.
 export function describeSweep(report: SweepReport): string[] {
   const lines: string[] = [];
-  if (report.removed.length > 0) lines.push(`tavi: deleted ${report.removed.length} folder${report.removed.length === 1 ? "" : "s"} left by removed worktrees: ${report.removed.join(", ")}`);
-  for (const { path: leftover, error } of report.stranded) lines.push(`tavi: could not delete ${leftover} (left by a removed worktree): ${error}`);
+  if (report.removed.length > 0)
+    lines.push(
+      `tavi: deleted ${report.removed.length} folder${report.removed.length === 1 ? "" : "s"} left by removed worktrees: ${report.removed.join(", ")}`,
+    );
+  for (const { path: leftover, error } of report.stranded)
+    lines.push(`tavi: could not delete ${leftover} (left by a removed worktree): ${error}`);
   return lines;
 }
 

@@ -213,7 +213,10 @@ test("a release that outlives the grace window hands back exactly once (#63)", a
   await new Promise((resolve) => setTimeout(resolve, 5));
   assert.deepEqual(process.resizes, [{ cols: 41, rows: 28 }], "resized before the grace elapsed");
   await new Promise((resolve) => setTimeout(resolve, 40));
-  assert.deepEqual(process.resizes, [{ cols: 41, rows: 28 }, { cols: 174, rows: 49 }]);
+  assert.deepEqual(process.resizes, [
+    { cols: 41, rows: 28 },
+    { cols: 174, rows: 49 },
+  ]);
   assert.equal(asked, 1);
 
   // A later re-claim is a real client with a real grid.

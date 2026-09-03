@@ -5,7 +5,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { promisify } from "node:util";
-import { currentVersion, isManagedRuntime, packageRootFor, pruneVersions, readPending, runtimeLayout, switchCurrent, writeLauncher, writePending } from "./runtime.js";
+import {
+  currentVersion,
+  isManagedRuntime,
+  packageRootFor,
+  pruneVersions,
+  readPending,
+  runtimeLayout,
+  switchCurrent,
+  writeLauncher,
+  writePending,
+} from "./runtime.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -65,9 +75,14 @@ function fakeVersion(layout: ReturnType<typeof runtimeLayout>, version: string, 
   writeFileSync(path.join(root, "dist", "index.js"), `${body}\n`);
 }
 
-async function run(layout: ReturnType<typeof runtimeLayout>, marker: string): Promise<{ code: number; stderr: string }> {
+async function run(
+  layout: ReturnType<typeof runtimeLayout>,
+  marker: string,
+): Promise<{ code: number; stderr: string }> {
   try {
-    const { stderr } = await execFileAsync(process.execPath, [layout.launcher], { env: { ...process.env, MARK: marker } });
+    const { stderr } = await execFileAsync(process.execPath, [layout.launcher], {
+      env: { ...process.env, MARK: marker },
+    });
     return { code: 0, stderr };
   } catch (error) {
     const failure = error as { code?: number; stderr?: string };

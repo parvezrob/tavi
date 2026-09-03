@@ -16,3 +16,4 @@ xcuserdata/
 *.xcuserstate
 apps/ios/Frameworks/GhosttyKit.xcframework
 *.tgz
+.claude/worktrees/

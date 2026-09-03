@@ -374,7 +374,10 @@ test("a phone pairs with a single-use code and gets a credential of its own (#45
     // The host can list and revoke; a phone can see neither, but can leave.
     const listed = await fetch(`${base}/api/devices`, { headers: { Authorization: `Bearer ${config.token}` } });
     assert.equal(listed.status, 200);
-    assert.deepEqual(((await listed.json()) as { devices: Array<{ id: string }> }).devices.map((d) => d.id), [grant.device.id]);
+    assert.deepEqual(
+      ((await listed.json()) as { devices: Array<{ id: string }> }).devices.map((d) => d.id),
+      [grant.device.id],
+    );
     const phoneLists = await fetch(`${base}/api/devices`, { headers: { Authorization: `Bearer ${grant.credential}` } });
     assert.equal(phoneLists.status, 403);
     const hostLeaves = await fetch(`${base}/api/devices/me`, {
@@ -499,9 +502,18 @@ test("the project picker serves live agent folders, remembered choices, and root
     };
 
     // The folder an agent is living in leads; the remembered one follows.
-    assert.deepEqual(body.recent.map((entry) => entry.path), [web, api]);
-    assert.deepEqual(body.recent.map((entry) => entry.active), [true, false]);
-    assert.equal(body.recent.every((entry) => entry.withinRoots), true);
+    assert.deepEqual(
+      body.recent.map((entry) => entry.path),
+      [web, api],
+    );
+    assert.deepEqual(
+      body.recent.map((entry) => entry.active),
+      [true, false],
+    );
+    assert.equal(
+      body.recent.every((entry) => entry.withinRoots),
+      true,
+    );
     assert.deepEqual(body.workspaces, [{ name: "api", path: api, git: true }]);
     assert.deepEqual(body.roots, [root]);
     // Every kind herdr supports is offered; only what this Mac has is installed.
@@ -571,13 +583,19 @@ test("creating an agent requires a real folder and confirmation outside the root
     const inside = await create({ agent: "claude", cwd: project });
     assert.equal(inside.status, 201);
     assert.deepEqual(created, [{ agent: "claude", cwd: project }]);
-    assert.deepEqual(projects.list().map((entry) => entry.path), [project]);
+    assert.deepEqual(
+      projects.list().map((entry) => entry.path),
+      [project],
+    );
 
     // Outside a root with the confirmation the phone sends after asking.
     const confirmed = await create({ agent: "codex", cwd: outside, allowOutsideRoots: true });
     assert.equal(confirmed.status, 201);
     assert.deepEqual(created.at(-1), { agent: "codex", cwd: outside });
-    assert.deepEqual(projects.list().map((entry) => entry.path), [outside, project]);
+    assert.deepEqual(
+      projects.list().map((entry) => entry.path),
+      [outside, project],
+    );
 
     // Any kind herdr can launch is accepted, not just the first two; anything
     // else is refused before herdr sees it.
@@ -613,11 +631,9 @@ test("terminal websocket authenticates and bridges typed protocol messages", asy
   await listen(server);
 
   const address = server.address() as AddressInfo;
-  const websocket = new WebSocket(
-    `ws://127.0.0.1:${address.port}/api/agents/fixture/terminal`,
-    [TERMINAL_PROTOCOL],
-    { headers: { Authorization: `Bearer ${config.token}` } },
-  );
+  const websocket = new WebSocket(`ws://127.0.0.1:${address.port}/api/agents/fixture/terminal`, [TERMINAL_PROTOCOL], {
+    headers: { Authorization: `Bearer ${config.token}` },
+  });
   const messages = collectMessages(websocket);
 
   try {
@@ -743,11 +759,9 @@ test("terminal attach uses the backend attach command without pty flow control",
   await listen(server);
 
   const address = server.address() as AddressInfo;
-  const websocket = new WebSocket(
-    `ws://127.0.0.1:${address.port}/api/agents/fixture/terminal`,
-    [TERMINAL_PROTOCOL],
-    { headers: { Authorization: `Bearer ${config.token}` } },
-  );
+  const websocket = new WebSocket(`ws://127.0.0.1:${address.port}/api/agents/fixture/terminal`, [TERMINAL_PROTOCOL], {
+    headers: { Authorization: `Bearer ${config.token}` },
+  });
 
   try {
     await once(websocket, "open");
@@ -775,9 +789,7 @@ test("terminal websocket rejects missing credentials before spawning a pty", asy
 
   try {
     const address = server.address() as AddressInfo;
-    const status = await rejectedUpgradeStatus(
-      `ws://127.0.0.1:${address.port}/api/agents/fixture/terminal`,
-    );
+    const status = await rejectedUpgradeStatus(`ws://127.0.0.1:${address.port}/api/agents/fixture/terminal`);
     assert.equal(status, 401);
     assert.equal(spawnCount, 0);
   } finally {
@@ -788,7 +800,11 @@ test("terminal websocket rejects missing credentials before spawning a pty", asy
 test("terminal websocket rejects an unsupported protocol before pane lookup", async () => {
   let lookupCount = 0;
   let spawnCount = 0;
-  const herdr = terminalHerdr({ onLookup: () => { lookupCount += 1; } });
+  const herdr = terminalHerdr({
+    onLookup: () => {
+      lookupCount += 1;
+    },
+  });
   const server = await createTaviServer({
     config,
     herdr,
@@ -926,11 +942,9 @@ async function openTerminalSocket(terminal: FakeTerminal): Promise<{
   await listen(server);
 
   const address = server.address() as AddressInfo;
-  const websocket = new WebSocket(
-    `ws://127.0.0.1:${address.port}/api/agents/fixture/terminal`,
-    [TERMINAL_PROTOCOL],
-    { headers: { Authorization: `Bearer ${config.token}` } },
-  );
+  const websocket = new WebSocket(`ws://127.0.0.1:${address.port}/api/agents/fixture/terminal`, [TERMINAL_PROTOCOL], {
+    headers: { Authorization: `Bearer ${config.token}` },
+  });
   const messages = collectMessages(websocket);
   await once(websocket, "open");
   assert.equal((await messages.next()).value?.type, "ready");
@@ -1079,7 +1093,10 @@ test("read-only file routes: auth required, roots enforced after realpath, conte
     assert.equal(escaped.status, 403);
     assert.deepEqual(await escaped.json(), { error: "That file is outside your project folders.", outsideRoots: true });
 
-    const absoluteOutside = await fetch(`${origin}/api/files/stat?cwd=${cwd}&path=${encodeURIComponent(path.join(outside, "settings.json"))}`, { headers });
+    const absoluteOutside = await fetch(
+      `${origin}/api/files/stat?cwd=${cwd}&path=${encodeURIComponent(path.join(outside, "settings.json"))}`,
+      { headers },
+    );
     assert.equal(absoluteOutside.status, 403);
 
     const listing = await fetch(`${origin}/api/files?cwd=${cwd}&path=.`, { headers });
@@ -1111,7 +1128,13 @@ test("repos endpoint reports worktrees with branch and dirty state (#59a)", asyn
   writeFileSync(path.join(repoDir, "README.md"), "# app\n");
   execFileSync("git", ["-C", repoDir, "add", "."]);
   execFileSync("git", ["-C", repoDir, "commit", "-q", "-m", "init"], {
-    env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "t",
+      GIT_AUTHOR_EMAIL: "t@t",
+      GIT_COMMITTER_NAME: "t",
+      GIT_COMMITTER_EMAIL: "t@t",
+    },
   });
 
   const server = await createTaviServer({ config: { ...config, roots: [base] }, pullRequests: async () => null });
@@ -1124,10 +1147,15 @@ test("repos endpoint reports worktrees with branch and dirty state (#59a)", asyn
 
     const response = await fetch(`${origin}/api/repos`, { headers: { Authorization: `Bearer ${config.token}` } });
     assert.equal(response.status, 200);
-    const body = (await response.json()) as { repos: { root: string; worktrees: { branch: string | null; isMain: boolean }[] }[] };
+    const body = (await response.json()) as {
+      repos: { root: string; worktrees: { branch: string | null; isMain: boolean }[] }[];
+    };
     const repo = body.repos.find((entry) => entry.root === repoDir);
     assert.ok(repo, "expected the repository to be reported");
-    assert.deepEqual(repo?.worktrees.map((w) => [w.branch, w.isMain]), [["main", true]]);
+    assert.deepEqual(
+      repo?.worktrees.map((w) => [w.branch, w.isMain]),
+      [["main", true]],
+    );
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -1154,7 +1182,8 @@ test("preview: door status, candidates, open/keepalive/close scoped to the devic
     doorReady: async () => doorUp,
     discovery: {
       // 8787 is the host's own API port: never offered, even from inside the project.
-      listListeners: async () => "p42\ncnode\nf3\nn127.0.0.1:5173\np43\ncnode\nf3\nn127.0.0.1:4000\np44\ncnode\nf3\nn127.0.0.1:8787\n",
+      listListeners: async () =>
+        "p42\ncnode\nf3\nn127.0.0.1:5173\np43\ncnode\nf3\nn127.0.0.1:4000\np44\ncnode\nf3\nn127.0.0.1:8787\n",
       listCwds: async () => `p42\nfcwd\nn${project}\np43\nfcwd\nn/tmp\np44\nfcwd\nn${project}\n`,
       realpath: async (target: string) => target,
       kill: (pid: number) => killed.push(pid),
@@ -1162,7 +1191,10 @@ test("preview: door status, candidates, open/keepalive/close scoped to the devic
   });
   await listen(server);
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const as = (credential: string, init: RequestInit = {}) => ({ ...init, headers: { ...(init.headers ?? {}), Authorization: `Bearer ${credential}`, "Content-Type": "application/json" } });
+  const as = (credential: string, init: RequestInit = {}) => ({
+    ...init,
+    headers: { ...(init.headers ?? {}), Authorization: `Bearer ${credential}`, "Content-Type": "application/json" },
+  });
 
   try {
     assert.equal((await fetch(`${origin}/api/preview/door`)).status, 401, "bearer token required");
@@ -1170,24 +1202,42 @@ test("preview: door status, candidates, open/keepalive/close scoped to the devic
     assert.deepEqual(await door.json(), { doorPort: 8443, ready: false, cookieName: "tavi_preview" });
 
     const candidates = await fetch(`${origin}/api/preview/candidates?cwd=${encodeURIComponent(project)}`, as(phoneA));
-    assert.deepEqual(await candidates.json(), { available: true, servers: [{ port: 5173, command: "node", cwd: project }] });
+    assert.deepEqual(await candidates.json(), {
+      available: true,
+      servers: [{ port: 5173, command: "node", cwd: project }],
+    });
     const outside = await fetch(`${origin}/api/preview/candidates?cwd=${encodeURIComponent("/tmp")}`, as(phoneA));
     assert.equal(outside.status, 403);
 
     // The door is not published yet: say what to run, mint nothing.
-    const noDoor = await fetch(`${origin}/api/preview`, as(phoneA, { method: "POST", body: JSON.stringify({ cwd: project, port: 5173 }) }));
+    const noDoor = await fetch(
+      `${origin}/api/preview`,
+      as(phoneA, { method: "POST", body: JSON.stringify({ cwd: project, port: 5173 }) }),
+    );
     assert.equal(noDoor.status, 409);
     assert.equal(((await noDoor.json()) as { doorMissing?: boolean }).doorMissing, true);
     assert.equal(previews.size, 0);
 
     doorUp = true;
-    const dead = await fetch(`${origin}/api/preview`, as(phoneA, { method: "POST", body: JSON.stringify({ cwd: project, port: 4000 }) }));
+    const dead = await fetch(
+      `${origin}/api/preview`,
+      as(phoneA, { method: "POST", body: JSON.stringify({ cwd: project, port: 4000 }) }),
+    );
     assert.equal(dead.status, 409);
     assert.match(((await dead.json()) as { error: string }).error, /Nothing is listening on localhost:4000/);
 
-    const opened = await fetch(`${origin}/api/preview`, as(phoneA, { method: "POST", body: JSON.stringify({ cwd: project, port: 5173 }) }));
+    const opened = await fetch(
+      `${origin}/api/preview`,
+      as(phoneA, { method: "POST", body: JSON.stringify({ cwd: project, port: 5173 }) }),
+    );
     assert.equal(opened.status, 201);
-    const body = (await opened.json()) as { id: string; port: number; doorPort: number; cookieName: string; ticket: string };
+    const body = (await opened.json()) as {
+      id: string;
+      port: number;
+      doorPort: number;
+      cookieName: string;
+      ticket: string;
+    };
     assert.equal(body.port, 5173);
     assert.equal(body.doorPort, 8443);
     assert.equal(body.cookieName, "tavi_preview");
@@ -1197,15 +1247,27 @@ test("preview: door status, candidates, open/keepalive/close scoped to the devic
     const alive = await fetch(`${origin}/api/preview/${body.id}/keepalive`, as(phoneA, { method: "POST" }));
     assert.deepEqual(await alive.json(), { id: body.id, port: 5173, listening: true });
     // Phone B never sees phone A's preview.
-    assert.equal((await fetch(`${origin}/api/preview/${body.id}/keepalive`, as(phoneB, { method: "POST" }))).status, 404);
+    assert.equal(
+      (await fetch(`${origin}/api/preview/${body.id}/keepalive`, as(phoneB, { method: "POST" }))).status,
+      404,
+    );
     assert.equal((await fetch(`${origin}/api/preview/${body.id}`, as(phoneB, { method: "DELETE" }))).status, 404);
     assert.equal((await fetch(`${origin}/api/preview/${body.id}`, as(phoneA, { method: "DELETE" }))).status, 204);
     assert.equal(previews.admit(body.ticket), undefined);
-    assert.equal((await fetch(`${origin}/api/preview/${body.id}/keepalive`, as(phoneA, { method: "POST" }))).status, 404);
+    assert.equal(
+      (await fetch(`${origin}/api/preview/${body.id}/keepalive`, as(phoneA, { method: "POST" }))).status,
+      404,
+    );
 
-    const stopStranger = await fetch(`${origin}/api/preview/stop`, as(phoneA, { method: "POST", body: JSON.stringify({ cwd: project, port: 4000 }) }));
+    const stopStranger = await fetch(
+      `${origin}/api/preview/stop`,
+      as(phoneA, { method: "POST", body: JSON.stringify({ cwd: project, port: 4000 }) }),
+    );
     assert.equal(stopStranger.status, 404);
-    const stopped = await fetch(`${origin}/api/preview/stop`, as(phoneA, { method: "POST", body: JSON.stringify({ cwd: project, port: 5173 }) }));
+    const stopped = await fetch(
+      `${origin}/api/preview/stop`,
+      as(phoneA, { method: "POST", body: JSON.stringify({ cwd: project, port: 5173 }) }),
+    );
     assert.deepEqual(await stopped.json(), { stopped: true, pid: 42, command: "node" });
     assert.deepEqual(killed, [42]);
   } finally {
@@ -1219,7 +1281,13 @@ test("preview: door status, candidates, open/keepalive/close scoped to the devic
 test("worktree routes: 401 without a credential, 403 outside the roots, 400 without confirm, 409 for the main checkout", async () => {
   const base = realpathSync(mkdtempSync(path.join(tmpdir(), "tavi-wt-route-")));
   const repoDir = path.join(base, "app");
-  const gitEnv = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+  const gitEnv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: "t",
+    GIT_AUTHOR_EMAIL: "t@t",
+    GIT_COMMITTER_NAME: "t",
+    GIT_COMMITTER_EMAIL: "t@t",
+  };
   execFileSync("git", ["init", "-q", "-b", "main", repoDir]);
   writeFileSync(path.join(repoDir, "README.md"), "# app\n");
   execFileSync("git", ["-C", repoDir, "add", "."]);
@@ -1227,20 +1295,36 @@ test("worktree routes: 401 without a credential, 403 outside the roots, 400 with
   const outside = realpathSync(mkdtempSync(path.join(tmpdir(), "tavi-wt-outside-")));
   execFileSync("git", ["init", "-q", "-b", "main", outside]);
 
-  const server = await createTaviServer({ config: { ...config, roots: [base] }, pullRequests: async () => null, gh: async () => ({ stdout: "[]" }) });
+  const server = await createTaviServer({
+    config: { ...config, roots: [base] },
+    pullRequests: async () => null,
+    gh: async () => ({ stdout: "[]" }),
+  });
   await listen(server);
   try {
     const address = server.address() as AddressInfo;
     const origin = `http://127.0.0.1:${address.port}`;
     const headers = { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" };
-    const del = (body: unknown, auth = true) => fetch(`${origin}/api/worktrees`, { method: "DELETE", headers: auth ? headers : { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const del = (body: unknown, auth = true) =>
+      fetch(`${origin}/api/worktrees`, {
+        method: "DELETE",
+        headers: auth ? headers : { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
 
-    for (const route of ["/api/worktrees/status", "/api/worktrees/log", "/api/worktrees/removal", "/api/worktrees/pull-request"]) {
+    for (const route of [
+      "/api/worktrees/status",
+      "/api/worktrees/log",
+      "/api/worktrees/removal",
+      "/api/worktrees/pull-request",
+    ]) {
       assert.equal((await fetch(`${origin}${route}?path=${encodeURIComponent(repoDir)}`)).status, 401, route);
     }
     assert.equal((await del({ path: repoDir, confirm: { uncommitted: 0, unpushed: 0 } }, false)).status, 401);
 
-    const outsideRemoval = await fetch(`${origin}/api/worktrees/removal?path=${encodeURIComponent(outside)}`, { headers });
+    const outsideRemoval = await fetch(`${origin}/api/worktrees/removal?path=${encodeURIComponent(outside)}`, {
+      headers,
+    });
     assert.equal(outsideRemoval.status, 403);
     assert.equal(((await outsideRemoval.json()) as { outsideRoots?: boolean }).outsideRoots, true);
     const outsideDelete = await del({ path: outside, confirm: { uncommitted: 0, unpushed: 0 } });

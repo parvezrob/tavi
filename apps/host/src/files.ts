@@ -177,13 +177,34 @@ export type FileContentResult =
 export async function readTextContent(realPath: string, maxBytes = MAX_TEXT_BYTES): Promise<FileContentResult> {
   const info = await statFile(realPath);
   if (info.preview === "directory") {
-    return { ok: false, status: 400, error: "That is a folder.", preview: info.preview, size: info.size, mime: info.mime };
+    return {
+      ok: false,
+      status: 400,
+      error: "That is a folder.",
+      preview: info.preview,
+      size: info.size,
+      mime: info.mime,
+    };
   }
   if (info.preview === "secret") {
-    return { ok: false, status: 403, error: "This file looks like it holds credentials, so Tavi does not show it.", preview: info.preview, size: info.size, mime: info.mime };
+    return {
+      ok: false,
+      status: 403,
+      error: "This file looks like it holds credentials, so Tavi does not show it.",
+      preview: info.preview,
+      size: info.size,
+      mime: info.mime,
+    };
   }
   if (info.preview !== "text") {
-    return { ok: false, status: 415, error: "This file is not text.", preview: info.preview, size: info.size, mime: info.mime };
+    return {
+      ok: false,
+      status: 415,
+      error: "This file is not text.",
+      preview: info.preview,
+      size: info.size,
+      mime: info.mime,
+    };
   }
   const handle = await fs.open(realPath, "r");
   try {
@@ -278,7 +299,9 @@ function gitIgnored(directory: string, names: string[]): Promise<Set<string>> {
       clearTimeout(timer);
       resolve(new Set(stdout.split("\0").filter((name) => name.length > 0)));
     };
-    const child = spawn("git", ["-C", directory, "check-ignore", "-z", "--stdin"], { stdio: ["pipe", "pipe", "ignore"] });
+    const child = spawn("git", ["-C", directory, "check-ignore", "-z", "--stdin"], {
+      stdio: ["pipe", "pipe", "ignore"],
+    });
     const timer = setTimeout(() => {
       child.kill();
       finish("");

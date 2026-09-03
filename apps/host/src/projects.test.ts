@@ -3,12 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSyn
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import {
-  isWithinRoots,
-  mergeRecentProjects,
-  normalizeProjectPath,
-  ProjectHistory,
-} from "./projects.js";
+import { isWithinRoots, mergeRecentProjects, normalizeProjectPath, ProjectHistory } from "./projects.js";
 
 function scratch(): string {
   return mkdtempSync(path.join(tmpdir(), "tavi-projects-"));
@@ -131,7 +126,10 @@ test("an unreadable, damaged, or foreign history file reads as empty and says so
   assert.deepEqual(history.list(), []);
 
   assert.equal(reported.length, 3);
-  assert.equal(reported.every((message) => message.includes(file)), true);
+  assert.equal(
+    reported.every((message) => message.includes(file)),
+    true,
+  );
 
   // Entries the host cannot trust are dropped, the rest survive.
   writeFileSync(
@@ -188,9 +186,18 @@ test("recent projects merge live agent folders with remembered choices", () => {
   );
 
   // Folders with a live agent lead; the rest follow by most recent choice.
-  assert.deepEqual(merged.map((entry) => entry.path), [web, notes, api, outside]);
-  assert.deepEqual(merged.map((entry) => entry.active), [true, true, false, false]);
-  assert.deepEqual(merged.map((entry) => entry.withinRoots), [true, false, true, false]);
+  assert.deepEqual(
+    merged.map((entry) => entry.path),
+    [web, notes, api, outside],
+  );
+  assert.deepEqual(
+    merged.map((entry) => entry.active),
+    [true, true, false, false],
+  );
+  assert.deepEqual(
+    merged.map((entry) => entry.withinRoots),
+    [true, false, true, false],
+  );
   assert.equal(merged[0]?.name, "web");
   // An agent's folder the host never launched carries no invented history.
   assert.equal(merged[1]?.lastUsedAt, undefined);
@@ -209,7 +216,10 @@ test("a remembered folder that no longer exists is not offered", () => {
     [root],
   );
 
-  assert.deepEqual(merged.map((entry) => entry.path), [api]);
+  assert.deepEqual(
+    merged.map((entry) => entry.path),
+    [api],
+  );
 });
 
 test("merging tolerates duplicate, differently spelled, and empty agent folders", () => {

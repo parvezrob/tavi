@@ -3,7 +3,15 @@ import { existsSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import { bootstrap, BootstrapError, type BootstrapDeps, diagnose, durablePackageRoot, formatChecks, serviceEntrypoint } from "./bootstrap.js";
+import {
+  bootstrap,
+  BootstrapError,
+  type BootstrapDeps,
+  diagnose,
+  durablePackageRoot,
+  formatChecks,
+  serviceEntrypoint,
+} from "./bootstrap.js";
 import { type HostConfig, VERSION } from "./config.js";
 
 const config: HostConfig = {
@@ -77,9 +85,14 @@ function createDeps(world: World) {
         return JSON.stringify({ BackendState: world.backendState, Self: { DNSName: "studio.tail1234.ts.net." } });
       }
       if (args[0] === "serve" && args[1] === "status") {
-        const site = (proxies: string[]) => ({ Handlers: Object.fromEntries(proxies.map((proxy, index) => [`/${index || ""}`, { Proxy: proxy }])) });
+        const site = (proxies: string[]) => ({
+          Handlers: Object.fromEntries(proxies.map((proxy, index) => [`/${index || ""}`, { Proxy: proxy }])),
+        });
         return JSON.stringify({
-          Web: { "studio.tail1234.ts.net:443": site(world.serveProxies), "studio.tail1234.ts.net:8443": site(world.doorProxies ?? []) },
+          Web: {
+            "studio.tail1234.ts.net:443": site(world.serveProxies),
+            "studio.tail1234.ts.net:8443": site(world.doorProxies ?? []),
+          },
         });
       }
       if (args[0] === "serve" && args[1] === "--bg") {
@@ -154,14 +167,17 @@ const READY: World = {
 test("doctor reports every check green on a configured machine", async () => {
   const { deps } = createDeps({ ...READY, serveProxies: [...READY.serveProxies] });
   const checks = await diagnose(config, deps);
-  assert.deepEqual(checks.map((check) => [check.name, check.ok]), [
-    ["Terminal (pty)", true],
-    ["Tailscale", true],
-    ["Tailscale Serve", true],
-    ["Preview door", true],
-    ["Tavi host", true],
-    ["herdr", true],
-  ]);
+  assert.deepEqual(
+    checks.map((check) => [check.name, check.ok]),
+    [
+      ["Terminal (pty)", true],
+      ["Tailscale", true],
+      ["Tailscale Serve", true],
+      ["Preview door", true],
+      ["Tavi host", true],
+      ["herdr", true],
+    ],
+  );
   assert.match(formatChecks(checks), /✓ Tailscale {8}connected as studio.tail1234.ts.net/);
 });
 
@@ -200,7 +216,14 @@ test("doctor says exactly what to install when Tailscale is missing, and marks h
 });
 
 test("pair shows one checklist, asks once, then does the work and reports each ✓", async () => {
-  const world: World = { ...READY, serveProxies: [], doorProxies: [], serviceLoaded: false, healthy: false, answers: [true] };
+  const world: World = {
+    ...READY,
+    serveProxies: [],
+    doorProxies: [],
+    serviceLoaded: false,
+    healthy: false,
+    answers: [true],
+  };
   const { deps, commands, questions, reports } = createDeps(world);
 
   await bootstrap(config, deps);
@@ -215,9 +238,15 @@ test("pair shows one checklist, asks once, then does the work and reports each �
   assert.deepEqual(questions, ["Do these 3 things now? Your password may be asked once."]);
   assert.ok(commands.includes("tailscale serve --bg 8787"), commands.join("\n"));
   assert.ok(commands.includes("tailscale serve --bg --https=8443 8788"), commands.join("\n"));
-  assert.ok(reports.some((line) => /^  ✓ Private address for previews   https:\/\/studio.tail1234.ts.net:8443$/.test(line)), reports.join("\n"));
+  assert.ok(
+    reports.some((line) => /^  ✓ Private address for previews   https:\/\/studio.tail1234.ts.net:8443$/.test(line)),
+    reports.join("\n"),
+  );
   assert.ok(commands.includes("install-service"));
-  assert.ok(reports.some((line) => /^  ✓ Private address   https:\/\/studio.tail1234.ts.net$/.test(line)), reports.join("\n"));
+  assert.ok(
+    reports.some((line) => /^  ✓ Private address   https:\/\/studio.tail1234.ts.net$/.test(line)),
+    reports.join("\n"),
+  );
   assert.ok(reports.some((line) => /^  ✓ Tavi runs in the background$/.test(line)));
   assert.ok(!reports.some((line) => /systemctl|launchctl|serve --bg/.test(line)), reports.join("\n"));
 });
@@ -228,10 +257,16 @@ test("a background host older than this package is updated, not admired (ubuntu 
 
   await bootstrap(config, deps);
 
-  assert.match(reports[0] ?? "", new RegExp(`• Update Tavi in the background to ${VERSION.replaceAll(".", "\\.")}  — will do`));
+  assert.match(
+    reports[0] ?? "",
+    new RegExp(`• Update Tavi in the background to ${VERSION.replaceAll(".", "\\.")}  — will do`),
+  );
   assert.deepEqual(questions, ["Do this now? Your password may be asked once."]);
   assert.ok(commands.includes("install-service"));
-  assert.ok(reports.some((line) => line.includes(`✓ Tavi runs in the background  (${VERSION})`)), reports.join("\n"));
+  assert.ok(
+    reports.some((line) => line.includes(`✓ Tavi runs in the background  (${VERSION})`)),
+    reports.join("\n"),
+  );
   assert.equal(world.runningVersion, VERSION);
 });
 
@@ -259,7 +294,13 @@ test("saying no ends with the doctor instructions and changes nothing", async ()
 });
 
 test("Tailscale missing on Linux: the plan says install and sign in; one yes installs it, signs in, and continues", async () => {
-  const world: World = { ...READY, os: "linux", tools: { herdr: "/usr/local/bin/herdr" }, herdrRunning: true, answers: [true] };
+  const world: World = {
+    ...READY,
+    os: "linux",
+    tools: { herdr: "/usr/local/bin/herdr" },
+    herdrRunning: true,
+    answers: [true],
+  };
   const { deps, ran, questions, reports } = createDeps(world);
 
   await bootstrap(config, deps);
@@ -269,7 +310,10 @@ test("Tailscale missing on Linux: the plan says install and sign in; one yes ins
   assert.equal(ran[0], "sh -c curl -fsSL https://tailscale.com/install.sh | sh");
   assert.ok(ran.includes("/usr/bin/tailscale up"), ran.join("\n"));
   assert.equal(world.backendState, "Running");
-  assert.ok(reports.some((line) => /✓ Tailscale connected   studio.tail1234.ts.net/.test(line)), reports.join("\n"));
+  assert.ok(
+    reports.some((line) => /✓ Tailscale connected   studio.tail1234.ts.net/.test(line)),
+    reports.join("\n"),
+  );
 });
 
 test("Tailscale missing and the person says no: stops with the download link", async () => {
@@ -287,7 +331,14 @@ test("Tailscale stopped on the Mac: plan says start, yes runs `tailscale up`", a
 });
 
 test("Serve denied on Linux: the operator step happens inside the private-address step, no extra question", async () => {
-  const world: World = { ...READY, os: "linux", serveProxies: [], doorProxies: [], serveFails: "sending serve config: Access denied: serve config denied", answers: [true] };
+  const world: World = {
+    ...READY,
+    os: "linux",
+    serveProxies: [],
+    doorProxies: [],
+    serveFails: "sending serve config: Access denied: serve config denied",
+    answers: [true],
+  };
   const { deps, ran, questions } = createDeps(world);
 
   await bootstrap(config, deps);
@@ -298,19 +349,34 @@ test("Serve denied on Linux: the operator step happens inside the private-addres
 });
 
 test("Serve refused for HTTPS certificates: one plain sentence with the admin link, no jargon", async () => {
-  const world: World = { ...READY, serveProxies: [], doorProxies: [], serveFails: "error: HTTPS is not enabled for this tailnet", answers: [true] };
+  const world: World = {
+    ...READY,
+    serveProxies: [],
+    doorProxies: [],
+    serveFails: "error: HTTPS is not enabled for this tailnet",
+    answers: [true],
+  };
   const { deps } = createDeps(world);
-  await assert.rejects(() => bootstrap(config, deps), (error: unknown) => {
-    assert.ok(error instanceof BootstrapError);
-    assert.match(error.message, /HTTPS certificates turned on/);
-    assert.match(error.message, /login.tailscale.com\/admin\/dns/);
-    assert.doesNotMatch(error.message, /serve --bg|tailnet/);
-    return true;
-  });
+  await assert.rejects(
+    () => bootstrap(config, deps),
+    (error: unknown) => {
+      assert.ok(error instanceof BootstrapError);
+      assert.match(error.message, /HTTPS certificates turned on/);
+      assert.match(error.message, /login.tailscale.com\/admin\/dns/);
+      assert.doesNotMatch(error.message, /serve --bg|tailnet/);
+      return true;
+    },
+  );
 });
 
 test("when the service cannot start, Tavi runs for the session, says so in plain words, and pairing continues", async () => {
-  const world: World = { ...READY, serviceLoaded: false, healthy: false, answers: [true], serviceFails: "`systemctl --user restart tavi-host.service` failed: bad unit file setting" };
+  const world: World = {
+    ...READY,
+    serviceLoaded: false,
+    healthy: false,
+    answers: [true],
+    serviceFails: "`systemctl --user restart tavi-host.service` failed: bad unit file setting",
+  };
   const { deps, commands, reports } = createDeps(world);
 
   await bootstrap(config, deps);
@@ -319,7 +385,10 @@ test("when the service cannot start, Tavi runs for the session, says so in plain
   const explanation = reports.find((line) => /Couldn't set Tavi to run in the background/.test(line)) ?? "";
   assert.match(explanation, /host\.log/);
   assert.doesNotMatch(explanation, /systemctl/);
-  assert.ok(reports.some((line) => /✓ Tavi runs in the background   until you log out/.test(line)), reports.join("\n"));
+  assert.ok(
+    reports.some((line) => /✓ Tavi runs in the background   until you log out/.test(line)),
+    reports.join("\n"),
+  );
 });
 
 test("pair bootstrap fails honestly when nothing can start the host", async () => {
@@ -341,7 +410,12 @@ test("herdr installed but not running: the plan starts it in the background", as
 });
 
 test("herdr is in the plan when missing; a failed install is skipped with a note, never fatal", async () => {
-  const yes = createDeps({ ...READY, tools: { tailscale: "/usr/bin/tailscale" }, herdrRunning: false, answers: [true] });
+  const yes = createDeps({
+    ...READY,
+    tools: { tailscale: "/usr/bin/tailscale" },
+    herdrRunning: false,
+    answers: [true],
+  });
   const originalRun = yes.deps.run;
   yes.deps.run = async (command, args) => {
     await originalRun(command, args);
@@ -352,12 +426,20 @@ test("herdr is in the plan when missing; a failed install is skipped with a note
   assert.ok(yes.commands.includes("start-herdr /usr/local/bin/herdr"), yes.commands.join("\n"));
   assert.ok(yes.reports.some((line) => /✓ herdr running/.test(line)));
 
-  const failing = createDeps({ ...READY, tools: { tailscale: "/usr/bin/tailscale" }, herdrRunning: false, answers: [true] });
+  const failing = createDeps({
+    ...READY,
+    tools: { tailscale: "/usr/bin/tailscale" },
+    herdrRunning: false,
+    answers: [true],
+  });
   failing.deps.run = async () => {
     throw new Error("brew: command not found");
   };
   await bootstrap(config, failing.deps);
-  assert.ok(failing.reports.some((line) => /– herdr skipped: brew: command not found/.test(line)), failing.reports.join("\n"));
+  assert.ok(
+    failing.reports.some((line) => /– herdr skipped: brew: command not found/.test(line)),
+    failing.reports.join("\n"),
+  );
 });
 
 test("non-interactive runs never change anything they were not told to", async () => {
@@ -437,7 +519,13 @@ function temporaryDirectory(context: TestContext): string {
 }
 
 test("an npx install without the `tavi` command gets one added in the plan; a checkout never hears about it (#64)", async () => {
-  const world: World = { ...READY, serveProxies: [...READY.serveProxies], commandNeeded: true, commandOk: false, answers: [true] };
+  const world: World = {
+    ...READY,
+    serveProxies: [...READY.serveProxies],
+    commandNeeded: true,
+    commandOk: false,
+    answers: [true],
+  };
   const { deps, commands, reports } = createDeps(world);
   await bootstrap(config, deps);
   const plan = reports.join("\n");

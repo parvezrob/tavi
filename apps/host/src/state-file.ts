@@ -1,4 +1,13 @@
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 
@@ -9,7 +18,10 @@ import path from "node:path";
 // directory itself is not synced, so a power loss can still lose the newest
 // write — acceptable for these, which are re-creatable state, not records.
 
-export type StateFileRead = { status: "missing" } | { status: "ok"; value: unknown } | { status: "unreadable"; reason: string };
+export type StateFileRead =
+  | { status: "missing" }
+  | { status: "ok"; value: unknown }
+  | { status: "unreadable"; reason: string };
 
 export function readStateFile(file: string): StateFileRead {
   try {

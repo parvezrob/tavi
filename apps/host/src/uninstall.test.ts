@@ -8,7 +8,18 @@ import type { HostConfig } from "./config.js";
 import { uninstall, type UninstallDeps } from "./uninstall.js";
 
 function config(stateDir: string): HostConfig {
-  return { bindHost: "127.0.0.1", port: 8787, token: "token-long-enough-for-the-test-suite", shell: "/bin/sh", herdrSocket: "/tmp/h.sock", roots: [], stateDir, machineName: "m", previewPort: 8788, previewDoorPort: 8443 };
+  return {
+    bindHost: "127.0.0.1",
+    port: 8787,
+    token: "token-long-enough-for-the-test-suite",
+    shell: "/bin/sh",
+    herdrSocket: "/tmp/h.sock",
+    roots: [],
+    stateDir,
+    machineName: "m",
+    previewPort: 8788,
+    previewDoorPort: 8443,
+  };
 }
 
 function deps(overrides: Partial<UninstallDeps> & { answer: boolean; handlers?: Array<[string, string]> }) {
@@ -17,12 +28,24 @@ function deps(overrides: Partial<UninstallDeps> & { answer: boolean; handlers?: 
   const d: UninstallDeps = {
     ask: async () => overrides.answer,
     report: (m) => reports.push(m),
-    uninstallService: async () => { calls.push("service"); },
-    uninstallHerdrService: async () => { calls.push("herdr"); },
-    removeClaudeHooks: () => { calls.push("hooks"); return true; },
+    uninstallService: async () => {
+      calls.push("service");
+    },
+    uninstallHerdrService: async () => {
+      calls.push("herdr");
+    },
+    removeClaudeHooks: () => {
+      calls.push("hooks");
+      return true;
+    },
     serveHandlers: async () => overrides.handlers ?? [["mac.ts.net:443", "http://127.0.0.1:8787"]],
-    resetServe: async () => { calls.push("serve-reset"); },
-    removeCommandLink: () => { calls.push("command-link"); return "/usr/local/bin/tavi"; },
+    resetServe: async () => {
+      calls.push("serve-reset");
+    },
+    removeCommandLink: () => {
+      calls.push("command-link");
+      return "/usr/local/bin/tavi";
+    },
     ...overrides,
   };
   return { d, calls, reports };
@@ -45,10 +68,19 @@ test("uninstall removes the host, Tavi's herdr service, hooks, the Serve entry, 
 
 test("uninstall leaves a shared Tailscale Serve config alone and says so", async (context) => {
   const home = temp(context);
-  const { d, calls, reports } = deps({ answer: true, handlers: [["mac.ts.net:443", "http://127.0.0.1:8787"], ["mac.ts.net:443", "http://127.0.0.1:3000"]] });
+  const { d, calls, reports } = deps({
+    answer: true,
+    handlers: [
+      ["mac.ts.net:443", "http://127.0.0.1:8787"],
+      ["mac.ts.net:443", "http://127.0.0.1:3000"],
+    ],
+  });
   await uninstall(config(path.join(home, ".tavi")), d);
   assert.ok(!calls.includes("serve-reset"));
-  assert.ok(reports.some((line) => /left alone.*something else of yours/.test(line)), reports.join("\n"));
+  assert.ok(
+    reports.some((line) => /left alone.*something else of yours/.test(line)),
+    reports.join("\n"),
+  );
 });
 
 test("saying no changes nothing", async (context) => {
@@ -64,7 +96,11 @@ test("saying no changes nothing", async (context) => {
 test("removeClaudeHooks takes out only Tavi's entries", (context) => {
   const home = temp(context);
   const settings = path.join(home, "settings.json");
-  writeFileSync(settings, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: "say done" }] }] }, theme: "dark" }), "utf8");
+  writeFileSync(
+    settings,
+    JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: "say done" }] }] }, theme: "dark" }),
+    "utf8",
+  );
   installClaudeHooks(config(home), settings);
   assert.equal(removeClaudeHooks(settings), true);
   const after = JSON.parse(readFileSync(settings, "utf8")) as { hooks: Record<string, unknown[]>; theme: string };

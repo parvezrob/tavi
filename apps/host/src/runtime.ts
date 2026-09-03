@@ -1,4 +1,15 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 // The managed runtime: where a host installed by `npx tavi-host pair` lives
@@ -57,7 +68,9 @@ export function packageRootFor(layout: RuntimeLayout, version: string): string {
 export function isManagedRuntime(packageRoot: string, stateDir: string): boolean {
   const layout = runtimeLayout(stateDir);
   const resolved = path.resolve(packageRoot);
-  return [layout.versionsDir, layout.currentLink].some((prefix) => resolved.startsWith(path.resolve(prefix) + path.sep));
+  return [layout.versionsDir, layout.currentLink].some((prefix) =>
+    resolved.startsWith(path.resolve(prefix) + path.sep),
+  );
 }
 
 export function currentVersion(layout: RuntimeLayout): string | undefined {
@@ -85,7 +98,12 @@ export function readPending(layout: RuntimeLayout): PendingUpdate | undefined {
   try {
     const parsed = JSON.parse(readFileSync(layout.pendingFile, "utf8")) as Partial<PendingUpdate>;
     return typeof parsed.version === "string"
-      ? { version: parsed.version, attempts: typeof parsed.attempts === "number" ? parsed.attempts : 0, startedAt: parsed.startedAt ?? "", ...(parsed.previous ? { previous: parsed.previous } : {}) }
+      ? {
+          version: parsed.version,
+          attempts: typeof parsed.attempts === "number" ? parsed.attempts : 0,
+          startedAt: parsed.startedAt ?? "",
+          ...(parsed.previous ? { previous: parsed.previous } : {}),
+        }
       : undefined;
   } catch {
     return undefined;

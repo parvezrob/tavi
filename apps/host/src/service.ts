@@ -171,10 +171,7 @@ async function execute(command: string, args: string[]): Promise<void> {
     await execFileAsync(command, args);
   } catch (error) {
     const stderr = (error as { stderr?: string }).stderr?.trim();
-    throw new Error(
-      `\`${[command, ...args].join(" ")}\` failed${stderr ? `: ${stderr}` : ""}`,
-      { cause: error },
-    );
+    throw new Error(`\`${[command, ...args].join(" ")}\` failed${stderr ? `: ${stderr}` : ""}`, { cause: error });
   }
 }
 

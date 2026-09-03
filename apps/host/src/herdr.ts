@@ -27,13 +27,9 @@ export interface HerdrOptions {
   promptSettleMilliseconds?: number;
 }
 
-export type HerdrAgentLookup =
-  | { available: true; agent?: HerdrAgentInfo }
-  | { available: false; reason: string };
+export type HerdrAgentLookup = { available: true; agent?: HerdrAgentInfo } | { available: false; reason: string };
 
-export type HerdrPreviewResult =
-  | { available: true; preview: string }
-  | { available: false; reason: string };
+export type HerdrPreviewResult = { available: true; preview: string } | { available: false; reason: string };
 
 export type HerdrPromptResult = { submitted: true } | { submitted: false; reason: string };
 
@@ -60,9 +56,7 @@ export interface HerdrTabRequest {
   label?: string | undefined;
 }
 
-export type HerdrTabResult =
-  | { created: true; paneId: string; tabId: string }
-  | { created: false; reason: string };
+export type HerdrTabResult = { created: true; paneId: string; tabId: string } | { created: false; reason: string };
 
 export interface HerdrTreeTab {
   tabId: string;
@@ -84,9 +78,7 @@ export type HerdrTreeResult =
 
 export type HerdrTabCloseResult = { closed: true } | { closed: false; reason: string };
 
-export type HerdrTabRenameResult =
-  | { renamed: true; label: string }
-  | { renamed: false; reason: string };
+export type HerdrTabRenameResult = { renamed: true; label: string } | { renamed: false; reason: string };
 
 export interface TerminalSize {
   cols: number;
@@ -330,11 +322,7 @@ export class HerdrService implements HerdrAgentSource {
   // from Herdr's own read API — never scraped or reinterpreted here. `source`
   // picks the buffer: "recent" is a rolling window of recent output (good for
   // an activity preview); "visible" is the current on-screen viewport.
-  async readAgent(
-    paneId: string,
-    lines: number,
-    source: "recent" | "visible" = "recent",
-  ): Promise<HerdrPreviewResult> {
+  async readAgent(paneId: string, lines: number, source: "recent" | "visible" = "recent"): Promise<HerdrPreviewResult> {
     try {
       const result = asRecord(
         await this.request("agent.read", {
@@ -424,8 +412,7 @@ export class HerdrService implements HerdrAgentSource {
         await this.ensurePromptSubmitted(paneId, text);
         return { submitted: true };
       } catch (error) {
-        const launchPending =
-          error instanceof Error && /not an active named agent/i.test(error.message);
+        const launchPending = error instanceof Error && /not an active named agent/i.test(error.message);
         if (!launchPending) {
           return { submitted: false, reason: describeConnectionFailure(error) };
         }
@@ -442,11 +429,7 @@ export class HerdrService implements HerdrAgentSource {
   // would. Guarded to *idle* panes only — typing into a working pane or an
   // open dialog could act on it. Newlines become spaces because send_keys
   // has no bracketed paste; the submission still happens exactly once.
-  private async typePromptFallback(
-    paneId: string,
-    text: string,
-    cause: unknown,
-  ): Promise<HerdrPromptResult> {
+  private async typePromptFallback(paneId: string, text: string, cause: unknown): Promise<HerdrPromptResult> {
     const lookup = await this.findAgent(paneId);
     if (!lookup.available || !lookup.agent || lookup.agent.status !== "idle") {
       return { submitted: false, reason: describeConnectionFailure(cause) };
@@ -551,8 +534,7 @@ export class HerdrService implements HerdrAgentSource {
 
   private request(method: string, params: Record<string, unknown>): Promise<unknown> {
     const id = `tavi:${(this.requestCounter += 1)}`;
-    const timeoutMilliseconds =
-      this.options.requestTimeoutMilliseconds ?? REQUEST_TIMEOUT_MILLISECONDS;
+    const timeoutMilliseconds = this.options.requestTimeoutMilliseconds ?? REQUEST_TIMEOUT_MILLISECONDS;
 
     return new Promise((resolve, reject) => {
       const socket = createConnection({ path: this.options.socketPath });
@@ -654,16 +636,13 @@ function unavailable(reason: string): HerdrAgentsResult {
 }
 
 function describeConnectionFailure(error: unknown): string {
-  const code =
-    error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined;
+  const code = error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined;
   if (code === "ENOENT" || code === "ECONNREFUSED") return "The Herdr server is not running.";
   return error instanceof Error ? error.message : "Herdr could not be reached.";
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function asString(value: unknown): string {

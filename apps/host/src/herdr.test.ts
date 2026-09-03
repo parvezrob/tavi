@@ -353,7 +353,18 @@ test("a newer herdr that keeps the agent shape just works; one that breaks it as
   const newer = temporarySocketPath(context);
   await startFakeHerdr(context, newer, {
     protocol: 21,
-    agents: [{ agent: "claude", agent_status: "idle", cwd: "/", pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", revision: 1, brand_new_field: true }],
+    agents: [
+      {
+        agent: "claude",
+        agent_status: "idle",
+        cwd: "/",
+        pane_id: "w1:p1",
+        tab_id: "w1:t1",
+        workspace_id: "w1",
+        revision: 1,
+        brand_new_field: true,
+      },
+    ],
   });
   const fine = await new HerdrService({ socketPath: newer }).listAgents();
   assert.equal(fine.available, true);
@@ -463,14 +474,14 @@ async function startFakeHerdr(
                 ? { type: "pane_read", read: { text: behavior.readText ?? "" } }
                 : request.method === "session.snapshot"
                   ? { type: "session_snapshot", snapshot: behavior.snapshot ?? {} }
-                : request.method === "agent.prompt" || request.method === "agent.send_keys"
-                  ? { type: "ok" }
-                  : request.method === "tab.rename"
-                    ? {
-                        type: "tab_info",
-                        tab: { tab_id: request.params?.tab_id ?? "", label: request.params?.label ?? "" },
-                      }
-                    : { type: "agent_list", agents: behavior.agents };
+                  : request.method === "agent.prompt" || request.method === "agent.send_keys"
+                    ? { type: "ok" }
+                    : request.method === "tab.rename"
+                      ? {
+                          type: "tab_info",
+                          tab: { tab_id: request.params?.tab_id ?? "", label: request.params?.label ?? "" },
+                        }
+                      : { type: "agent_list", agents: behavior.agents };
       socket.write(`${JSON.stringify({ id: request.id, result })}\n`);
     });
   });

@@ -75,12 +75,20 @@ export async function createWorktree(
   let base = request.base?.trim() || null;
   if (base) {
     if (base.includes("\0") || base.startsWith("-") || !(await refExists(repo.main, base))) {
-      return { ok: false, status: 400, error: `There is no branch or commit named ${base} in ${path.basename(repo.main)}.` };
+      return {
+        ok: false,
+        status: 400,
+        error: `There is no branch or commit named ${base} in ${path.basename(repo.main)}.`,
+      };
     }
   } else {
     base = await findDefaultBranch(repo.main);
     if (!base) {
-      return { ok: false, status: 400, error: `${path.basename(repo.main)} has no main or master branch to start from; name a base.` };
+      return {
+        ok: false,
+        status: 400,
+        error: `${path.basename(repo.main)} has no main or master branch to start from; name a base.`,
+      };
     }
   }
 
@@ -102,12 +110,25 @@ export async function createWorktree(
   try {
     // A checkout of a large repository, or a slow post-checkout hook, needs
     // more than the local budget; a failure rolls back what this call made.
-    await git(repo.main, ["worktree", "add", "--no-track", "-b", branch, target, base], undefined, [0], WORKTREE_ADD_TIMEOUT_MS);
+    await git(
+      repo.main,
+      ["worktree", "add", "--no-track", "-b", branch, target, base],
+      undefined,
+      [0],
+      WORKTREE_ADD_TIMEOUT_MS,
+    );
   } catch (error) {
     const reason = describeGitError(error);
     await rollBackCreate(repo.main, target, branch);
-    const timedOut = /SIGTERM|ETIMEDOUT/i.test(error instanceof Error ? error.message : "") && !/fatal:|error:/i.test(reason);
-    return { ok: false, status: 503, error: timedOut ? `git took longer than ${WORKTREE_ADD_TIMEOUT_MS / 1000} s to create the worktree, so it was rolled back. Try again on the computer.` : `git could not create the worktree: ${reason}` };
+    const timedOut =
+      /SIGTERM|ETIMEDOUT/i.test(error instanceof Error ? error.message : "") && !/fatal:|error:/i.test(reason);
+    return {
+      ok: false,
+      status: 503,
+      error: timedOut
+        ? `git took longer than ${WORKTREE_ADD_TIMEOUT_MS / 1000} s to create the worktree, so it was rolled back. Try again on the computer.`
+        : `git could not create the worktree: ${reason}`,
+    };
   }
   // Best effort after the worktree exists: a failed config write is not
   // worth a half-made worktree the phone was never told about.
@@ -127,7 +148,12 @@ export async function createWorktree(
 // picker's root scan (one level under each root) finds the worktrees
 // folder, and nothing is ever created inside the checkout itself.
 export function worktreePath(mainWorktree: string, branch: string): string {
-  const slug = branch.replace(/[\\/]/g, "-").replace(/[^A-Za-z0-9._-]/g, "-").replace(/-{2,}/g, "-").replace(/^[-.]+|[-.]+$/g, "") || "worktree";
+  const slug =
+    branch
+      .replace(/[\\/]/g, "-")
+      .replace(/[^A-Za-z0-9._-]/g, "-")
+      .replace(/-{2,}/g, "-")
+      .replace(/^[-.]+|[-.]+$/g, "") || "worktree";
   return path.join(path.dirname(mainWorktree), `${path.basename(mainWorktree)}-worktrees`, slug);
 }
 
@@ -165,9 +191,7 @@ async function withinRootsAfterRealpath(target: string, roots: readonly string[]
   return isWithinRoots(target, roots) || isWithinRoots(realTarget, realRoots);
 }
 
-type RepositoryResolution =
-  | { ok: true; main: string }
-  | { ok: false; status: 400 | 404; error: string };
+type RepositoryResolution = { ok: true; main: string } | { ok: false; status: 400 | 404; error: string };
 
 // The phone's folder → the repository's main worktree, realpath'd. A folder
 // that is not inside a repository, or does not exist, is said plainly.
@@ -191,7 +215,11 @@ async function resolveRepository(candidate: string): Promise<RepositoryResolutio
     if (/not a git repository/i.test(describeGitError(error))) {
       return { ok: false, status: 404, error: "That folder is not inside a git repository." };
     }
-    return { ok: false, status: 404, error: `That folder cannot be read as a git repository: ${describeGitError(error)}` };
+    return {
+      ok: false,
+      status: 404,
+      error: `That folder cannot be read as a git repository: ${describeGitError(error)}`,
+    };
   }
 }
 
@@ -292,7 +320,12 @@ export async function previewRemoval(worktreePath: string, deps: RemovalDeps = {
   // Every count here is measured or the preview is refused: a git read
   // that fails must never read as "nothing would be lost" (#81 review).
   const changes = await listChanges(worktreePath);
-  if (!changes.ok) return { ok: false, status: 503, error: `Could not count the uncommitted changes, so nothing was removed: ${changes.error}` };
+  if (!changes.ok)
+    return {
+      ok: false,
+      status: 503,
+      error: `Could not count the uncommitted changes, so nothing was removed: ${changes.error}`,
+    };
   const uncommitted = {
     files: changes.files.length,
     additions: changes.files.reduce((sum, file) => sum + (file.additions ?? 0), 0),
@@ -314,11 +347,19 @@ export async function previewRemoval(worktreePath: string, deps: RemovalDeps = {
       commits = 0;
     }
   } catch (error) {
-    return { ok: false, status: 503, error: `Could not count the unpushed commits, so nothing was removed: ${describeGitError(error)}` };
+    return {
+      ok: false,
+      status: 503,
+      error: `Could not count the unpushed commits, so nothing was removed: ${describeGitError(error)}`,
+    };
   }
   let remote: string | null = null;
   try {
-    remote = (await git(worktreePath, ["remote"])).stdout.split("\n").map((line) => line.trim()).filter(Boolean)[0] ?? null;
+    remote =
+      (await git(worktreePath, ["remote"])).stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)[0] ?? null;
   } catch {
     remote = null;
   }
@@ -374,27 +415,48 @@ export type RemoveWorktreeResult =
 
 const pendingDeletes = new Set<Promise<void>>();
 
-export async function removeWorktree(worktreePath: string, request: RemoveWorktreeRequest, deps: RemovalDeps = {}): Promise<RemoveWorktreeResult> {
+export async function removeWorktree(
+  worktreePath: string,
+  request: RemoveWorktreeRequest,
+  deps: RemovalDeps = {},
+): Promise<RemoveWorktreeResult> {
   const previewed = await previewRemoval(worktreePath, deps);
   if (!previewed.ok) return previewed;
   const preview = previewed.preview;
   if (preview.isMain) {
-    return { ok: false, status: 409, error: `${path.basename(worktreePath)} is the repository's main checkout; it cannot be removed from here.` };
+    return {
+      ok: false,
+      status: 409,
+      error: `${path.basename(worktreePath)} is the repository's main checkout; it cannot be removed from here.`,
+    };
   }
   if (preview.locked) {
     // A lock is a "do not remove" — Claude Code's own worktrees carry one
     // — so it is lifted only on request; prune would otherwise skip the
     // entry and leave the repository pointing at a deleted folder.
     if (!request.unlock) {
-      return { ok: false, status: 409, error: `${preview.branch ?? path.basename(worktreePath)} is locked on the computer. Choose "Unlock and remove" if you mean to remove it.`, preview };
+      return {
+        ok: false,
+        status: 409,
+        error: `${preview.branch ?? path.basename(worktreePath)} is locked on the computer. Choose "Unlock and remove" if you mean to remove it.`,
+        preview,
+      };
     }
     try {
       await git(preview.repoRoot, ["worktree", "unlock", worktreePath]);
     } catch (error) {
-      return { ok: false, status: 503, error: `Nothing was removed: git could not unlock the worktree: ${describeGitError(error)}`, preview };
+      return {
+        ok: false,
+        status: 503,
+        error: `Nothing was removed: git could not unlock the worktree: ${describeGitError(error)}`,
+        preview,
+      };
     }
   }
-  if (preview.uncommitted.files !== request.confirm.uncommitted || preview.unpushed.commits !== request.confirm.unpushed) {
+  if (
+    preview.uncommitted.files !== request.confirm.uncommitted ||
+    preview.unpushed.commits !== request.confirm.unpushed
+  ) {
     return {
       ok: false,
       status: 409,
@@ -405,7 +467,13 @@ export async function removeWorktree(worktreePath: string, request: RemoveWorktr
 
   let pushed = 0;
   if (request.pushFirst && preview.unpushed.commits > 0) {
-    if (!preview.branch) return { ok: false, status: 409, error: "Nothing was removed. This worktree is not on a branch, so its commits cannot be pushed.", preview };
+    if (!preview.branch)
+      return {
+        ok: false,
+        status: 409,
+        error: "Nothing was removed. This worktree is not on a branch, so its commits cannot be pushed.",
+        preview,
+      };
     const push = await pushBranch(worktreePath);
     if (!push.ok) return { ok: false, status: push.status, error: `Nothing was removed. ${push.error}` };
     pushed = push.pushed;
@@ -435,7 +503,11 @@ export async function removeWorktree(worktreePath: string, request: RemoveWorktr
   try {
     await fs.rename(worktreePath, aside);
   } catch (error) {
-    return { ok: false, status: 503, error: `The worktree folder could not be moved aside: ${error instanceof Error ? error.message : String(error)}` };
+    return {
+      ok: false,
+      status: 503,
+      error: `The worktree folder could not be moved aside: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
   // Deregistration: the registered path is gone, so `worktree prune`
   // drops the entry (`worktree remove` would refuse the moved folder).
@@ -450,7 +522,9 @@ export async function removeWorktree(worktreePath: string, request: RemoveWorktr
     (error: unknown) => {
       // Said on the log now; retried by the hourly sweep and named by
       // `tavi doctor` until it goes (#82).
-      console.error(`tavi: could not delete ${aside} after removing the worktree (it will be retried; tavi doctor lists it): ${error instanceof Error ? error.message : String(error)}`);
+      console.error(
+        `tavi: could not delete ${aside} after removing the worktree (it will be retried; tavi doctor lists it): ${error instanceof Error ? error.message : String(error)}`,
+      );
     },
   );
   pendingDeletes.add(deletion);
@@ -464,7 +538,8 @@ export async function removeWorktree(worktreePath: string, request: RemoveWorktr
     // the base, or pushed by this very call — or when the person confirmed
     // the exact commit count away. A local remote-tracking ref is not
     // proof: it may be stale (#81 review).
-    const wantDelete = request.deleteBranch === true || (request.deleteBranch !== false && (preview.branchMerged || pushed > 0));
+    const wantDelete =
+      request.deleteBranch === true || (request.deleteBranch !== false && (preview.branchMerged || pushed > 0));
     if (wantDelete) {
       const force = !preview.branchMerged;
       try {
@@ -476,17 +551,26 @@ export async function removeWorktree(worktreePath: string, request: RemoveWorktr
       }
     } else {
       branchKept = preview.branch;
-      branchNote = preview.unpushed.commits > 0
-        ? `${countWords(preview.unpushed.commits, "commit")} on ${preview.branch} exist nowhere else, so the branch stays.`
-        : preview.unpushed.upstream
-          ? `${preview.branch} stays here; it is on ${preview.unpushed.upstream} too.`
-          : `${preview.branch} is not merged into ${preview.base ?? "its base"}, so the branch stays.`;
+      branchNote =
+        preview.unpushed.commits > 0
+          ? `${countWords(preview.unpushed.commits, "commit")} on ${preview.branch} exist nowhere else, so the branch stays.`
+          : preview.unpushed.upstream
+            ? `${preview.branch} stays here; it is on ${preview.unpushed.upstream} too.`
+            : `${preview.branch} is not merged into ${preview.base ?? "its base"}, so the branch stays.`;
     }
   }
 
   return {
     ok: true,
-    removed: { path: worktreePath, branch: preview.branch, branchDeleted, branchKept, branchNote, closedAgents, pushed },
+    removed: {
+      path: worktreePath,
+      branch: preview.branch,
+      branchDeleted,
+      branchKept,
+      branchNote,
+      closedAgents,
+      pushed,
+    },
   };
 }
 
@@ -502,14 +586,17 @@ export async function awaitPendingDeletes(): Promise<void> {
   await Promise.all([...pendingDeletes]);
 }
 
-type Located = { ok: true; main: string; isMain: boolean; locked: boolean } | { ok: false; status: 404 | 503; error: string };
+type Located =
+  | { ok: true; main: string; isMain: boolean; locked: boolean }
+  | { ok: false; status: 404 | 503; error: string };
 
 async function locateWorktree(worktreePath: string): Promise<Located> {
   let listed: ReturnType<typeof parseWorktreeList>;
   try {
     listed = parseWorktreeList((await git(worktreePath, ["worktree", "list", "--porcelain", "-z"])).stdout);
   } catch (error) {
-    if (/not a git repository/i.test(describeGitError(error))) return { ok: false, status: 404, error: "That folder is not inside a git repository." };
+    if (/not a git repository/i.test(describeGitError(error)))
+      return { ok: false, status: 404, error: "That folder is not inside a git repository." };
     return { ok: false, status: 503, error: `git could not read that worktree: ${describeGitError(error)}` };
   }
   const main = listed.find((worktree) => worktree.isMain);
@@ -526,7 +613,12 @@ async function locateWorktree(worktreePath: string): Promise<Located> {
     if (worktree.isMain) mainReal = real;
     if (real === worktreePath) match = worktree;
   }
-  if (!match) return { ok: false, status: 404, error: "That folder is not a worktree of its repository — only a whole worktree can be removed." };
+  if (!match)
+    return {
+      ok: false,
+      status: 404,
+      error: "That folder is not a worktree of its repository — only a whole worktree can be removed.",
+    };
   return { ok: true, main: mainReal, isMain: match.isMain, locked: match.locked };
 }
 
@@ -539,7 +631,10 @@ async function isAncestor(cwd: string, branch: string, base: string): Promise<bo
   }
 }
 
-async function agentsInside(worktreePath: string, deps: RemovalDeps): Promise<{ inside: RemovalAgent[]; alsoClosed: RemovalAgent[] }> {
+async function agentsInside(
+  worktreePath: string,
+  deps: RemovalDeps,
+): Promise<{ inside: RemovalAgent[]; alsoClosed: RemovalAgent[] }> {
   const none = { inside: [], alsoClosed: [] };
   if (!deps.agents) return none;
   let agents: HerdrAgentInfo[];

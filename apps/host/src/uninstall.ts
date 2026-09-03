@@ -53,7 +53,9 @@ export async function uninstall(config: HostConfig, deps: UninstallDeps): Promis
   });
 
   deps.report("\nTavi is gone from this computer. On the phone, remove this computer under Settings → Manage access.");
-  deps.report("Still installed, in case you want them removed too: Tailscale (its app / package), herdr (`brew uninstall herdr` or delete the binary), Node.js.");
+  deps.report(
+    "Still installed, in case you want them removed too: Tailscale (its app / package), herdr (`brew uninstall herdr` or delete the binary), Node.js.",
+  );
   return true;
 }
 

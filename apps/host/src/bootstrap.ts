@@ -6,11 +6,25 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { type HostConfig, VERSION } from "./config.js";
-import { COMMAND_NAME, chooseBinDir, commandLinkStatus, pathHint, writeCommandLink, type CommandLinkStatus } from "./command-link.js";
+import {
+  COMMAND_NAME,
+  chooseBinDir,
+  commandLinkStatus,
+  pathHint,
+  writeCommandLink,
+  type CommandLinkStatus,
+} from "./command-link.js";
 import { installService, SERVICE_LABEL } from "./service.js";
 import { LINUX_UNIT } from "./service-linux.js";
 import { installHerdrService } from "./herdr-service.js";
-import { isManagedRuntime, packageRootFor, runtimeLayout, switchCurrent, versionPrefix, writeLauncher } from "./runtime.js";
+import {
+  isManagedRuntime,
+  packageRootFor,
+  runtimeLayout,
+  switchCurrent,
+  versionPrefix,
+  writeLauncher,
+} from "./runtime.js";
 import { HerdrService } from "./herdr.js";
 import { listRemovalLeftovers } from "./removal-sweep.js";
 
@@ -79,7 +93,9 @@ export function defaultDeps(config: HostConfig, options: { assumeYes?: boolean }
       new Promise((resolve, reject) => {
         const child = spawn(command, args, { stdio: "inherit" });
         child.on("error", reject);
-        child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`\`${[command, ...args].join(" ")}\` exited with ${code}`))));
+        child.on("exit", (code) =>
+          code === 0 ? resolve() : reject(new Error(`\`${[command, ...args].join(" ")}\` exited with ${code}`)),
+        );
       }),
     ask: async (question) => {
       if (options.assumeYes) return true;
@@ -248,18 +264,30 @@ export async function bootstrap(config: HostConfig, deps: BootstrapDeps): Promis
     lines.push("  ✓ Private address for previews  (dev servers on the phone)");
   } else {
     lines.push("  • Private address for previews, so dev servers show on the phone  — will set up");
-    steps.push({ label: "Private address for previews", done: "Private address for previews", run: () => stepDoor(config, deps) });
+    steps.push({
+      label: "Private address for previews",
+      done: "Private address for previews",
+      run: () => stepDoor(config, deps),
+    });
   }
   if (service.ok) {
     lines.push("  ✓ Tavi runs in the background");
   } else if (service.outdated) {
     lines.push(`  • Update Tavi in the background to ${VERSION}  — will do`);
     pending.push(service);
-    steps.push({ label: "Update Tavi in the background", done: `Tavi runs in the background  (${VERSION})`, run: () => stepService(config, deps) });
+    steps.push({
+      label: "Update Tavi in the background",
+      done: `Tavi runs in the background  (${VERSION})`,
+      run: () => stepService(config, deps),
+    });
   } else {
     lines.push("  • Run Tavi in the background  — will set up");
     pending.push(service);
-    steps.push({ label: "Run Tavi in the background", done: "Tavi runs in the background", run: () => stepService(config, deps) });
+    steps.push({
+      label: "Run Tavi in the background",
+      done: "Tavi runs in the background",
+      run: () => stepService(config, deps),
+    });
   }
   const command = await deps.commandStatus();
   if (command.needed && command.ok) {
@@ -320,7 +348,9 @@ export async function bootstrap(config: HostConfig, deps: BootstrapDeps): Promis
         deps.report(`  – ${step.label} skipped: ${firstLine(describe(error))}. Tavi still works as a terminal.`);
         continue;
       }
-      throw error instanceof BootstrapError ? error : new BootstrapError([{ name: step.label, ok: false, detail: firstLine(describe(error)) }]);
+      throw error instanceof BootstrapError
+        ? error
+        : new BootstrapError([{ name: step.label, ok: false, detail: firstLine(describe(error)) }]);
     }
   }
   deps.report("");
@@ -410,9 +440,17 @@ export async function doorReady(config: HostConfig, deps: Pick<BootstrapDeps, "w
   return (await findDoor(config, deps, cli)) !== undefined;
 }
 
-async function findDoor(config: HostConfig, deps: Pick<BootstrapDeps, "execute">, cli: string): Promise<{ host: string; proxy: string } | undefined> {
+async function findDoor(
+  config: HostConfig,
+  deps: Pick<BootstrapDeps, "execute">,
+  cli: string,
+): Promise<{ host: string; proxy: string } | undefined> {
   const handlers = await serveHandlers(deps, cli);
-  return handlers.find((handler) => new RegExp(`:${config.previewDoorPort}$`).test(handler.host) && new RegExp(`:${config.previewPort}$`).test(handler.proxy));
+  return handlers.find(
+    (handler) =>
+      new RegExp(`:${config.previewDoorPort}$`).test(handler.host) &&
+      new RegExp(`:${config.previewPort}$`).test(handler.proxy),
+  );
 }
 
 async function checkDoor(config: HostConfig, deps: BootstrapDeps, cli: string | undefined): Promise<Check> {
@@ -421,12 +459,20 @@ async function checkDoor(config: HostConfig, deps: BootstrapDeps, cli: string | 
   if (!cli) return { name, ok: false, detail: "Needs Tailscale first.", fix };
   const ours = await findDoor(config, deps, cli);
   if (!ours) {
-    return { name, ok: false, detail: `Port ${config.previewPort} is not published as https://…:${config.previewDoorPort}, so dev servers cannot show on the phone.`, fix };
+    return {
+      name,
+      ok: false,
+      detail: `Port ${config.previewPort} is not published as https://…:${config.previewDoorPort}, so dev servers cannot show on the phone.`,
+      fix,
+    };
   }
   return { name, ok: true, detail: `https://${ours.host} → ${ours.proxy}` };
 }
 
-async function serveHandlers(deps: Pick<BootstrapDeps, "execute">, cli: string): Promise<Array<{ host: string; proxy: string }>> {
+async function serveHandlers(
+  deps: Pick<BootstrapDeps, "execute">,
+  cli: string,
+): Promise<Array<{ host: string; proxy: string }>> {
   try {
     const status = JSON.parse(await deps.execute(cli, ["serve", "status", "--json"])) as {
       Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }>;
@@ -444,7 +490,10 @@ async function ensureOperator(deps: BootstrapDeps, cli: string, force = false): 
   const user = deps.env.USER || deps.env.LOGNAME;
   if (!user) return;
   if (!force) {
-    const ok = await deps.execute(cli, ["serve", "status", "--json"]).then(() => true).catch(() => false);
+    const ok = await deps
+      .execute(cli, ["serve", "status", "--json"])
+      .then(() => true)
+      .catch(() => false);
     if (ok) return;
   }
   await deps.run("sudo", [cli, "set", `--operator=${user}`]);
@@ -459,7 +508,9 @@ async function stepService(config: HostConfig, deps: BootstrapDeps): Promise<str
   } catch (error) {
     // The person still gets to pair today; the service is Tavi's problem
     // to fix and the details go to the log, not their screen.
-    deps.report(`  – Couldn't set Tavi to run in the background here (details in ${log} — please share that file with us).`);
+    deps.report(
+      `  – Couldn't set Tavi to run in the background here (details in ${log} — please share that file with us).`,
+    );
     deps.report(`    Running Tavi for this session instead. (${firstLine(describe(error))})`);
   }
   await deps.startForSession();
@@ -479,7 +530,9 @@ async function waitHealthy(config: HostConfig, deps: BootstrapDeps, problem: str
   const deadline = deps.now() + HEALTH_WAIT_MS;
   while ((await deps.healthy(config.port)) !== VERSION) {
     if (deps.now() >= deadline) {
-      throw new Error(`${problem} on port ${config.port} after ${HEALTH_WAIT_MS / 1000}s. See ${path.join(config.stateDir, "host.log")}.`);
+      throw new Error(
+        `${problem} on port ${config.port} after ${HEALTH_WAIT_MS / 1000}s. See ${path.join(config.stateDir, "host.log")}.`,
+      );
     }
     await deps.sleep(250);
   }
@@ -537,7 +590,10 @@ async function checkPty(deps: BootstrapDeps): Promise<Check> {
 // Tailscale's own error text names the real cause; pass the right one on
 // rather than guessing. On Linux the CLI needs root or an operator user to
 // change serve config; HTTPS certs are a one-time tailnet setting.
-function explainServeFailure(message: string, port: number): { kind: "operator" | "https" | "other"; detail: string; fix: string } {
+function explainServeFailure(
+  message: string,
+  port: number,
+): { kind: "operator" | "https" | "other"; detail: string; fix: string } {
   const command = `tailscale serve --bg ${port}`;
   if (/Access denied|serve config denied|operator/i.test(message)) {
     return {
@@ -553,7 +609,11 @@ function explainServeFailure(message: string, port: number): { kind: "operator" 
       fix: `Enable HTTPS certificates for your tailnet (Tailscale admin → DNS → HTTPS Certificates), then run: ${command}`,
     };
   }
-  return { kind: "other", detail: `Configuring it failed: ${firstLine(message)}`, fix: `Run ${command} yourself and read Tailscale's message.` };
+  return {
+    kind: "other",
+    detail: `Configuring it failed: ${firstLine(message)}`,
+    fix: `Run ${command} yourself and read Tailscale's message.`,
+  };
 }
 
 function firstLine(text: string): string {
@@ -577,7 +637,15 @@ async function checkTailscale(deps: BootstrapDeps): Promise<{ check: Check; cli?
   try {
     status = JSON.parse(await deps.execute(cli, ["status", "--json"])) as typeof status;
   } catch {
-    return { check: { name, ok: false, detail: "Tailscale is installed but not responding.", fix: "Open the Tailscale app and sign in, then run this again." }, cli };
+    return {
+      check: {
+        name,
+        ok: false,
+        detail: "Tailscale is installed but not responding.",
+        fix: "Open the Tailscale app and sign in, then run this again.",
+      },
+      cli,
+    };
   }
   if (status.BackendState !== "Running") {
     return {
@@ -599,9 +667,16 @@ async function checkServe(config: HostConfig, deps: BootstrapDeps, cli: string |
   const fix = `tailscale serve --bg ${config.port}`;
   if (!cli) return { name, ok: false, detail: "Needs Tailscale first.", fix };
   const handlers = await serveHandlers(deps, cli);
-  const ours = handlers.find((handler) => /:443$/.test(handler.host) && new RegExp(`:${config.port}$`).test(handler.proxy));
+  const ours = handlers.find(
+    (handler) => /:443$/.test(handler.host) && new RegExp(`:${config.port}$`).test(handler.proxy),
+  );
   if (!ours) {
-    return { name, ok: false, detail: `Port ${config.port} is not exposed as a private HTTPS address on your tailnet.`, fix };
+    return {
+      name,
+      ok: false,
+      detail: `Port ${config.port} is not exposed as a private HTTPS address on your tailnet.`,
+      fix,
+    };
   }
   return { name, ok: true, detail: `https://${ours.host.replace(/:443$/, "")} → ${ours.proxy}` };
 }
@@ -628,7 +703,13 @@ async function checkService(config: HostConfig, deps: BootstrapDeps): Promise<Ch
       .then((out) => out.trim() === "active")
       .catch(() => false);
     if (healthy && active) return { name, ok: true, detail: `running as ${LINUX_UNIT} on port ${config.port}` };
-    if (healthy) return { name, ok: true, detail: `running on port ${config.port} (not as a service — it will not survive a reboot)`, fix: "tavi install-service" };
+    if (healthy)
+      return {
+        name,
+        ok: true,
+        detail: `running on port ${config.port} (not as a service — it will not survive a reboot)`,
+        fix: "tavi install-service",
+      };
     return {
       name,
       ok: false,
@@ -639,14 +720,25 @@ async function checkService(config: HostConfig, deps: BootstrapDeps): Promise<Ch
   if (deps.operatingSystem !== "darwin") {
     return healthy
       ? { name, ok: true, detail: `running on port ${config.port}` }
-      : { name, ok: false, detail: "Not running. Automatic service install supports macOS and Linux.", fix: "Run `tavi` in a terminal and keep it open." };
+      : {
+          name,
+          ok: false,
+          detail: "Not running. Automatic service install supports macOS and Linux.",
+          fix: "Run `tavi` in a terminal and keep it open.",
+        };
   }
   const loaded = await deps
     .execute("launchctl", ["print", `gui/${deps.userId}/${SERVICE_LABEL}`])
     .then(() => true)
     .catch(() => false);
   if (healthy && loaded) return { name, ok: true, detail: `running as ${SERVICE_LABEL} on port ${config.port}` };
-  if (healthy) return { name, ok: true, detail: `running on port ${config.port} (not as a login service — it will not survive a reboot)`, fix: "tavi install-service" };
+  if (healthy)
+    return {
+      name,
+      ok: true,
+      detail: `running on port ${config.port} (not as a login service — it will not survive a reboot)`,
+      fix: "tavi install-service",
+    };
   return {
     name,
     ok: false,
@@ -659,10 +751,22 @@ async function checkHerdr(deps: BootstrapDeps): Promise<Check> {
   const name = "herdr";
   const found = await deps.which("herdr");
   if (!found) {
-    return { name, ok: false, optional: true, detail: "Not installed. Agent cards and launching agents need it; the plain terminal works without it.", fix: "npx tavi-host pair (offers to install it)" };
+    return {
+      name,
+      ok: false,
+      optional: true,
+      detail: "Not installed. Agent cards and launching agents need it; the plain terminal works without it.",
+      fix: "npx tavi-host pair (offers to install it)",
+    };
   }
   if (await deps.herdrRunning()) return { name, ok: true, optional: true, detail: `running (${found})` };
-  return { name, ok: false, optional: true, detail: "Installed but its server is not running, so the app shows no agent cards.", fix: "npx tavi-host pair (starts it in the background)" };
+  return {
+    name,
+    ok: false,
+    optional: true,
+    detail: "Installed but its server is not running, so the app shows no agent cards.",
+    fix: "npx tavi-host pair (starts it in the background)",
+  };
 }
 
 async function checkOptionalTool(deps: BootstrapDeps, tool: string, detail: string, fix: string): Promise<Check> {
@@ -703,7 +807,15 @@ export async function durablePackageRoot(
     const execute =
       options.execute ??
       (async (command: string, args: string[]) => (await execFileAsync(command, args, { timeout: 180_000 })).stdout);
-    await execute("npm", ["install", "--prefix", versionPrefix(layout, version), "--no-audit", "--no-fund", "--loglevel=error", spec]);
+    await execute("npm", [
+      "install",
+      "--prefix",
+      versionPrefix(layout, version),
+      "--no-audit",
+      "--no-fund",
+      "--loglevel=error",
+      spec,
+    ]);
     if (!existsSync(path.join(target, "dist", "index.js"))) {
       throw new Error(`npm reported success but ${target} has no dist/index.js.`);
     }
@@ -719,7 +831,9 @@ export async function durablePackageRoot(
 
 /** The managed runtime runs through its launcher (rollback, self-update); anything else runs dist/index.js directly. */
 export function serviceEntrypoint(config: HostConfig, packageRoot: string): string {
-  return isManagedRuntime(packageRoot, config.stateDir) ? runtimeLayout(config.stateDir).launcher : path.join(packageRoot, "dist", "index.js");
+  return isManagedRuntime(packageRoot, config.stateDir)
+    ? runtimeLayout(config.stateDir).launcher
+    : path.join(packageRoot, "dist", "index.js");
 }
 
 function isEphemeral(packageRoot: string, env: NodeJS.ProcessEnv): boolean {
@@ -732,7 +846,9 @@ function currentPackageRoot(): string {
 
 function readVersion(packageRoot: string): string {
   try {
-    return (JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8")) as { version?: string }).version ?? "";
+    return (
+      (JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8")) as { version?: string }).version ?? ""
+    );
   } catch {
     return "";
   }

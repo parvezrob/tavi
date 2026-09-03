@@ -24,7 +24,10 @@ test("describePeerPath: direct when the peer has a current address, relay when o
 });
 
 test("callerAddress: the first X-Forwarded-For hop behind Serve, the socket otherwise, tailnet addresses only", () => {
-  const behindServe = { headers: { "x-forwarded-for": "100.102.71.0, 127.0.0.1" }, socket: { remoteAddress: "127.0.0.1" } };
+  const behindServe = {
+    headers: { "x-forwarded-for": "100.102.71.0, 127.0.0.1" },
+    socket: { remoteAddress: "127.0.0.1" },
+  };
   assert.equal(callerAddress(behindServe as never), "100.102.71.0");
   const direct = { headers: {}, socket: { remoteAddress: "::ffff:100.102.71.0" } };
   assert.equal(callerAddress(direct as never), "100.102.71.0");
@@ -62,5 +65,7 @@ test("connectionPath: asks tailscale once per window, and any failure is unknown
   // The cached document still answers for another peer within the window.
   assert.deepEqual(await connectionPath(other, failing, true), { path: "relay", relay: "blr" });
   // No tailnet caller: nothing to ask.
-  assert.deepEqual(await connectionPath({ headers: {}, socket: { remoteAddress: "127.0.0.1" } } as never, runner), { path: "unknown" });
+  assert.deepEqual(await connectionPath({ headers: {}, socket: { remoteAddress: "127.0.0.1" } } as never, runner), {
+    path: "unknown",
+  });
 });

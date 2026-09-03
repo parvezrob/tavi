@@ -13,6 +13,8 @@
     "dev:host": "npm run dev --workspace tavi-host",
     "devices": "npm run devices --workspace tavi-host",
     "doctor": "npm run doctor --workspace tavi-host",
+    "format": "npm run format --workspace tavi-host",
+    "lint": "npm run lint --workspace tavi-host",
     "pair": "npm run pair --workspace tavi-host",
     "postinstall": "node apps/host/scripts/ensure-node-pty.mjs",
     "service:install": "npm run service:install --workspace tavi-host",

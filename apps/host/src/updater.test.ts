@@ -65,7 +65,12 @@ test("a host that starts cleanly clears the pending marker for its own version o
 test("a failed check (e.g. npm not propagated yet) retries in an hour, not a day", async (context) => {
   const { deps } = fixture(context, { current: "0.1.6", latest: undefined });
   const timers: Array<{ fn: () => void; ms: number }> = [];
-  startUpdater(deps, { initialDelayMs: 1, intervalMs: 10_000, retryMs: 500, setTimer: (fn, ms) => (timers.push({ fn, ms }), {}) });
+  startUpdater(deps, {
+    initialDelayMs: 1,
+    intervalMs: 10_000,
+    retryMs: 500,
+    setTimer: (fn, ms) => (timers.push({ fn, ms }), {}),
+  });
   timers[0]?.fn();
   await new Promise((resolve) => setTimeout(resolve, 5));
   assert.ok(timers[1] && timers[1].ms >= 450 && timers[1].ms <= 550, `retry timer was ${timers[1]?.ms}`);
@@ -79,7 +84,11 @@ test("the schedule checks after the initial delay, then daily, and never overlap
     checks += 1;
     return "0.1.6";
   };
-  const updater = startUpdater(deps, { initialDelayMs: 1000, intervalMs: 10_000, setTimer: (fn, ms) => (timers.push({ fn, ms }), {}) });
+  const updater = startUpdater(deps, {
+    initialDelayMs: 1000,
+    intervalMs: 10_000,
+    setTimer: (fn, ms) => (timers.push({ fn, ms }), {}),
+  });
   assert.equal(timers[0]?.ms, 1000);
   timers[0]?.fn();
   const [a, b] = [updater.checkNow(), updater.checkNow()];

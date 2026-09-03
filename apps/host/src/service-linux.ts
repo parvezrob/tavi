@@ -33,14 +33,16 @@ export async function installSystemdUnit(
   return unitFile;
 }
 
-export async function uninstallSystemdUnit(unit: string, options: { homeDirectory: string; execute: Execute }): Promise<string[]> {
+export async function uninstallSystemdUnit(
+  unit: string,
+  options: { homeDirectory: string; execute: Execute },
+): Promise<string[]> {
   const unitFile = path.join(options.homeDirectory, LINUX_UNIT_DIR, unit);
   await options.execute("systemctl", ["--user", "disable", "--now", unit]).catch(() => undefined);
   await rm(unitFile, { force: true });
   await options.execute("systemctl", ["--user", "daemon-reload"]).catch(() => undefined);
   return [unitFile];
 }
-
 
 export async function installSystemdService(config: HostConfig, options: ServiceOptions = {}): Promise<string> {
   const execute = options.execute ?? defaultExecute;
@@ -55,7 +57,10 @@ export async function installSystemdService(config: HostConfig, options: Service
   await chmod(config.stateDir, 0o700);
   await writeFile(logFile, "", { flag: "a", mode: 0o600 });
   await chmod(logFile, 0o600);
-  await writeFile(unitFile, systemdUnit({ config, packageRoot, entrypoint, logFile }), { encoding: "utf8", mode: 0o600 });
+  await writeFile(unitFile, systemdUnit({ config, packageRoot, entrypoint, logFile }), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
 
   await execute("systemctl", ["--user", "daemon-reload"]);
   await execute("systemctl", ["--user", "enable", LINUX_UNIT]);
@@ -75,7 +80,12 @@ export async function uninstallSystemdService(options: ServiceOptions = {}): Pro
   return [unitFile];
 }
 
-export function systemdUnit(input: { config: HostConfig; packageRoot: string; entrypoint: string; logFile: string }): string {
+export function systemdUnit(input: {
+  config: HostConfig;
+  packageRoot: string;
+  entrypoint: string;
+  logFile: string;
+}): string {
   const environment: Record<string, string> = {
     TAVI_HOST: input.config.bindHost,
     TAVI_PORT: String(input.config.port),
@@ -120,7 +130,12 @@ async function defaultExecute(command: string, args: string[]): Promise<void> {
   const { execFile } = await import("node:child_process");
   await new Promise<void>((resolve, reject) => {
     execFile(command, args, (error, _stdout, stderr) => {
-      if (error) reject(new Error(`\`${[command, ...args].join(" ")}\` failed${stderr ? `: ${stderr.trim()}` : ""}`, { cause: error }));
+      if (error)
+        reject(
+          new Error(`\`${[command, ...args].join(" ")}\` failed${stderr ? `: ${stderr.trim()}` : ""}`, {
+            cause: error,
+          }),
+        );
       else resolve();
     });
   });
