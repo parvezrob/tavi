@@ -57,6 +57,33 @@ export async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   }
 }
 
+// A parsed body is only ever read key by key; anything that is not an object
+// (a bare number, null, a string) reads as an empty one and the route's own
+// field checks refuse it.
+export function bodyRecord(body: unknown): Record<string, unknown> {
+  return typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+}
+
+// Every refusal to touch a path — `resolveWithinRoots`, an upload, a new
+// worktree — answers in this one shape, because `outsideRoots` is what tells
+// the phone to offer the second confirmation rather than give up.
+export function sendPathFailure(
+  response: ServerResponse,
+  failure: { status: number; error: string; outsideRoots?: true },
+): true {
+  sendJson(response, failure.status, {
+    error: failure.error,
+    ...(failure.outsideRoots ? { outsideRoots: true } : {}),
+  });
+  return true;
+}
+
+// Herdr is optional on a host; every route that needs it says so the same way.
+export function sendHerdrUnconfigured(response: ServerResponse): true {
+  sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
+  return true;
+}
+
 export function sendJson(response: ServerResponse, status: number, value: unknown): void {
   if (response.headersSent) return;
   const body = JSON.stringify(value);

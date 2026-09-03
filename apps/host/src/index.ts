@@ -26,6 +26,7 @@ import { HerdrEventFeed } from "./herdr-events.js";
 import { installService, uninstallService } from "./service.js";
 import { isManagedRuntime, runtimeLayout } from "./runtime.js";
 import { defaultUpdaterDeps, markStarted, startUpdater, type UpdateOutcome } from "./updater.js";
+import { log } from "./log.js";
 import { describeSweep, SWEEP_INTERVAL_MS, sweepRemovalLeftovers } from "./removal-sweep.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -327,7 +328,7 @@ server.listen(config.port, config.bindHost, () => {
   const sweep = (): void => {
     void sweepRemovalLeftovers(config.roots)
       .then((report) => {
-        for (const line of describeSweep(report)) console.error(line);
+        for (const line of describeSweep(report)) log.warn("removal-sweep", line);
       })
       .catch(() => undefined);
   };

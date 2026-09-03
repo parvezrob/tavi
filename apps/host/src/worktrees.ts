@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { listChanges } from "./changes.js";
 import { describeGitError, git } from "./git-exec.js";
+import { log } from "./log.js";
 import { findDefaultBranch, parseWorktreeList, refExists } from "./git.js";
 import { isWithinRoots } from "./projects.js";
 import { leftoverName } from "./removal-sweep.js";
@@ -515,15 +516,16 @@ export async function removeWorktree(
   try {
     await git(preview.repoRoot, ["worktree", "prune"]);
   } catch (error) {
-    console.error(`tavi: git worktree prune failed after removing ${worktreePath}: ${describeGitError(error)}`);
+    log.error("worktrees", `git worktree prune failed after removing ${worktreePath}: ${describeGitError(error)}`);
   }
   const deletion = fs.rm(aside, { recursive: true, force: true }).then(
     () => undefined,
     (error: unknown) => {
       // Said on the log now; retried by the hourly sweep and named by
       // `tavi doctor` until it goes (#82).
-      console.error(
-        `tavi: could not delete ${aside} after removing the worktree (it will be retried; tavi doctor lists it): ${error instanceof Error ? error.message : String(error)}`,
+      log.error(
+        "worktrees",
+        `could not delete ${aside} after removing the worktree (it will be retried; tavi doctor lists it): ${error instanceof Error ? error.message : String(error)}`,
       );
     },
   );

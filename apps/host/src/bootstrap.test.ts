@@ -91,6 +91,7 @@ function createDeps(world: World) {
       }
       if (args[0] === "serve" && args[1] === "--bg") {
         if (world.serveFails) throw new Error(world.serveFails);
+        // biome-ignore lint/suspicious/noAssignInExpressions: the fake records the first door proxy and every one after it in one line.
         if (args[2]?.startsWith("--https=")) (world.doorProxies ??= []).push(`http://127.0.0.1:${args[3]}`);
         else world.serveProxies.push(`http://127.0.0.1:${args[2]}`);
         return "";

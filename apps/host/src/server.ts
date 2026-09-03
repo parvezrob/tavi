@@ -12,6 +12,7 @@ import type { PullRequestLookup } from "./git.js";
 import type { HerdrAgentSource } from "./herdr.js";
 import type { AgentEventSource } from "./herdr-events.js";
 import { type Route, type RouteContext, sendJson } from "./http.js";
+import { log } from "./log.js";
 import { DeviceRegistry, PairingSessions } from "./pairing.js";
 import { PreviewRegistry, type DiscoveryDeps } from "./preview.js";
 import { ProjectHistory } from "./projects.js";
@@ -160,7 +161,8 @@ export async function createTaviServer(options: TaviServerOptions) {
     } catch (error) {
       const status = error instanceof InputError ? 400 : 500;
       const message = error instanceof Error ? error.message : "Unexpected server error.";
-      if (status === 500) console.error(error);
+      // The body says only that something failed; the stack belongs on the log.
+      if (status === 500) log.error("http", message, { error });
       sendJson(response, status, { error: message });
     }
   });
@@ -337,11 +339,6 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse, 
 
   for (const route of ROUTES) {
     if (await route(url, request, response, context)) return;
-  }
-
-  if (url.pathname.startsWith("/api/")) {
-    sendJson(response, 404, { error: "Not found." });
-    return;
   }
 
   sendJson(response, 404, { error: "Not found." });

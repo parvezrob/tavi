@@ -191,7 +191,7 @@ export async function diagnose(config: HostConfig, deps: BootstrapDeps): Promise
 
 // Folders removed worktrees left behind that the host could not delete
 // (#82): named, with the command, only when there are any.
-export async function checkRemovalLeftovers(config: Pick<HostConfig, "roots">): Promise<Check[]> {
+async function checkRemovalLeftovers(config: Pick<HostConfig, "roots">): Promise<Check[]> {
   const leftovers = await listRemovalLeftovers(config.roots);
   if (leftovers.length === 0) return [];
   const quoted = leftovers.map((folder) => `'${folder.replaceAll("'", "'\\''")}'`).join(" ");
@@ -359,6 +359,9 @@ export async function bootstrap(config: HostConfig, deps: BootstrapDeps): Promis
 // Installs and/or starts Tailscale. `tailscale up` prints the sign-in link
 // itself and returns once the browser side is done.
 async function stepTailscale(deps: BootstrapDeps): Promise<string | undefined> {
+  // Not a retry of one flaky call: each pass fixes one thing the check
+  // named (install, then operator, then `up`), so the loop needs one pass
+  // per fix plus the confirming re-check.
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const { check, cli } = await checkTailscale(deps);
     if (check.ok) return check.detail.replace(/^connected as /, "");
@@ -379,6 +382,8 @@ async function stepTailscale(deps: BootstrapDeps): Promise<string | undefined> {
 async function stepServe(config: HostConfig, deps: BootstrapDeps): Promise<string | undefined> {
   const cli = (await checkTailscale(deps)).cli;
   if (!cli) throw new Error("Tailscale is not available.");
+  // One pass per fix a failed check can apply (operator, then HTTPS certs,
+  // then the retried `serve`), plus the pass that confirms it took.
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const serve = await checkServe(config, deps, cli);
     if (serve.ok) return serve.detail.split(" → ")[0];
@@ -412,6 +417,8 @@ async function stepServe(config: HostConfig, deps: BootstrapDeps): Promise<strin
 async function stepDoor(config: HostConfig, deps: BootstrapDeps): Promise<string | undefined> {
   const cli = (await checkTailscale(deps)).cli;
   if (!cli) throw new Error("Tailscale is not available.");
+  // Tailscale is already up by here, so the only fix a pass can apply is
+  // the operator question: one pass to ask it, one to retry, one to confirm.
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const door = await checkDoor(config, deps, cli);
     if (door.ok) return door.detail.split(" → ")[0];

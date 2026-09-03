@@ -1,6 +1,6 @@
 import { parseClaudeHookEvent } from "../attention.js";
 import type { DialogDecision } from "../herdr.js";
-import { readJsonBody, type Route, sendJson } from "../http.js";
+import { bodyRecord, readJsonBody, type Route, sendHerdrUnconfigured, sendJson } from "../http.js";
 import { mergeRecentProjects } from "../projects.js";
 import { clamp, safeSessionId } from "../validation.js";
 
@@ -33,10 +33,7 @@ export const agentRoutes: Route = async (url, request, response, context) => {
 
   const previewMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/preview$/);
   if (previewMatch && request.method === "GET") {
-    if (!herdr) {
-      sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
-      return true;
-    }
+    if (!herdr) return sendHerdrUnconfigured(response);
     const paneId = safeSessionId(previewMatch[1] || "");
     const requestedLines = Number.parseInt(url.searchParams.get("lines") || "12", 10);
     const lines = Number.isFinite(requestedLines) ? clamp(requestedLines, 1, 50) : 12;
@@ -55,10 +52,7 @@ export const agentRoutes: Route = async (url, request, response, context) => {
 
   const dialogMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/dialog$/);
   if (dialogMatch && request.method === "GET") {
-    if (!herdr) {
-      sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
-      return true;
-    }
+    if (!herdr) return sendHerdrUnconfigured(response);
     const paneId = safeSessionId(dialogMatch[1] || "");
     const result = await herdr.readDialog(paneId);
     if ("available" in result) {
@@ -75,13 +69,10 @@ export const agentRoutes: Route = async (url, request, response, context) => {
 
   const decisionMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/decision$/);
   if (decisionMatch && request.method === "POST") {
-    if (!herdr) {
-      sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
-      return true;
-    }
+    if (!herdr) return sendHerdrUnconfigured(response);
     const paneId = safeSessionId(decisionMatch[1] || "");
     const body = await readJsonBody(request);
-    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const record = bodyRecord(body);
     const rawDecision = record.decision;
     // "approve" / "deny", or { decision: "option", option: N } to pick a
     // specific numbered choice.
@@ -137,10 +128,7 @@ export const agentRoutes: Route = async (url, request, response, context) => {
 
   const promptMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/prompt$/);
   if (promptMatch && request.method === "POST") {
-    if (!herdr) {
-      sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
-      return true;
-    }
+    if (!herdr) return sendHerdrUnconfigured(response);
     const paneId = safeSessionId(promptMatch[1] || "");
     const body = await readJsonBody(request);
     const text =

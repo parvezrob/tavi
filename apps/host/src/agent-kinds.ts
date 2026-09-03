@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { runLoginShell } from "./login-shell.js";
 
 // Not an agent herdr launches: a plain shell in the chosen folder, which
 // Tavi then *reports* to herdr as an agent so it lists and attaches like
@@ -95,15 +95,4 @@ export class AgentKindDetector {
       return new Set();
     }
   }
-}
-
-function runLoginShell(shell: string, script: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(shell, ["-lc", script], { timeout: 10_000 }, (error, stdout) => {
-      // A non-zero exit is normal here: the last `command -v` in the chain
-      // fails whenever that kind is absent. Only a spawn failure matters.
-      if (error && typeof stdout !== "string") reject(error);
-      else resolve(stdout ?? "");
-    });
-  });
 }

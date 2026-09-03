@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { git } from "./git-exec.js";
 import { isWithinRoots } from "./projects.js";
 
 // Read-only file access for the phone (#25, #57, #61): what an agent
@@ -19,6 +19,8 @@ export const MAX_TEXT_BYTES = 1024 * 1024;
 export const MAX_RAW_BYTES = 16 * 1024 * 1024;
 const BINARY_SNIFF_BYTES = 8 * 1024;
 const MAX_LISTING_ENTRIES = 2_000;
+// A folder listing waits less for git than a status read does (git-exec's
+// own budget is 8 s): the listing is still correct without the ignore marks.
 const GIT_TIMEOUT_MS = 5_000;
 
 export type FileResolution =
@@ -288,32 +290,24 @@ export async function listDirectory(realPath: string): Promise<DirectoryListing>
 // Which of these names .gitignore covers, per git itself. Not a repository,
 // or git missing: nothing is ignored. Never throws — a listing is not worth
 // failing over an ignore check.
-function gitIgnored(directory: string, names: string[]): Promise<Set<string>> {
-  if (names.length === 0) return Promise.resolve(new Set());
-  return new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    let settled = false;
-    const finish = (stdout: string) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(new Set(stdout.split("\0").filter((name) => name.length > 0)));
-    };
-    const child = spawn("git", ["-C", directory, "check-ignore", "-z", "--stdin"], {
-      stdio: ["pipe", "pipe", "ignore"],
-    });
-    const timer = setTimeout(() => {
-      child.kill();
-      finish("");
-    }, GIT_TIMEOUT_MS);
-    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
-    child.on("error", () => finish(""));
+async function gitIgnored(directory: string, names: string[]): Promise<Set<string>> {
+  if (names.length === 0) return new Set();
+  try {
     // Exit 1 means "nothing ignored" and 128 "not a repository"; whatever
     // git printed before exiting is the answer either way.
-    child.on("close", () => finish(Buffer.concat(chunks).toString("utf8")));
-    child.stdin.on("error", () => undefined);
-    child.stdin.end(`${names.join("\0")}\0`);
-  });
+    const { stdout } = await git(
+      directory,
+      ["check-ignore", "-z", "--stdin"],
+      undefined,
+      [0, 1, 128],
+      GIT_TIMEOUT_MS,
+      `${names.join("\0")}\0`,
+    );
+    return new Set(stdout.split("\0").filter((name) => name.length > 0));
+  } catch {
+    // No git, or it took too long: nothing is claimed ignored.
+    return new Set();
+  }
 }
 
 // A first-8-KB NUL sniff, the same heuristic git uses to call a file binary.
@@ -392,6 +386,6 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   ".toml": "text/toml",
 };
 
-export function mimeFor(filePath: string): string {
+function mimeFor(filePath: string): string {
   return MIME_BY_EXTENSION[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
 }

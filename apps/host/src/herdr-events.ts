@@ -124,6 +124,7 @@ export class HerdrEventFeed implements AgentEventSource {
         ...REFRESH_SUBSCRIPTIONS.map((type) => ({ type })),
         ...agents.map((agent) => ({ type: "pane.agent_status_changed", pane_id: agent.id })),
       ];
+      // biome-ignore lint/suspicious/noAssignInExpressions: the id must be unique per subscription, and the counter has no other reader.
       const id = `tavi:events:${(this.subscriptionCounter += 1)}`;
       socket.write(`${JSON.stringify({ id, method: "events.subscribe", params: { subscriptions } })}\n`);
     });

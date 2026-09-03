@@ -9,6 +9,7 @@
   "scripts": {
     "build": "npm run build --workspace tavi-host",
     "check": "npm run check --workspace tavi-host",
+    "check:lengths": "node scripts/check-file-lengths.mjs",
     "dev": "npm run dev --workspace tavi-host",
     "dev:host": "npm run dev --workspace tavi-host",
     "devices": "npm run devices --workspace tavi-host",

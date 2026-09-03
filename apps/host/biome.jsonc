@@ -10,11 +10,7 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "recommended",
-      "suspicious": {
-        // The host's five sites are deliberate: `counter += 1` inside a template literal and one lazy cache init.
-        "noAssignInExpressions": "off"
-      }
+      "preset": "recommended"
     }
   },
   "assist": {

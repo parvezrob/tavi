@@ -79,7 +79,7 @@ export function isOurCommandLink(file: string): boolean {
 }
 
 // Where the shim may live on this machine, for status and removal.
-export function commandLinkCandidates(homeDir: string): string[] {
+function commandLinkCandidates(homeDir: string): string[] {
   return ["/opt/homebrew/bin", "/usr/local/bin", path.join(homeDir, ".local", "bin")].map((dir) =>
     path.join(dir, COMMAND_NAME),
   );

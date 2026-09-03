@@ -1,5 +1,5 @@
 import { bearerToken, isAuthorized } from "../auth.js";
-import { readJsonBody, type Route, sendJson } from "../http.js";
+import { bodyRecord, readJsonBody, type Route, sendJson } from "../http.js";
 
 export const publicPairingRoutes: Route = async (url, request, response, context) => {
   const { config, devices, pairing } = context;
@@ -9,7 +9,7 @@ export const publicPairingRoutes: Route = async (url, request, response, context
   // its own credential back and the host's token never leaves the Mac.
   if (url.pathname === "/api/pair" && request.method === "POST") {
     const body = await readJsonBody(request);
-    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const record = bodyRecord(body);
     const secret = typeof record.secret === "string" ? record.secret : "";
     const deviceName = typeof record.deviceName === "string" ? record.deviceName : "";
     if (!pairing.redeem(secret)) {

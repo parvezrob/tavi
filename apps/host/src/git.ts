@@ -382,7 +382,7 @@ const GH_TIMEOUT_MS = 5_000;
 type PullRequestCacheEntry = { at: number; ttl: number; value: Promise<PullRequestRef | null> };
 const pullRequestCache = new Map<string, PullRequestCacheEntry>();
 
-export function cachedPullRequestLookup(
+function cachedPullRequestLookup(
   repository: string,
   branch: string,
   signal?: AbortSignal,

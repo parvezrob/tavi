@@ -2,7 +2,7 @@ import { createReadStream } from "node:fs";
 import path from "node:path";
 import { diffFile, listChanges } from "../changes.js";
 import { listDirectory, MAX_RAW_BYTES, readTextContent, resolveWithinRoots, statFile } from "../files.js";
-import { type Route, sendJson } from "../http.js";
+import { type Route, sendJson, sendPathFailure } from "../http.js";
 import { readUploadBody, saveUpload } from "../uploads.js";
 
 export const fileRoutes: Route = async (url, request, response, context) => {
@@ -15,10 +15,7 @@ export const fileRoutes: Route = async (url, request, response, context) => {
   // Nothing here writes.
   if (url.pathname === "/api/changes" && request.method === "GET") {
     const cwd = await resolveWithinRoots(url.searchParams.get("cwd") ?? "", "/", config.roots);
-    if (!cwd.ok) {
-      sendJson(response, cwd.status, { error: cwd.error, ...(cwd.outsideRoots ? { outsideRoots: true } : {}) });
-      return true;
-    }
+    if (!cwd.ok) return sendPathFailure(response, cwd);
     const result = await listChanges(cwd.path);
     if (!result.ok) {
       sendJson(response, result.status, {
@@ -38,10 +35,7 @@ export const fileRoutes: Route = async (url, request, response, context) => {
 
   if (url.pathname === "/api/changes/file" && request.method === "GET") {
     const cwd = await resolveWithinRoots(url.searchParams.get("cwd") ?? "", "/", config.roots);
-    if (!cwd.ok) {
-      sendJson(response, cwd.status, { error: cwd.error, ...(cwd.outsideRoots ? { outsideRoots: true } : {}) });
-      return true;
-    }
+    if (!cwd.ok) return sendPathFailure(response, cwd);
     const result = await diffFile(cwd.path, url.searchParams.get("path") ?? "");
     if (!result.ok) {
       sendJson(response, result.status, { error: result.error });
@@ -67,10 +61,7 @@ export const fileRoutes: Route = async (url, request, response, context) => {
       contentType: request.headers["content-type"],
       body,
     });
-    if (!saved.ok) {
-      sendJson(response, saved.status, { error: saved.error, ...(saved.outsideRoots ? { outsideRoots: true } : {}) });
-      return true;
-    }
+    if (!saved.ok) return sendPathFailure(response, saved);
     sendJson(response, 201, { path: saved.path, bytes: saved.bytes });
     return true;
   }
@@ -84,13 +75,7 @@ export const fileRoutes: Route = async (url, request, response, context) => {
     const cwdParam = url.searchParams.get("cwd") ?? "";
     const target = url.searchParams.get("path") ?? ".";
     const resolved = await resolveWithinRoots(target, path.isAbsolute(cwdParam) ? cwdParam : "/", config.roots);
-    if (!resolved.ok) {
-      sendJson(response, resolved.status, {
-        error: resolved.error,
-        ...(resolved.outsideRoots ? { outsideRoots: true } : {}),
-      });
-      return true;
-    }
+    if (!resolved.ok) return sendPathFailure(response, resolved);
     if (url.pathname === "/api/files/stat") {
       sendJson(response, 200, { ...(await statFile(resolved.path)), relativePath: resolved.relativePath });
       return true;

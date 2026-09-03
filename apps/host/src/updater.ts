@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { log as hostLog } from "./log.js";
 import { promisify } from "node:util";
 import {
   clearPending,
@@ -48,7 +49,7 @@ export function defaultUpdaterDeps(input: {
   return {
     currentVersion: input.currentVersion,
     layout: input.layout,
-    log: input.log ?? ((message) => console.log(message)),
+    log: input.log ?? ((message) => hostLog.info("updater", message)),
     restart: input.restart,
     fetchLatest: async () => {
       const response = await fetch(`${REGISTRY}/${PACKAGE_NAME}/latest`, { signal: AbortSignal.timeout(10_000) }).catch(

@@ -80,12 +80,7 @@ export async function uninstallSystemdService(options: ServiceOptions = {}): Pro
   return [unitFile];
 }
 
-export function systemdUnit(input: {
-  config: HostConfig;
-  packageRoot: string;
-  entrypoint: string;
-  logFile: string;
-}): string {
+function systemdUnit(input: { config: HostConfig; packageRoot: string; entrypoint: string; logFile: string }): string {
   const environment: Record<string, string> = {
     TAVI_HOST: input.config.bindHost,
     TAVI_PORT: String(input.config.port),

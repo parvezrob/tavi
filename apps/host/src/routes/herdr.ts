@@ -1,5 +1,5 @@
 import { AGENT_KIND_NAMES, SHELL_KIND } from "../agent-kinds.js";
-import { readJsonBody, type Route, sendJson } from "../http.js";
+import { bodyRecord, readJsonBody, type Route, sendHerdrUnconfigured, sendJson } from "../http.js";
 import { isWithinRoots, normalizeProjectPath } from "../projects.js";
 import { safeSessionId } from "../validation.js";
 
@@ -7,10 +7,7 @@ export const herdrRoutes: Route = async (url, request, response, context) => {
   const { config, herdr, projects, agentKinds } = context;
 
   if (url.pathname === "/api/herdr/tree" && request.method === "GET") {
-    if (!herdr) {
-      sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
-      return true;
-    }
+    if (!herdr) return sendHerdrUnconfigured(response);
     const tree = await herdr.listTree();
     if (!tree.available) {
       sendJson(response, 503, { error: tree.reason });
@@ -22,10 +19,7 @@ export const herdrRoutes: Route = async (url, request, response, context) => {
 
   const tabCloseMatch = url.pathname.match(/^\/api\/herdr\/tabs\/([^/]+)$/);
   if (tabCloseMatch && request.method === "DELETE") {
-    if (!herdr) {
-      sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
-      return true;
-    }
+    if (!herdr) return sendHerdrUnconfigured(response);
     const tabId = safeSessionId(tabCloseMatch[1] || "");
     const result = await herdr.closeTab(tabId);
     if (!result.closed) {
@@ -40,13 +34,10 @@ export const herdrRoutes: Route = async (url, request, response, context) => {
   // pane's identity on the phone. Herdr owns the truth; the new label
   // reaches every phone through the events feed's refresh.
   if (tabCloseMatch && request.method === "PATCH") {
-    if (!herdr) {
-      sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
-      return true;
-    }
+    if (!herdr) return sendHerdrUnconfigured(response);
     const tabId = safeSessionId(tabCloseMatch[1] || "");
     const body = await readJsonBody(request);
-    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const record = bodyRecord(body);
     const label = typeof record.label === "string" ? record.label.trim() : "";
     if (!label || label.length > 120) {
       sendJson(response, 400, { error: "label must be 1–120 characters." });
@@ -62,12 +53,9 @@ export const herdrRoutes: Route = async (url, request, response, context) => {
   }
 
   if (url.pathname === "/api/herdr/tabs" && request.method === "POST") {
-    if (!herdr) {
-      sendJson(response, 404, { error: "Herdr integration is not configured on this host." });
-      return true;
-    }
+    if (!herdr) return sendHerdrUnconfigured(response);
     const body = await readJsonBody(request);
-    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const record = bodyRecord(body);
     const agent = typeof record.agent === "string" ? record.agent : undefined;
     if (agent !== undefined && !AGENT_KIND_NAMES.includes(agent)) {
       sendJson(response, 400, { error: `agent must be one of: ${AGENT_KIND_NAMES.join(", ")}.` });

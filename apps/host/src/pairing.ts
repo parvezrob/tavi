@@ -1,5 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
+import { log } from "./log.js";
 import { readStateFile, writeStateFile } from "./state-file.js";
 
 // Pairing (#45) and per-device credentials (#46). A phone never sees the
@@ -66,7 +67,7 @@ export class DeviceRegistry {
   constructor(
     private readonly stateDir: string,
     private readonly now: () => Date = () => new Date(),
-    private readonly report: (message: string) => void = (message) => console.error(message),
+    private readonly report: (message: string) => void = (message) => log.error("pairing", message),
   ) {}
 
   identity(): HostIdentity {

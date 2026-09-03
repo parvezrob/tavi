@@ -16,9 +16,12 @@ export async function git(
   okExitCodes: number[] = [0],
   // Only network commands (#78 push) need more than the local budget.
   timeoutMs = GIT_TIMEOUT_MS,
+  // `check-ignore --stdin` (files.ts) feeds git a list too long to be argv;
+  // nothing else here has a body to write.
+  stdin?: string,
 ): Promise<{ stdout: string }> {
   try {
-    const { stdout } = await execFileAsync("git", ["-C", cwd, ...args], {
+    const pending = execFileAsync("git", ["-C", cwd, ...args], {
       timeout: timeoutMs,
       maxBuffer,
       encoding: "utf8",
@@ -31,6 +34,12 @@ export async function git(
         GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes -o ConnectTimeout=15",
       },
     });
+    if (stdin !== undefined) {
+      // A child that exits before reading it all makes writing an error, not a crash.
+      pending.child.stdin?.on("error", () => undefined);
+      pending.child.stdin?.end(stdin);
+    }
+    const { stdout } = await pending;
     return { stdout };
   } catch (error) {
     const code = (error as { code?: unknown }).code;

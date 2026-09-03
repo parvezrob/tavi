@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { resolveOnLoginPath } from "./login-shell.js";
 
 // The one place the host runs GitHub's CLI (#79; the card badge in git.ts
 // uses it too). `gh` is the person's own login on that computer — Tavi
@@ -32,23 +33,14 @@ export function configureGh(loginShell: string): void {
 }
 
 // The absolute path of `gh`, or null when the login shell cannot find it.
-export function ghBinary(): Promise<string | null> {
+function ghBinary(): Promise<string | null> {
   const now = Date.now();
   if (resolved && (now - resolvedAt < RESOLVE_RETRY_MS || resolvedAt === -1)) return resolved;
   resolvedAt = now;
-  resolved = new Promise((resolve) => {
-    execFile(shell, ["-lc", "command -v gh"], { timeout: 10_000 }, (error, stdout) => {
-      const found =
-        String(stdout ?? "")
-          .trim()
-          .split("\n")
-          .pop()
-          ?.trim() ?? "";
-      const path = !error && found.startsWith("/") ? found : null;
-      // A hit is kept for good; a miss is asked again later.
-      if (path) resolvedAt = -1;
-      resolve(path);
-    });
+  resolved = resolveOnLoginPath(shell, "gh").then((path) => {
+    // A hit is kept for good; a miss is asked again later.
+    if (path) resolvedAt = -1;
+    return path;
   });
   return resolved;
 }

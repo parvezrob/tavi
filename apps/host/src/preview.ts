@@ -192,7 +192,7 @@ export function validPort(value: unknown): number | undefined {
 }
 
 // Is anything accepting connections on this port, on which loopback?
-export async function probeLoopback(port: number): Promise<LoopbackAddress | undefined> {
+async function probeLoopback(port: number): Promise<LoopbackAddress | undefined> {
   for (const address of ["127.0.0.1", "::1"] as const) {
     if (await accepts(address, port)) return address;
   }
@@ -392,7 +392,7 @@ export function stripTicketCookie(cookieHeader: string | undefined): string | un
 // The dev server's answer, with one fix: a redirect to its own
 // `http://localhost:<port>/x` becomes `/x`, which the phone follows through
 // the door instead of into a localhost it does not have.
-export function answerHeaders(rawHeaders: string[], port: number): string[] {
+function answerHeaders(rawHeaders: string[], port: number): string[] {
   const out: string[] = [];
   for (let index = 0; index + 1 < rawHeaders.length; index += 2) {
     const name = rawHeaders[index] ?? "";

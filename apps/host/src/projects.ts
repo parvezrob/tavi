@@ -1,4 +1,5 @@
 import { statSync } from "node:fs";
+import { log } from "./log.js";
 import { readStateFile, writeStateFile } from "./state-file.js";
 import path from "node:path";
 
@@ -88,7 +89,7 @@ export class ProjectHistory {
   constructor(
     private readonly stateDir: string,
     private readonly now: () => Date = () => new Date(),
-    private readonly report: (message: string) => void = (message) => console.error(message),
+    private readonly report: (message: string) => void = (message) => log.error("projects", message),
   ) {}
 
   list(): StoredProject[] {

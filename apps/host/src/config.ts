@@ -14,6 +14,7 @@ import {
 } from "node:fs";
 import { homedir, hostname, platform } from "node:os";
 import path from "node:path";
+import { log } from "./log.js";
 
 export const VERSION = "0.1.17";
 
@@ -72,7 +73,7 @@ export class ConfigurationError extends Error {}
 
 export function loadConfig(options: LoadConfigOptions = {}): HostConfig {
   const env = options.env ?? process.env;
-  const report = options.report ?? ((message: string) => console.error(message));
+  const report = options.report ?? ((message: string) => log.warn("config", message));
   const { read, reportDeprecated } = createEnvironmentReader(env);
 
   const homeDirectory = options.homeDirectory ?? homedir();

@@ -310,7 +310,7 @@ async function viewPullRequest(worktreePath: string, number: number, gh: GhRunne
   }
 }
 
-export function parsePullRequest(item: Record<string, unknown>): PullRequestInfo | null {
+function parsePullRequest(item: Record<string, unknown>): PullRequestInfo | null {
   if (typeof item.number !== "number" || typeof item.url !== "string") return null;
   const rawState = String(item.state ?? "OPEN").toUpperCase();
   const state: PullRequestInfo["state"] = rawState === "MERGED" ? "merged" : rawState === "CLOSED" ? "closed" : "open";

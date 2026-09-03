@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { access } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { promisify } from "node:util";
+import { resolveOnLoginPath } from "./login-shell.js";
 
 // The caller's path to this computer, from the computer's own Tailscale
 // (#86 / #84, PRD §7.13): "direct" when the phone reaches us peer to peer,
@@ -47,17 +48,7 @@ export function tailscaleBinary(): Promise<string | null> {
   if (resolved && (now - resolvedAt < RESOLVE_RETRY_MS || resolvedAt === -1)) return resolved;
   resolvedAt = now;
   resolved = (async () => {
-    const onPath = await new Promise<string | null>((resolve) => {
-      execFile(shell, ["-lc", "command -v tailscale"], { timeout: 10_000 }, (error, stdout) => {
-        const found =
-          String(stdout ?? "")
-            .trim()
-            .split("\n")
-            .pop()
-            ?.trim() ?? "";
-        resolve(!error && found.startsWith("/") ? found : null);
-      });
-    });
+    const onPath = await resolveOnLoginPath(shell, "tailscale");
     if (onPath) {
       resolvedAt = -1;
       return onPath;
@@ -137,6 +128,7 @@ let statusCache: { at: number; value: unknown; refreshing: Promise<unknown> | nu
 // 01:00). The first answer after a start is "unknown"; the next is right.
 function status(runner: TailscaleRunner, wait: boolean): Promise<unknown> {
   const now = Date.now();
+  // biome-ignore lint/suspicious/noAssignInExpressions: one lazy init — the local and the module cache must be the same object.
   const cache = statusCache ?? (statusCache = { at: 0, value: null, refreshing: null });
   if (now - cache.at >= STATUS_CACHE_MS && !cache.refreshing) {
     cache.refreshing = runner(["status", "--json"])

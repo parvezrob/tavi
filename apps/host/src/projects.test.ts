@@ -65,6 +65,7 @@ test("remembered projects survive a round trip, newest first and capped", () => 
   let tick = 0;
   const history = new ProjectHistory(
     stateDir,
+    // biome-ignore lint/suspicious/noAssignInExpressions: a clock that advances a second per call, in one expression.
     () => new Date(1_700_000_000_000 + (tick += 1_000)),
     () => {},
   );

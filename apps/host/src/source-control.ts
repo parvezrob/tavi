@@ -1,5 +1,6 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import path from "node:path";
+import { resolveOnLoginPath } from "./login-shell.js";
 import { listChanges, type ChangedFile } from "./changes.js";
 import { looksLikeASecret } from "./files.js";
 import { describeGitError, git } from "./git-exec.js";
@@ -601,23 +602,6 @@ async function runClaudeCli(shell: string, prompt: string, input: string): Promi
     });
     child.stdin.on("error", () => undefined);
     child.stdin.end(input);
-  });
-}
-
-function resolveOnLoginPath(shell: string, name: string): Promise<string | null> {
-  // The name is ours, never the phone's — and it is still checked before
-  // it goes anywhere near a shell line.
-  if (!/^[a-z][a-z0-9-]*$/.test(name)) return Promise.resolve(null);
-  return new Promise((resolve) => {
-    execFile(shell, ["-lc", `command -v ${name}`], { timeout: 10_000 }, (error, stdout) => {
-      const found =
-        String(stdout ?? "")
-          .trim()
-          .split("\n")
-          .pop()
-          ?.trim() ?? "";
-      resolve(!error && found.startsWith("/") ? found : null);
-    });
   });
 }
 

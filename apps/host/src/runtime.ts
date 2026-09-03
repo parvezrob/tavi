@@ -167,6 +167,8 @@ if (pending && typeof pending.version === "string") {
     symlinkSync(path.join("versions", pending.previous), temporary);
     renameSync(temporary, currentLink);
     try { unlinkSync(pendingFile); } catch {}
+    // The one console.* left in the host: this file runs standalone, before
+    // any version is loaded, so it cannot import log.ts.
     console.error("[tavi] " + pending.version + " failed to start " + MAX_ATTEMPTS + " times; rolled back to " + pending.previous);
   } else {
     writeFileSync(pendingFile, JSON.stringify(pending));

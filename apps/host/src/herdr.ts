@@ -416,6 +416,9 @@ export class HerdrService implements HerdrAgentSource {
         if (!launchPending) {
           return { submitted: false, reason: describeConnectionFailure(error) };
         }
+        // Four tries at ~0.5 s: an agent herdr has only just launched is not
+        // a named agent yet, and that window is short. Past it the pane is
+        // real but the API will not have it, so typing is the only way in.
         if (attempt >= 3) {
           return this.typePromptFallback(paneId, text, error);
         }
@@ -533,6 +536,7 @@ export class HerdrService implements HerdrAgentSource {
   }
 
   private request(method: string, params: Record<string, unknown>): Promise<unknown> {
+    // biome-ignore lint/suspicious/noAssignInExpressions: the id must be unique per request, and the counter has no other reader.
     const id = `tavi:${(this.requestCounter += 1)}`;
     const timeoutMilliseconds = this.options.requestTimeoutMilliseconds ?? REQUEST_TIMEOUT_MILLISECONDS;
 

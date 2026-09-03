@@ -2,7 +2,7 @@ import path from "node:path";
 import { resolveWithinRoots } from "../files.js";
 import { forgetPullRequest, invalidateRepos, listReposCached } from "../git.js";
 import { git } from "../git-exec.js";
-import { readJsonBody, type Route, sendJson } from "../http.js";
+import { bodyRecord, readJsonBody, type Route, sendJson, sendPathFailure } from "../http.js";
 import { createPullRequest, linkPullRequest, listIssues, pullRequestStatus } from "../pull-requests.js";
 import {
   commitStaged,
@@ -42,7 +42,7 @@ export const sourceControlRoutes: Route = async (url, request, response, context
   // hears of it; outside them the phone must confirm, as for #24.
   if (url.pathname === "/api/worktrees" && request.method === "POST") {
     const body = await readJsonBody(request);
-    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const record = bodyRecord(body);
     if (typeof record.repo !== "string" || typeof record.branch !== "string") {
       sendJson(response, 400, { error: "repo and branch are required." });
       return true;
@@ -52,13 +52,7 @@ export const sourceControlRoutes: Route = async (url, request, response, context
       config.roots,
       { allowOutsideRoots: record.allowOutsideRoots === true },
     );
-    if (!result.ok) {
-      sendJson(response, result.status, {
-        error: result.error,
-        ...(result.outsideRoots ? { outsideRoots: true } : {}),
-      });
-      return true;
-    }
+    if (!result.ok) return sendPathFailure(response, result);
     projects.remember(result.worktree.path);
     invalidateRepos();
     sendJson(response, 201, { worktree: result.worktree });
@@ -70,13 +64,7 @@ export const sourceControlRoutes: Route = async (url, request, response, context
   // against the roots like every file route; the writes are fixed argv.
   if (url.pathname === "/api/worktrees/status" && request.method === "GET") {
     const target = await resolveWithinRoots(url.searchParams.get("path") ?? "", "/", config.roots);
-    if (!target.ok) {
-      sendJson(response, target.status, {
-        error: target.error,
-        ...(target.outsideRoots ? { outsideRoots: true } : {}),
-      });
-      return true;
-    }
+    if (!target.ok) return sendPathFailure(response, target);
     const result = await worktreeStatus(target.path);
     if (!result.ok) {
       sendJson(response, result.status, {
@@ -105,28 +93,16 @@ export const sourceControlRoutes: Route = async (url, request, response, context
   };
   if (url.pathname === "/api/worktrees/removal" && request.method === "GET") {
     const target = await resolveWithinRoots(url.searchParams.get("path") ?? "", "/", config.roots);
-    if (!target.ok) {
-      sendJson(response, target.status, {
-        error: target.error,
-        ...(target.outsideRoots ? { outsideRoots: true } : {}),
-      });
-      return true;
-    }
+    if (!target.ok) return sendPathFailure(response, target);
     const result = await previewRemoval(target.path, removalDeps);
     sendJson(response, result.ok ? 200 : result.status, result.ok ? result.preview : { error: result.error });
     return true;
   }
   if (url.pathname === "/api/worktrees" && request.method === "DELETE") {
     const body = await readJsonBody(request);
-    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const record = bodyRecord(body);
     const target = await resolveWithinRoots(typeof record.path === "string" ? record.path : "", "/", config.roots);
-    if (!target.ok) {
-      sendJson(response, target.status, {
-        error: target.error,
-        ...(target.outsideRoots ? { outsideRoots: true } : {}),
-      });
-      return true;
-    }
+    if (!target.ok) return sendPathFailure(response, target);
     const confirm =
       typeof record.confirm === "object" && record.confirm !== null
         ? (record.confirm as Record<string, unknown>)
@@ -162,13 +138,7 @@ export const sourceControlRoutes: Route = async (url, request, response, context
   // GitHub issue". `repo` is any folder inside the repository.
   if (url.pathname === "/api/repos/issues" && request.method === "GET") {
     const target = await resolveWithinRoots(url.searchParams.get("repo") ?? "", "/", config.roots);
-    if (!target.ok) {
-      sendJson(response, target.status, {
-        error: target.error,
-        ...(target.outsideRoots ? { outsideRoots: true } : {}),
-      });
-      return true;
-    }
+    if (!target.ok) return sendPathFailure(response, target);
     const result = await listIssues(target.path, ghDeps);
     sendJson(response, 200, { issues: result.issues, gh: result.gh });
     return true;
@@ -178,13 +148,7 @@ export const sourceControlRoutes: Route = async (url, request, response, context
   // first), or link the branch's pull request through the person's own gh.
   if (url.pathname === "/api/worktrees/pull-request" && request.method === "GET") {
     const target = await resolveWithinRoots(url.searchParams.get("path") ?? "", "/", config.roots);
-    if (!target.ok) {
-      sendJson(response, target.status, {
-        error: target.error,
-        ...(target.outsideRoots ? { outsideRoots: true } : {}),
-      });
-      return true;
-    }
+    if (!target.ok) return sendPathFailure(response, target);
     const result = await pullRequestStatus(target.path, ghDeps);
     sendJson(response, result.ok ? 200 : result.status, result.ok ? result.status : { error: result.error });
     return true;
@@ -192,15 +156,9 @@ export const sourceControlRoutes: Route = async (url, request, response, context
   const pullRequestWrite = url.pathname.match(/^\/api\/worktrees\/pull-request(\/link)?$/);
   if (pullRequestWrite && request.method === "POST") {
     const body = await readJsonBody(request);
-    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const record = bodyRecord(body);
     const target = await resolveWithinRoots(typeof record.path === "string" ? record.path : "", "/", config.roots);
-    if (!target.ok) {
-      sendJson(response, target.status, {
-        error: target.error,
-        ...(target.outsideRoots ? { outsideRoots: true } : {}),
-      });
-      return true;
-    }
+    if (!target.ok) return sendPathFailure(response, target);
     if (pullRequestWrite[1]) {
       const result = await linkPullRequest(target.path, { number: record.number, url: record.url }, ghDeps);
       if (result.ok) await forgetPullRequestBadge(target.path);
@@ -233,13 +191,7 @@ export const sourceControlRoutes: Route = async (url, request, response, context
   // and under its base, Push, and Pull main in.
   if (url.pathname === "/api/worktrees/log" && request.method === "GET") {
     const target = await resolveWithinRoots(url.searchParams.get("path") ?? "", "/", config.roots);
-    if (!target.ok) {
-      sendJson(response, target.status, {
-        error: target.error,
-        ...(target.outsideRoots ? { outsideRoots: true } : {}),
-      });
-      return true;
-    }
+    if (!target.ok) return sendPathFailure(response, target);
     const result = await worktreeLog(target.path);
     sendJson(response, result.ok ? 200 : result.status, result.ok ? result.log : { error: result.error });
     return true;
@@ -251,15 +203,9 @@ export const sourceControlRoutes: Route = async (url, request, response, context
   if (sourceControlWrite && request.method === "POST") {
     const action = sourceControlWrite[1] as "stage" | "unstage" | "commit" | "commit-message" | "push" | "pull-base";
     const body = await readJsonBody(request);
-    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const record = bodyRecord(body);
     const target = await resolveWithinRoots(typeof record.path === "string" ? record.path : "", "/", config.roots);
-    if (!target.ok) {
-      sendJson(response, target.status, {
-        error: target.error,
-        ...(target.outsideRoots ? { outsideRoots: true } : {}),
-      });
-      return true;
-    }
+    if (!target.ok) return sendPathFailure(response, target);
     if (action === "stage" || action === "unstage") {
       const files =
         record.files === "all"

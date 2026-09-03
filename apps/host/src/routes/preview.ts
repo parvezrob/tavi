@@ -2,7 +2,7 @@ import type { IncomingMessage } from "node:http";
 import { bearerToken, isAuthorized } from "../auth.js";
 import type { HostConfig } from "../config.js";
 import { resolveWithinRoots } from "../files.js";
-import { type Route, readJsonBody, sendJson } from "../http.js";
+import { bodyRecord, type Route, readJsonBody, sendJson, sendPathFailure } from "../http.js";
 import type { DeviceRegistry } from "../pairing.js";
 import {
   defaultDiscoveryDeps,
@@ -26,10 +26,7 @@ export const previewRoutes: Route = async (url, request, response, context) => {
   }
   if (url.pathname === "/api/preview/candidates" && request.method === "GET") {
     const cwd = await resolveWithinRoots(url.searchParams.get("cwd") ?? "", "/", config.roots);
-    if (!cwd.ok) {
-      sendJson(response, cwd.status, { error: cwd.error, ...(cwd.outsideRoots ? { outsideRoots: true } : {}) });
-      return true;
-    }
+    if (!cwd.ok) return sendPathFailure(response, cwd);
     const found = await listProjectServers(cwd.path, config.roots, withOwnPortsExcluded(discovery, config));
     if (!found.available) {
       sendJson(response, 200, { available: false, reason: found.reason, servers: [] });
@@ -43,12 +40,9 @@ export const previewRoutes: Route = async (url, request, response, context) => {
   }
   if (url.pathname === "/api/preview" && request.method === "POST") {
     const body = await readJsonBody(request);
-    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const record = bodyRecord(body);
     const cwd = await resolveWithinRoots(typeof record.cwd === "string" ? record.cwd : "", "/", config.roots);
-    if (!cwd.ok) {
-      sendJson(response, cwd.status, { error: cwd.error, ...(cwd.outsideRoots ? { outsideRoots: true } : {}) });
-      return true;
-    }
+    if (!cwd.ok) return sendPathFailure(response, cwd);
     if (!(await doorReady())) {
       sendJson(response, 409, {
         error: "This computer's preview door is not set up. Run `npx tavi-host pair` on it once; it adds the door.",
@@ -77,12 +71,9 @@ export const previewRoutes: Route = async (url, request, response, context) => {
   }
   if (url.pathname === "/api/preview/stop" && request.method === "POST") {
     const body = await readJsonBody(request);
-    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    const record = bodyRecord(body);
     const cwd = await resolveWithinRoots(typeof record.cwd === "string" ? record.cwd : "", "/", config.roots);
-    if (!cwd.ok) {
-      sendJson(response, cwd.status, { error: cwd.error, ...(cwd.outsideRoots ? { outsideRoots: true } : {}) });
-      return true;
-    }
+    if (!cwd.ok) return sendPathFailure(response, cwd);
     const port = validPort(record.port);
     if (port === undefined) {
       sendJson(response, 400, { error: "port must be a number between 1 and 65535." });

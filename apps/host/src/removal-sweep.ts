@@ -69,10 +69,10 @@ export function describeSweep(report: SweepReport): string[] {
   const lines: string[] = [];
   if (report.removed.length > 0)
     lines.push(
-      `tavi: deleted ${report.removed.length} folder${report.removed.length === 1 ? "" : "s"} left by removed worktrees: ${report.removed.join(", ")}`,
+      `deleted ${report.removed.length} folder${report.removed.length === 1 ? "" : "s"} left by removed worktrees: ${report.removed.join(", ")}`,
     );
   for (const { path: leftover, error } of report.stranded)
-    lines.push(`tavi: could not delete ${leftover} (left by a removed worktree): ${error}`);
+    lines.push(`could not delete ${leftover} (left by a removed worktree): ${error}`);
   return lines;
 }
 
