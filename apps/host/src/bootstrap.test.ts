@@ -13,19 +13,13 @@ import {
   serviceEntrypoint,
 } from "./bootstrap.js";
 import { type HostConfig, VERSION } from "./config.js";
+import { testConfig } from "./testing/config.js";
 
-const config: HostConfig = {
-  bindHost: "127.0.0.1",
-  port: 8787,
-  token: "token-that-is-long-enough-for-tests",
-  shell: "/bin/zsh",
+const config = testConfig({
   herdrSocket: "/tmp/herdr.sock",
-  roots: [],
   stateDir: "/home/tester/.tavi",
   machineName: "studio",
-  previewPort: 8788,
-  previewDoorPort: 8443,
-};
+});
 
 interface World {
   tools: Record<string, string | undefined>;
@@ -230,24 +224,24 @@ test("pair shows one checklist, asks once, then does the work and reports each �
 
   const plan = reports.find((line) => /setting up this computer/.test(line)) ?? "";
   assert.match(plan, /✓ Terminal ready/);
-  assert.match(plan, /✓ Tailscale connected  \(studio.tail1234.ts.net\)/);
-  assert.match(plan, /• Private address for your phone  — will set up/);
-  assert.match(plan, /• Private address for previews, so dev servers show on the phone  — will set up/);
-  assert.match(plan, /• Run Tavi in the background  — will set up/);
+  assert.match(plan, /✓ Tailscale connected {2}\(studio.tail1234.ts.net\)/);
+  assert.match(plan, /• Private address for your phone {2}— will set up/);
+  assert.match(plan, /• Private address for previews, so dev servers show on the phone {2}— will set up/);
+  assert.match(plan, /• Run Tavi in the background {2}— will set up/);
   assert.match(plan, /✓ herdr running/);
   assert.deepEqual(questions, ["Do these 3 things now? Your password may be asked once."]);
   assert.ok(commands.includes("tailscale serve --bg 8787"), commands.join("\n"));
   assert.ok(commands.includes("tailscale serve --bg --https=8443 8788"), commands.join("\n"));
   assert.ok(
-    reports.some((line) => /^  ✓ Private address for previews   https:\/\/studio.tail1234.ts.net:8443$/.test(line)),
+    reports.some((line) => /^ {2}✓ Private address for previews {3}https:\/\/studio.tail1234.ts.net:8443$/.test(line)),
     reports.join("\n"),
   );
   assert.ok(commands.includes("install-service"));
   assert.ok(
-    reports.some((line) => /^  ✓ Private address   https:\/\/studio.tail1234.ts.net$/.test(line)),
+    reports.some((line) => /^ {2}✓ Private address {3}https:\/\/studio.tail1234.ts.net$/.test(line)),
     reports.join("\n"),
   );
-  assert.ok(reports.some((line) => /^  ✓ Tavi runs in the background$/.test(line)));
+  assert.ok(reports.some((line) => /^ {2}✓ Tavi runs in the background$/.test(line)));
   assert.ok(!reports.some((line) => /systemctl|launchctl|serve --bg/.test(line)), reports.join("\n"));
 });
 
@@ -305,13 +299,13 @@ test("Tailscale missing on Linux: the plan says install and sign in; one yes ins
 
   await bootstrap(config, deps);
 
-  assert.match(reports[0] ?? "", /• Install Tailscale and sign in  — will do/);
+  assert.match(reports[0] ?? "", /• Install Tailscale and sign in {2}— will do/);
   assert.equal(questions.length, 1);
   assert.equal(ran[0], "sh -c curl -fsSL https://tailscale.com/install.sh | sh");
   assert.ok(ran.includes("/usr/bin/tailscale up"), ran.join("\n"));
   assert.equal(world.backendState, "Running");
   assert.ok(
-    reports.some((line) => /✓ Tailscale connected   studio.tail1234.ts.net/.test(line)),
+    reports.some((line) => /✓ Tailscale connected {3}studio.tail1234.ts.net/.test(line)),
     reports.join("\n"),
   );
 });
@@ -386,7 +380,7 @@ test("when the service cannot start, Tavi runs for the session, says so in plain
   assert.match(explanation, /host\.log/);
   assert.doesNotMatch(explanation, /systemctl/);
   assert.ok(
-    reports.some((line) => /✓ Tavi runs in the background   until you log out/.test(line)),
+    reports.some((line) => /✓ Tavi runs in the background {3}until you log out/.test(line)),
     reports.join("\n"),
   );
 });
@@ -421,7 +415,7 @@ test("herdr is in the plan when missing; a failed install is skipped with a note
     await originalRun(command, args);
   };
   await bootstrap(config, yes.deps);
-  assert.match(yes.reports[0] ?? "", /• Install herdr and start it, for the agent cards  — will do/);
+  assert.match(yes.reports[0] ?? "", /• Install herdr and start it, for the agent cards {2}— will do/);
   assert.ok(yes.ran.includes("brew install herdr"), yes.ran.join("\n"));
   assert.ok(yes.commands.includes("start-herdr /usr/local/bin/herdr"), yes.commands.join("\n"));
   assert.ok(yes.reports.some((line) => /✓ herdr running/.test(line)));
@@ -529,9 +523,9 @@ test("an npx install without the `tavi` command gets one added in the plan; a ch
   const { deps, commands, reports } = createDeps(world);
   await bootstrap(config, deps);
   const plan = reports.join("\n");
-  assert.match(plan, /• The `tavi` command, for `tavi update` and `tavi doctor`  — will add/);
+  assert.match(plan, /• The `tavi` command, for `tavi update` and `tavi doctor` {2}— will add/);
   assert.ok(commands.includes("link-command"));
-  assert.match(plan, /✓ `tavi` command ready   \(\/usr\/local\/bin\/tavi\)/);
+  assert.match(plan, /✓ `tavi` command ready {3}\(\/usr\/local\/bin\/tavi\)/);
 
   const checkout = createDeps({ ...READY, serveProxies: [...READY.serveProxies] });
   await bootstrap(config, checkout.deps);

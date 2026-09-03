@@ -7,7 +7,7 @@ import { bearerToken, isAuthorized } from "./auth.js";
 import { DeviceRegistry, PairingSessions } from "./pairing.js";
 import type { HostConfig } from "./config.js";
 import { VERSION } from "./config.js";
-import { AttachmentStore, type TerminalAttachment, type AttachmentClient } from "./attachment.js";
+import { AttachmentStore, type AttachmentClient } from "./attachment.js";
 import { AGENT_KIND_NAMES, AgentKindDetector, SHELL_KIND } from "./agent-kinds.js";
 import { parseClaudeHookEvent, type AttentionOverlay } from "./attention.js";
 import type { AgentEventSource } from "./herdr-events.js";

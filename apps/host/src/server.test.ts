@@ -11,26 +11,15 @@ import type { IPty } from "node-pty";
 import WebSocket from "ws";
 import { AgentKindDetector } from "./agent-kinds.js";
 import { AttentionOverlay } from "./attention.js";
-import type { HostConfig } from "./config.js";
 import { EVENTS_PROTOCOL, TERMINAL_PROTOCOL } from "./protocol.js";
 import type { HerdrAgentSource, HerdrTabRequest } from "./herdr.js";
 import { DeviceRegistry, PairingSessions } from "./pairing.js";
 import { ProjectHistory } from "./projects.js";
 import { createTaviServer } from "./server.js";
+import { testConfig } from "./testing/config.js";
 import type { ServerTerminalMessage } from "./types.js";
 
-const config: HostConfig = {
-  bindHost: "127.0.0.1",
-  port: 0,
-  token: "test-token-that-is-long-enough",
-  shell: "/bin/sh",
-  herdrSocket: "/tmp/tavi-test-herdr.sock",
-  roots: [],
-  stateDir: "/tmp",
-  machineName: "test-host",
-  previewPort: 8788,
-  previewDoorPort: 8443,
-};
+const config = testConfig({ port: 0 });
 
 test("the host is API-only and does not serve a browser client", async () => {
   await withServer(async (origin) => {
@@ -820,7 +809,9 @@ test("terminal websocket rejects an unsupported protocol before pane lookup", as
     const status = await rejectedUpgradeStatus(
       `ws://127.0.0.1:${address.port}/api/agents/fixture/terminal`,
       ["unsupported.v1"],
-      { Authorization: `Bearer ${config.token}` },
+      {
+        Authorization: `Bearer ${config.token}`,
+      },
     );
     assert.equal(status, 400);
     assert.equal(lookupCount, 0);
@@ -848,7 +839,9 @@ test("terminal websocket returns not found before spawning a pty", async () => {
     const status = await rejectedUpgradeStatus(
       `ws://127.0.0.1:${address.port}/api/agents/missing/terminal`,
       [TERMINAL_PROTOCOL],
-      { Authorization: `Bearer ${config.token}` },
+      {
+        Authorization: `Bearer ${config.token}`,
+      },
     );
     assert.equal(status, 404);
     assert.equal(spawnCount, 0);

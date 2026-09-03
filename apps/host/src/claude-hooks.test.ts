@@ -4,11 +4,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test, { type TestContext } from "node:test";
+import test from "node:test";
 import { claudeHookCommand, installClaudeHooks } from "./claude-hooks.js";
-import type { HostConfig } from "./config.js";
+import { testConfig } from "./testing/config.js";
 
-const config = { port: 4820 } as HostConfig;
+const config = testConfig({ port: 4820 });
 
 test("hook command never carries the token or a token expansion", () => {
   const command = claudeHookCommand(config, "/opt/tavi/dist/claude-hook-relay.js");
@@ -77,7 +77,9 @@ test("relay posts stdin to the host with the token from the config file", async 
       const relay = spawn(
         process.execPath,
         ["--import", "tsx", path.join(import.meta.dirname, "claude-hook-relay.ts"), String(port)],
-        { env: { ...process.env, HOME: home } },
+        {
+          env: { ...process.env, HOME: home },
+        },
       );
       relay.stdout.on("data", (chunk) => {
         stdout += chunk.toString("utf8");

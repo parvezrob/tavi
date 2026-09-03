@@ -59,6 +59,7 @@ export async function uninstall(config: HostConfig, deps: UninstallDeps): Promis
   return true;
 }
 
+// biome-ignore lint/suspicious/noConfusingVoidType: steps that report nothing are `Promise<void>` deps, not `Promise<undefined>`
 async function step(deps: UninstallDeps, done: string, run: () => Promise<string | undefined | void>): Promise<void> {
   try {
     const note = await run();

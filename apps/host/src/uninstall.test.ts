@@ -5,21 +5,11 @@ import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { installClaudeHooks, removeClaudeHooks } from "./claude-hooks.js";
 import type { HostConfig } from "./config.js";
+import { testConfig } from "./testing/config.js";
 import { uninstall, type UninstallDeps } from "./uninstall.js";
 
 function config(stateDir: string): HostConfig {
-  return {
-    bindHost: "127.0.0.1",
-    port: 8787,
-    token: "token-long-enough-for-the-test-suite",
-    shell: "/bin/sh",
-    herdrSocket: "/tmp/h.sock",
-    roots: [],
-    stateDir,
-    machineName: "m",
-    previewPort: 8788,
-    previewDoorPort: 8443,
-  };
+  return testConfig({ herdrSocket: "/tmp/h.sock", stateDir, machineName: "m" });
 }
 
 function deps(overrides: Partial<UninstallDeps> & { answer: boolean; handlers?: Array<[string, string]> }) {

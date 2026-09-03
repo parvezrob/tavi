@@ -7,7 +7,7 @@ import { encodePairingPayload } from "./pairing.js";
 // QR the phone scans. It goes through the host's own API rather than the
 // state files so the code lives in the process that will redeem it.
 
-export async function resolvePublicUrl(config: HostConfig, args: string[]): Promise<string> {
+export async function resolvePublicUrl(args: string[]): Promise<string> {
   const flag = args.indexOf("--url");
   if (flag !== -1 && args[flag + 1]) return normalize(args[flag + 1] ?? "");
   if (process.env.TAVI_PUBLIC_URL) return normalize(process.env.TAVI_PUBLIC_URL);

@@ -2,26 +2,21 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test, { type TestContext } from "node:test";
-import type { HostConfig } from "./config.js";
+import test from "node:test";
 import { installService, uninstallService } from "./service.js";
+import { testConfig } from "./testing/config.js";
 
 test("Linux installs a systemd user unit with the host environment and enables linger", async (context) => {
   const home = mkdtempSync(path.join(tmpdir(), "tavi-systemd-"));
   context.after(() => rmSync(home, { recursive: true, force: true }));
   const commands: string[] = [];
-  const config: HostConfig = {
-    bindHost: "127.0.0.1",
-    port: 8787,
-    token: "token-long-enough-for-the-test-suite",
+  const config = testConfig({
     shell: "/bin/bash",
     herdrSocket: path.join(home, ".config/herdr/herdr.sock"),
     roots: [path.join(home, "code")],
     stateDir: path.join(home, ".tavi"),
     machineName: "fedora",
-    previewPort: 8788,
-    previewDoorPort: 8443,
-  };
+  });
 
   const unit = await installService(config, {
     operatingSystem: "linux",

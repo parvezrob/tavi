@@ -86,8 +86,8 @@ test("one file's diff covers tracked changes and untracked files; secrets are re
   assert.equal(secret.ok, false);
   assert.equal((secret as { status: number }).status, 403);
 
-  const escape = await diffFile(dir, "../etc/passwd");
-  assert.equal((escape as { status: number }).status, 400);
+  const escaped = await diffFile(dir, "../etc/passwd");
+  assert.equal((escaped as { status: number }).status, 400);
   const absolute = await diffFile(dir, "/etc/passwd");
   assert.equal((absolute as { status: number }).status, 400);
 });

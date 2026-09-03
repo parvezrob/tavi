@@ -769,13 +769,6 @@ async function checkHerdr(deps: BootstrapDeps): Promise<Check> {
   };
 }
 
-async function checkOptionalTool(deps: BootstrapDeps, tool: string, detail: string, fix: string): Promise<Check> {
-  const found = await deps.which(tool);
-  return found
-    ? { name: tool, ok: true, optional: true, detail: found }
-    : { name: tool, ok: false, optional: true, detail, fix };
-}
-
 // `npx tavi-host` runs from npm's ephemeral cache, which is no place for a
 // login service to live: the cache gets pruned and a later `npx` of a newer
 // version would not touch the service. So the first pair installs a durable

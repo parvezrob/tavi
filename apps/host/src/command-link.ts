@@ -1,6 +1,6 @@
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { type RuntimeLayout } from "./runtime.js";
+import type { RuntimeLayout } from "./runtime.js";
 
 // The `tavi` command for a host installed by `npx tavi-host pair` (#64).
 // The managed runtime lives under ~/.tavi/runtime and nothing used to put a

@@ -4,8 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import type { HostConfig } from "./config.js";
 import { installService, type ServiceOptions, uninstallService } from "./service.js";
+import { testConfig } from "./testing/config.js";
 
 const CURRENT_LABEL = "com.farfield.tavi.host";
 const LEGACY_LABEL = "com.parvezrob.mocha.host";
@@ -163,18 +163,11 @@ function createFixture(context: TestContext, fixtureOptions: FixtureOptions = {}
     retryIntervalMs: 10,
     userId: 501,
   };
-  const config: HostConfig = {
-    bindHost: "127.0.0.1",
-    port: 8787,
-    token: "test-token-that-is-long-enough",
-    shell: "/bin/zsh",
-    herdrSocket: "/tmp/tavi-test-herdr.sock",
+  const config = testConfig({
     roots: ["/project"],
     stateDir: path.join(homeDirectory, ".tavi"),
     machineName: "Studio",
-    previewPort: 8788,
-    previewDoorPort: 8443,
-  };
+  });
 
   return {
     config,

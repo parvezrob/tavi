@@ -69,7 +69,10 @@ test("a failed check (e.g. npm not propagated yet) retries in an hour, not a day
     initialDelayMs: 1,
     intervalMs: 10_000,
     retryMs: 500,
-    setTimer: (fn, ms) => (timers.push({ fn, ms }), {}),
+    setTimer: (fn, ms) => {
+      timers.push({ fn, ms });
+      return {};
+    },
   });
   timers[0]?.fn();
   await new Promise((resolve) => setTimeout(resolve, 5));
@@ -87,7 +90,10 @@ test("the schedule checks after the initial delay, then daily, and never overlap
   const updater = startUpdater(deps, {
     initialDelayMs: 1000,
     intervalMs: 10_000,
-    setTimer: (fn, ms) => (timers.push({ fn, ms }), {}),
+    setTimer: (fn, ms) => {
+      timers.push({ fn, ms });
+      return {};
+    },
   });
   assert.equal(timers[0]?.ms, 1000);
   timers[0]?.fn();

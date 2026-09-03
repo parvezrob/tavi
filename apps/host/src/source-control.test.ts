@@ -71,8 +71,8 @@ test("stage, unstage, and commit exactly the staged set; refusals are sentences"
   assert.equal(empty.ok, false);
   if (!empty.ok) assert.equal(empty.status, 400);
 
-  const escape = await stageFiles(dir, ["../outside.txt"], "stage");
-  assert.equal(escape.ok, false);
+  const escaped = await stageFiles(dir, ["../outside.txt"], "stage");
+  assert.equal(escaped.ok, false);
 
   assert.ok((await stageFiles(dir, ["a.txt", "b.txt"], "stage")).ok);
   assert.ok((await stageFiles(dir, ["b.txt"], "unstage")).ok);

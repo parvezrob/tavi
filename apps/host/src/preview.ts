@@ -4,7 +4,6 @@ import {
   createServer,
   request as httpRequest,
   type IncomingHttpHeaders,
-  type IncomingMessage,
   type Server,
   type ServerResponse,
 } from "node:http";

@@ -141,7 +141,6 @@ export async function listRepos(roots: string[], options: ListReposOptions = {})
       // One repository that this call cannot read (a stalled network mount,
       // a mid-operation .git) does not blank the whole list; its neighbours
       // still answer.
-      continue;
     }
   }
 

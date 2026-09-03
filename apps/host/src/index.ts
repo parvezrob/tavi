@@ -137,7 +137,7 @@ if (process.argv[2] === "pair") {
   try {
     const assumeYes = process.argv.includes("--yes") || process.argv.includes("-y");
     await bootstrap(config, defaultDeps(config, { assumeYes }));
-    const publicUrl = await resolvePublicUrl(config, process.argv.slice(3));
+    const publicUrl = await resolvePublicUrl(process.argv.slice(3));
     await runPairCommand(config, publicUrl);
     process.exit(0);
   } catch (error) {

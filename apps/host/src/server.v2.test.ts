@@ -9,26 +9,21 @@ import path from "node:path";
 import test from "node:test";
 import type { IPty } from "node-pty";
 import WebSocket from "ws";
-import type { HostConfig } from "./config.js";
 import type { HerdrAgentSource } from "./herdr.js";
 import { OUTPUT_FRAME_HEADER_BYTES, OUTPUT_FRAME_TYPE, TERMINAL_PROTOCOL_V2 } from "./protocol.js";
 import { AgentKindDetector } from "./agent-kinds.js";
 import { ProjectHistory } from "./projects.js";
 import { createTaviServer, type TaviServerOptions } from "./server.js";
+import { testConfig } from "./testing/config.js";
 import type { ServerTerminalMessage } from "./types.js";
 
-const config: HostConfig = {
-  bindHost: "127.0.0.1",
+const config = testConfig({
   port: 0,
-  token: "test-token-that-is-long-enough",
-  shell: "/bin/zsh",
   herdrSocket: path.join(tmpdir(), "tavi-v2-test-herdr.sock"),
   roots: [tmpdir()],
   stateDir: tmpdir(),
   machineName: "Test",
-  previewPort: 8788,
-  previewDoorPort: 8443,
-};
+});
 
 type V2Event = { kind: "control"; message: ServerTerminalMessage } | { kind: "output"; offset: number; data: string };
 
@@ -333,7 +328,7 @@ test("events endpoint pushes agent snapshots and degrades honestly when unconfig
     await waitUntil(() => messages.length === 2);
     assert.equal(messages[1]?.type, "agents");
     assert.equal(messages[1]?.available, true);
-    assert.equal((messages[1]?.agents as Array<{ status: string }>)[0]?.status, "blocked");
+    assert.equal((messages[1]?.agents as Array<{ status: string }>)?.[0]?.status, "blocked");
 
     websocket.close();
     await once(websocket, "close");

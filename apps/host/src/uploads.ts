@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, type Stats } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import path from "node:path";
 
@@ -68,7 +68,7 @@ export async function saveUpload(options: {
       error: resolved.error,
       ...(resolved.outsideRoots ? { outsideRoots: true as const } : {}),
     };
-  let folderStat;
+  let folderStat: Stats;
   try {
     folderStat = await fs.stat(resolved.path);
   } catch {
