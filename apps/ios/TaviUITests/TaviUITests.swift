@@ -499,7 +499,7 @@ final class TaviUITests: XCTestCase {
         // Holding the chip opens the rename alert directly; retry the
         // press while the freshly attached surface settles.
         let alert = app.alerts.firstMatch
-        for _ in 0 ..< 3 where !alert.exists {
+        for _ in 0..<3 where !alert.exists {
             chip.press(forDuration: 0.9)
             if alert.waitForExistence(timeout: 4) { break }
         }
@@ -879,8 +879,7 @@ final class TaviUITests: XCTestCase {
         let catalog = try await projectCatalog(host: host, token: token)
         let first = try await knownProjectPath(host: host, token: token)
         guard let second = (catalog.recent.filter(\.withinRoots).map(\.path) + catalog.workspaces.map(\.path))
-            .first(where: { trimmed($0) != trimmed(first) })
-        else {
+            .first(where: { trimmed($0) != trimmed(first) }) else {
             throw XCTSkip("This host has only one project folder; the grouping needs two.")
         }
 
@@ -1065,7 +1064,7 @@ final class TaviUITests: XCTestCase {
         // sheet until its badge is on screen.
         let currentBadge = app.staticTexts["Current"]
         var badgeVisible = currentBadge.waitForExistence(timeout: 5)
-        for _ in 0 ..< 6 where !badgeVisible {
+        for _ in 0..<6 where !badgeVisible {
             app.descendants(matching: .any)["terminal.jumpSheet"].swipeUp()
             badgeVisible = currentBadge.waitForExistence(timeout: 2)
         }
@@ -1190,7 +1189,7 @@ final class TaviUITests: XCTestCase {
         try await waitForAgentStatus(host: host, token: token, paneId: paneId, status: "blocked", timeout: 60)
         // Confirm a dialog actually parses before driving the UI, else skip.
         var sawDialog = false
-        for _ in 0 ..< 10 where !sawDialog {
+        for _ in 0..<10 where !sawDialog {
             sawDialog = try await readDialogPresent(host: host, token: token, paneId: paneId)
             if !sawDialog { try await Task.sleep(for: .seconds(1)) }
         }
@@ -1217,13 +1216,12 @@ final class TaviUITests: XCTestCase {
 
         // The choice landed if the host stops reporting a live dialog on the pane.
         var resolved = false
-        for _ in 0 ..< 15 where !resolved {
+        for _ in 0..<15 where !resolved {
             try await Task.sleep(for: .seconds(1))
             resolved = try await !readDialogPresent(host: host, token: token, paneId: paneId)
         }
         XCTAssertTrue(resolved, "The dialog was still present after tapping the option.")
     }
-
 
     // Files mentioned (#61): a path the agent printed is offered only when it
     // is a real file inside the roots; a made-up one is not. Then the two
@@ -1334,6 +1332,7 @@ final class TaviUITests: XCTestCase {
                 let id: String
                 let status: String
             }
+
             let agents: [Agent]
         }
         let body = try JSONDecoder().decode(AgentsBody.self, from: data)
@@ -1478,8 +1477,7 @@ final class TaviUITests: XCTestCase {
         let insideRoots = catalog.recent.filter(\.withinRoots)
         guard let path = insideRoots.first(where: \.active)?.path
             ?? insideRoots.first?.path
-            ?? catalog.workspaces.first?.path
-        else {
+            ?? catalog.workspaces.first?.path else {
             throw XCTSkip("This host has no project folder inside its roots to start a disposable agent in.")
         }
         return path
@@ -1638,7 +1636,7 @@ final class TaviUITests: XCTestCase {
     // focus; tap until the keyboard is actually up, then type.
     @MainActor
     private func type(_ text: String, into field: XCUIElement, in app: XCUIApplication) -> Bool {
-        for _ in 0 ..< 5 {
+        for _ in 0..<5 {
             field.tap()
             if app.keyboards.element.waitForExistence(timeout: 3) {
                 field.typeText(text)

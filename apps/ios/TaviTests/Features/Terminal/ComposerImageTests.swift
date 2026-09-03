@@ -1,6 +1,6 @@
+@testable import Tavi
 import Testing
 import UIKit
-@testable import Tavi
 
 // An attached image is shrunk on the phone before it travels (#88).
 struct ComposerImageTests {

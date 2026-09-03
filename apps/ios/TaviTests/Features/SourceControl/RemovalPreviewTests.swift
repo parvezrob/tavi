@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import Tavi
+import Testing
 
 // Remove worktree wire shape and the words it drives (#81) — the choices
 // that lose work are pure functions so they are tested here.

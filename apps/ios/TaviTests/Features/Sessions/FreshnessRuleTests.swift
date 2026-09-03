@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import Tavi
+import Testing
 
 // Freshness shows when it carries a decision (#54): moving or waiting work
 // always, finished work always ("did it just finish?"), and idle only once

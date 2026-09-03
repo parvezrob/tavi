@@ -16,17 +16,17 @@ struct TerminalDevelopmentBootstrap: Sendable {
         _ environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> TerminalDevelopmentBootstrap {
         #if DEBUG
-        let agentPaneID = environment["TAVI_DEV_AGENT"].flatMap { $0.isEmpty ? nil : $0 }
-        let rendererStressChunks = environment["TAVI_DEV_RENDERER_STRESS_CHUNKS"]
-            .flatMap { value in
-                try? JSONDecoder().decode([String].self, from: Data(value.utf8))
-            }
-        return TerminalDevelopmentBootstrap(
-            agentPaneID: agentPaneID,
-            rendererStressChunks: rendererStressChunks
-        )
+            let agentPaneID = environment["TAVI_DEV_AGENT"].flatMap { $0.isEmpty ? nil : $0 }
+            let rendererStressChunks = environment["TAVI_DEV_RENDERER_STRESS_CHUNKS"]
+                .flatMap { value in
+                    try? JSONDecoder().decode([String].self, from: Data(value.utf8))
+                }
+            return TerminalDevelopmentBootstrap(
+                agentPaneID: agentPaneID,
+                rendererStressChunks: rendererStressChunks
+            )
         #else
-        TerminalDevelopmentBootstrap(agentPaneID: nil, rendererStressChunks: nil)
+            TerminalDevelopmentBootstrap(agentPaneID: nil, rendererStressChunks: nil)
         #endif
     }
 }

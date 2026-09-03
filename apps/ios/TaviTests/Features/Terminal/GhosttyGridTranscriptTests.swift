@@ -1,7 +1,7 @@
 import Foundation
+@testable import Tavi
 import Testing
 import UIKit
-@testable import Tavi
 
 // The transcript comes from Ghostty's rendered grid, not the byte stream
 // (#71). Under herdr's screen diffs a row whose prefix did not change is

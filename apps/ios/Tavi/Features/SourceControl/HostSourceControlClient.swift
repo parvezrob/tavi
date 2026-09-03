@@ -190,6 +190,7 @@ struct CommitReceipt: Decodable, Sendable, Equatable {
         let summary: String
         let files: Int
     }
+
     let commit: Commit
 }
 
@@ -367,11 +368,13 @@ struct RemovalPreview: Decodable, Sendable, Equatable {
         let additions: Int
         let deletions: Int
     }
+
     struct Unpushed: Decodable, Sendable, Equatable {
         let commits: Int
         let upstream: String?
         let remote: String?
     }
+
     struct Agent: Decodable, Sendable, Equatable {
         let paneId: String
         let tabId: String
@@ -381,6 +384,7 @@ struct RemovalPreview: Decodable, Sendable, Equatable {
         // down *outside* the worktree.
         let cwd: String?
     }
+
     let path: String
     let branch: String?
     let isMain: Bool
@@ -415,5 +419,6 @@ struct RemovalReceipt: Decodable, Sendable, Equatable {
         let closedAgents: Int
         let pushed: Int
     }
+
     let removed: Removed
 }

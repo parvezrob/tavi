@@ -26,6 +26,7 @@ struct TerminalHandshakeProbe: TerminalHandshakeProbing {
         struct Agent: Decodable {
             let id: String
         }
+
         let available: Bool?
         let agents: [Agent]?
     }

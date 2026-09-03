@@ -145,37 +145,37 @@ private struct TextFileView: View {
             }
         } else {
             GeometryReader { geometry in
-            ScrollViewReader { proxy in
-                ScrollView([.vertical, .horizontal]) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        let lines = content.content.split(separator: "\n", omittingEmptySubsequences: false)
-                        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                            HStack(alignment: .top, spacing: 12) {
-                                Text("\(index + 1)")
-                                    .frame(width: 40, alignment: .trailing)
-                                    .foregroundStyle(TaviTheme.textSecondary.opacity(0.6))
-                                Text(line.isEmpty ? " " : String(line))
-                                    .foregroundStyle(TaviTheme.textPrimary)
+                ScrollViewReader { proxy in
+                    ScrollView([.vertical, .horizontal]) {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            let lines = content.content.split(separator: "\n", omittingEmptySubsequences: false)
+                            ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                                HStack(alignment: .top, spacing: 12) {
+                                    Text("\(index + 1)")
+                                        .frame(width: 40, alignment: .trailing)
+                                        .foregroundStyle(TaviTheme.textSecondary.opacity(0.6))
+                                    Text(line.isEmpty ? " " : String(line))
+                                        .foregroundStyle(TaviTheme.textPrimary)
+                                }
+                                .font(.system(size: 12, design: .monospaced))
+                                .padding(.vertical, 1)
+                                .padding(.horizontal, 12)
+                                .background(index + 1 == scrollToLine ? TaviTheme.accent.opacity(0.18) : Color.clear)
+                                .id(index + 1)
                             }
-                            .font(.system(size: 12, design: .monospaced))
-                            .padding(.vertical, 1)
-                            .padding(.horizontal, 12)
-                            .background(index + 1 == scrollToLine ? TaviTheme.accent.opacity(0.18) : Color.clear)
-                            .id(index + 1)
+                            truncationNote
                         }
-                        truncationNote
+                        .padding(.vertical, 8)
+                        // A two-axis ScrollView centres content shorter than the
+                        // screen; a file starts at the top-left corner.
+                        .frame(minWidth: geometry.size.width, minHeight: geometry.size.height, alignment: .topLeading)
                     }
-                    .padding(.vertical, 8)
-                    // A two-axis ScrollView centres content shorter than the
-                    // screen; a file starts at the top-left corner.
-                    .frame(minWidth: geometry.size.width, minHeight: geometry.size.height, alignment: .topLeading)
-                }
-                .onAppear {
-                    if let scrollToLine, scrollToLine <= content.lines {
-                        proxy.scrollTo(scrollToLine, anchor: .center)
+                    .onAppear {
+                        if let scrollToLine, scrollToLine <= content.lines {
+                            proxy.scrollTo(scrollToLine, anchor: .center)
+                        }
                     }
                 }
-            }
             }
         }
     }
@@ -348,29 +348,29 @@ private struct DiffView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             GeometryReader { geometry in
-            ScrollView([.vertical, .horizontal]) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    let lines = diff.diff.split(separator: "\n", omittingEmptySubsequences: false)
-                    ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                        let text = String(line)
-                        Text(text.isEmpty ? " " : text)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(Self.color(for: text))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Self.background(for: text))
+                ScrollView([.vertical, .horizontal]) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        let lines = diff.diff.split(separator: "\n", omittingEmptySubsequences: false)
+                        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                            let text = String(line)
+                            Text(text.isEmpty ? " " : text)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(Self.color(for: text))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Self.background(for: text))
+                        }
+                        if diff.truncated {
+                            Text("Showing the first 256 KB of this diff.")
+                                .font(.caption)
+                                .foregroundStyle(TaviTheme.textSecondary)
+                                .padding(16)
+                        }
                     }
-                    if diff.truncated {
-                        Text("Showing the first 256 KB of this diff.")
-                            .font(.caption)
-                            .foregroundStyle(TaviTheme.textSecondary)
-                            .padding(16)
-                    }
+                    .padding(.vertical, 8)
+                    .frame(minWidth: geometry.size.width, minHeight: geometry.size.height, alignment: .topLeading)
                 }
-                .padding(.vertical, 8)
-                .frame(minWidth: geometry.size.width, minHeight: geometry.size.height, alignment: .topLeading)
-            }
             }
             .accessibilityIdentifier("files.viewer.diff")
         }

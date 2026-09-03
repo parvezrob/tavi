@@ -1,0 +1,16 @@
+--swiftversion 6.0
+--indent 4
+--commas always
+--ranges nospace
+--decimalgrouping ignore
+--guardelse same-line
+--importgrouping alpha
+--wraparguments preserve
+--wrapparameters preserve
+--wrapcollections preserve
+--stripunusedargs closure-only
+# The tree as written: prose above a declaration is a reason, not API docs; a one-line body stays one line.
+--disable docComments,wrapPropertyBodies,wrapFunctionBodies,wrapIfStatementBodies,wrapIfExpressionBodies,wrapLoopBodies,wrapMultilineStatementBraces
+# Layout only. Every rule here rewrites tokens rather than lines, and each one changed working code.
+--disable hoistTry,hoistAwait,preferKeyPath,conditionalAssignment,opaqueGenericParameters,redundantSelf,redundantStaticSelf,redundantAsync,redundantViewBuilder,redundantNilInit,redundantReturn,modifierOrder,initCoderUnavailable,noForceUnwrapInTests,noForceTryInTests
+--exclude Frameworks,Tavi.xcodeproj,DerivedData,.build

@@ -1275,6 +1275,7 @@ final class AgentDirectory {
             let path: String
             let relay: String?
         }
+
         let connection: Connection?
     }
 }

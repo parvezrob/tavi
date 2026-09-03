@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import Tavi
+import Testing
 
 // Pull request wire shapes and words (#79).
 struct PullRequestTests {

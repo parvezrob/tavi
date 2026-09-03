@@ -793,7 +793,6 @@ struct SourceControlSheet: View {
 
     // MARK: - Shared
 
-
     private func loadingRow(_ text: String) -> some View {
         HStack(spacing: 10) {
             ProgressView()

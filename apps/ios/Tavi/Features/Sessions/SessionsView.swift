@@ -98,12 +98,12 @@ struct SessionsView: View {
                             }
                         }
                         #if DEBUG
-                        Button("Enter host and token (dev)", systemImage: "keyboard") {
-                            draftHost = ""
-                            draftToken = ""
-                            showingHostForm = true
-                        }
-                        .accessibilityIdentifier("sessions.hostSettings")
+                            Button("Enter host and token (dev)", systemImage: "keyboard") {
+                                draftHost = ""
+                                draftToken = ""
+                                showingHostForm = true
+                            }
+                            .accessibilityIdentifier("sessions.hostSettings")
                         #endif
                     } label: {
                         Label("Computers", systemImage: "desktopcomputer")
@@ -260,35 +260,35 @@ struct SessionsView: View {
                 bootstrapped = true
                 fleet.load()
                 #if DEBUG
-                // UI tests must not inherit a connection persisted by an
-                // earlier run on the same simulator.
-                if ProcessInfo.processInfo.environment["TAVI_DEV_RESET"] == "1" {
-                    fleet.removeAll()
-                    TerminalFontPreference.reset()
-                    TerminalViewportRecord.clear()
-                    UserDefaults.standard.removeObject(forKey: AppLock.storageKey)
-                }
+                    // UI tests must not inherit a connection persisted by an
+                    // earlier run on the same simulator.
+                    if ProcessInfo.processInfo.environment["TAVI_DEV_RESET"] == "1" {
+                        fleet.removeAll()
+                        TerminalFontPreference.reset()
+                        TerminalViewportRecord.clear()
+                        UserDefaults.standard.removeObject(forKey: AppLock.storageKey)
+                    }
                 #endif
                 seedFromDevelopmentEnvironmentIfNeeded()
                 #if DEBUG
-                // Scripted font-size runs (#51): the terminal preference is
-                // in the app container, unreachable from simctl, so live
-                // verification seeds it here like the other TAVI_DEV_ keys.
-                if let raw = ProcessInfo.processInfo.environment["TAVI_DEV_FONT_SIZE"],
-                   let size = Double(raw) {
-                    TerminalFontPreference.save(size)
-                }
+                    // Scripted font-size runs (#51): the terminal preference is
+                    // in the app container, unreachable from simctl, so live
+                    // verification seeds it here like the other TAVI_DEV_ keys.
+                    if let raw = ProcessInfo.processInfo.environment["TAVI_DEV_FONT_SIZE"],
+                       let size = Double(raw) {
+                        TerminalFontPreference.save(size)
+                    }
                 #endif
                 #if DEBUG
-                // Scripted development runs and the terminal UI tests jump
-                // straight into one agent's terminal without a tap. The
-                // pane is attached by id on the first paired computer
-                // because the agent list may not have loaded yet; a pane
-                // that does not exist fails honestly on the terminal itself.
-                if let paneID = TerminalDevelopmentBootstrap.launchEnvironment().agentPaneID,
-                   let hostId = fleet.hosts.first?.id {
-                    openAgent(hostId: hostId, paneID: paneID)
-                }
+                    // Scripted development runs and the terminal UI tests jump
+                    // straight into one agent's terminal without a tap. The
+                    // pane is attached by id on the first paired computer
+                    // because the agent list may not have loaded yet; a pane
+                    // that does not exist fails honestly on the terminal itself.
+                    if let paneID = TerminalDevelopmentBootstrap.launchEnvironment().agentPaneID,
+                       let hostId = fleet.hosts.first?.id {
+                        openAgent(hostId: hostId, paneID: paneID)
+                    }
                 #endif
             }
             .onChange(of: scenePhase) { _, phase in
@@ -787,21 +787,21 @@ struct SessionsView: View {
     private func seedFromDevelopmentEnvironmentIfNeeded() {
         // Release builds must never persist an injected credential (#33).
         #if DEBUG
-        // TAVI_DEV_HOST takes a comma-separated list so a simulator can show
-        // a several-computer home (the same Mac twice is enough to look at
-        // the layout); TAVI_DEV_HOST_NAMES names them in the same order.
-        let environment = ProcessInfo.processInfo.environment
-        if !fleet.isConfigured, let hosts = environment["TAVI_DEV_HOST"], !hosts.isEmpty {
-            let addresses = hosts.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-            let names = (environment["TAVI_DEV_HOST_NAMES"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-            for (index, address) in addresses.enumerated() where !address.isEmpty {
-                let host = PairedHost.typed(address: address)
-                fleet.add(host, credential: environment["TAVI_DEV_TOKEN"] ?? "")
-                if index < names.count, !names[index].isEmpty {
-                    fleet.rename(hostId: host.id, alias: names[index])
+            // TAVI_DEV_HOST takes a comma-separated list so a simulator can show
+            // a several-computer home (the same Mac twice is enough to look at
+            // the layout); TAVI_DEV_HOST_NAMES names them in the same order.
+            let environment = ProcessInfo.processInfo.environment
+            if !fleet.isConfigured, let hosts = environment["TAVI_DEV_HOST"], !hosts.isEmpty {
+                let addresses = hosts.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                let names = (environment["TAVI_DEV_HOST_NAMES"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                for (index, address) in addresses.enumerated() where !address.isEmpty {
+                    let host = PairedHost.typed(address: address)
+                    fleet.add(host, credential: environment["TAVI_DEV_TOKEN"] ?? "")
+                    if index < names.count, !names[index].isEmpty {
+                        fleet.rename(hostId: host.id, alias: names[index])
+                    }
                 }
             }
-        }
         #endif
     }
 }

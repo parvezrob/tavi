@@ -71,7 +71,7 @@ struct HostPreviewClient: Sendable {
         do {
             let (data, response) = try await Self.session.data(for: request)
             guard let http = response as? HTTPURLResponse else { return .failure("The host did not answer.") }
-            guard (200 ..< 300).contains(http.statusCode) else { return Self.refusal(status: http.statusCode, data: data) }
+            guard (200..<300).contains(http.statusCode) else { return Self.refusal(status: http.statusCode, data: data) }
             do {
                 return .value(try JSONDecoder().decode(Value.self, from: data))
             } catch {

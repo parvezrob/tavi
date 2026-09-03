@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import Tavi
+import Testing
 
 struct TerminalWebSocketClientTests {
     // Network.framework reports a rejected upgrade without its HTTP status

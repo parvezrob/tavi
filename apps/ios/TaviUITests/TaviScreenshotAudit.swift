@@ -375,7 +375,8 @@ final class TaviScreenshotAudit: XCTestCase {
         XCTAssertTrue(
             app.otherElements["newAgent.folders"].waitForExistence(timeout: 20)
                 || app.collectionViews["newAgent.folders"].waitForExistence(timeout: 1),
-            "The New Agent sheet never listed folders.")
+            "The New Agent sheet never listed folders."
+        )
         let kind = app.buttons["newAgent.agentKind"]
         XCTAssertTrue(kind.waitForExistence(timeout: 10))
         kind.tap()

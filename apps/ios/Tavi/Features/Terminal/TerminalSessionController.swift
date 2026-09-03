@@ -204,9 +204,9 @@ final class TerminalSessionController {
     }
 
     #if DEBUG
-    func renderDevelopmentOutput(_ value: String) {
-        bridge.receiveRemoteOutput(Data(value.utf8))
-    }
+        func renderDevelopmentOutput(_ value: String) {
+            bridge.receiveRemoteOutput(Data(value.utf8))
+        }
     #endif
 
     private func beginConnection() {

@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import Tavi
+import Testing
 
 // The composer's voice state machine (#56), driven by a scripted engine.
 // The property under test throughout: dictation only ever rewrites the

@@ -192,14 +192,14 @@ struct PreviewSheet: View {
                             .background(TaviTheme.well, in: RoundedRectangle(cornerRadius: TaviTheme.wellRadius))
                             .accessibilityIdentifier("preview.port.field")
                         Button("Open") {
-                            if let port = Int(typedPort), (1 ... 65_535).contains(port) {
+                            if let port = Int(typedPort), (1...65_535).contains(port) {
                                 Task { await proceed(to: PreviewServer(port: port)) }
                             }
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(TaviTheme.accent)
                         .foregroundStyle(TaviTheme.accentInk)
-                        .disabled(Int(typedPort).map { !(1 ... 65_535).contains($0) } ?? true)
+                        .disabled(Int(typedPort).map { !(1...65_535).contains($0) } ?? true)
                         .accessibilityIdentifier("preview.port.open")
                     }
                     .padding(12)

@@ -55,7 +55,6 @@ final class GhosttyRuntime {
     func tick() {
         ghostty_app_tick(app)
     }
-
 }
 
 // Ghostty can request wakeups in rapid bursts from any thread. Coalescing to

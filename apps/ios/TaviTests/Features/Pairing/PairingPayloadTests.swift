@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import Tavi
+import Testing
 
 struct PairingPayloadTests {
     private let valid = "tavi://pair?u=https://studio-mac.tail1234.ts.net&s=abc_DEF-123&f=8F2A%2019C4%20%C2%B7%207B10%20D6E9&n=studio-mac"

@@ -50,6 +50,7 @@ struct HomeProject: Identifiable, Equatable {
     var agentCount: Int {
         needsYou.count + active.count + recent.count + worktrees.reduce(0) { $0 + $1.agentCount }
     }
+
     var needsYouCount: Int { needsYou.count + worktrees.reduce(0) { $0 + $1.needsYou.count } }
     // Something to draw under the header. A repository always has its
     // worktree groups — the card must not blink out while its one agent

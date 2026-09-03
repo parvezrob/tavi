@@ -14,11 +14,10 @@ enum LocalhostPortScanner {
         var seen = Set<Int>()
         let pattern = #/(?:https?://)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):(?<port>\d{1,5})(?!\d|\.\d)/#
         for match in text.matches(of: pattern).reversed() {
-            guard let port = Int(match.output.port), (1 ... 65_535).contains(port), !seen.contains(port) else { continue }
+            guard let port = Int(match.output.port), (1...65_535).contains(port), !seen.contains(port) else { continue }
             seen.insert(port)
             ports.append(port)
         }
         return ports
     }
-
 }

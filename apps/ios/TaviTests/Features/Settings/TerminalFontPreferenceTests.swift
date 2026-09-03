@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import Tavi
+import Testing
 
 struct TerminalFontPreferenceTests {
     // A throwaway defaults suite that removes its plist when the test ends,

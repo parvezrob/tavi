@@ -446,31 +446,31 @@ struct NewAgentSheet: View {
             // Last, not first (#54): Recent is the common path; the custom
             // field led the sheet visually while serving the rare case.
             if whereMode == .folder, !whereLocked {
-            Section {
-                TextField("/Users/you/Projects/thing", text: $customPath)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .font(.footnote.monospaced())
-                    .accessibilityIdentifier("newAgent.customPath")
-                Button("Use this folder") {
-                    select(customPath.trimmingCharacters(in: .whitespacesAndNewlines))
+                Section {
+                    TextField("/Users/you/Projects/thing", text: $customPath)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .font(.footnote.monospaced())
+                        .accessibilityIdentifier("newAgent.customPath")
+                    Button("Use this folder") {
+                        select(customPath.trimmingCharacters(in: .whitespacesAndNewlines))
+                    }
+                    .disabled(customPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("newAgent.useCustomPath")
+                } header: {
+                    Text("Another folder")
+                } footer: {
+                    if let selectedPath, let agentKind {
+                        Text("Starting \(label(for: agentKind, in: catalog)) in \(selectedPath)")
+                            .font(.footnote)
+                            .foregroundStyle(TaviTheme.textSecondary)
+                    } else {
+                        Text("Pick the folder this agent should work in.")
+                            .font(.footnote)
+                            .foregroundStyle(TaviTheme.textSecondary)
+                    }
                 }
-                .disabled(customPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityIdentifier("newAgent.useCustomPath")
-            } header: {
-                Text("Another folder")
-            } footer: {
-                if let selectedPath, let agentKind {
-                    Text("Starting \(label(for: agentKind, in: catalog)) in \(selectedPath)")
-                        .font(.footnote)
-                        .foregroundStyle(TaviTheme.textSecondary)
-                } else {
-                    Text("Pick the folder this agent should work in.")
-                        .font(.footnote)
-                        .foregroundStyle(TaviTheme.textSecondary)
-                }
-            }
-            .listRowBackground(TaviTheme.card)
+                .listRowBackground(TaviTheme.card)
             }
         }
         .scrollContentBackground(.hidden)

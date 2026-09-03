@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import Tavi
+import Testing
 
 // Commits tab wire shapes and the age words (#78).
 struct CommitSummaryTests {

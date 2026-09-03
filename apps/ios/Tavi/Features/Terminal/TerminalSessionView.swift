@@ -333,8 +333,8 @@ struct TerminalSessionView: View {
                 ended
                     ? "This session ended on \(computerName ?? "the computer") — its last screen stays readable."
                     : [controller.connectionState.accessibilityDescription, controller.errorMessage]
-                        .compactMap { $0 }
-                        .joined(separator: " — ")
+                    .compactMap { $0 }
+                    .joined(separator: " — ")
             )
             .font(.caption)
             .foregroundStyle(TaviTheme.textSecondary)

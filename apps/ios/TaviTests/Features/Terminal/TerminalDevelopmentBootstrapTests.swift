@@ -1,5 +1,5 @@
-import Testing
 @testable import Tavi
+import Testing
 
 struct TerminalDevelopmentBootstrapTests {
     @Test

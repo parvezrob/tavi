@@ -32,7 +32,7 @@ final class TaviMemoryChecks: XCTestCase {
         let options = XCTMeasureOptions()
         options.iterationCount = 5
         measure(metrics: [XCTMemoryMetric(application: app), XCTClockMetric()], options: options) {
-            for _ in 0 ..< cyclesPerIteration {
+            for _ in 0..<cyclesPerIteration {
                 openPreview(app, expectConsent: false)
                 closePreview(app)
             }
@@ -96,7 +96,7 @@ final class TaviMemoryChecks: XCTestCase {
         let options = XCTMeasureOptions()
         options.iterationCount = 5
         measure(metrics: [XCTMemoryMetric(application: app), XCTClockMetric()], options: options) {
-            for _ in 0 ..< cyclesPerIteration {
+            for _ in 0..<cyclesPerIteration {
                 openTerminal(app, row: row)
                 closeTerminal(app)
             }
@@ -137,7 +137,7 @@ final class TaviMemoryChecks: XCTestCase {
             // herdr's screen diffs (only the changed cells of rows that all
             // start with the same words) no longer leave fragments.
             var now = ""
-            for _ in 0 ..< 5 where now.isEmpty || now == previous {
+            for _ in 0..<5 where now.isEmpty || now == previous {
                 now = (app.descendants(matching: .any)["terminal.surface"].value as? String) ?? ""
                 if now.isEmpty || now == previous { sleep(2) }
             }

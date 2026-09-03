@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import Tavi
+import Testing
 
 // The connection in words (#86 / #84, PRD §7.13): the host's `connection`
 // becomes a suffix on the header and a sentence on the computer sheet.
