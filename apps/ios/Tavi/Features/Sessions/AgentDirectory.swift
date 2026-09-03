@@ -23,9 +23,9 @@ final class AgentDirectory {
     // renders as an ordinary card.
     private(set) var repos: [RepoInfo] = []
 
-    private let link = HostConnection()
+    private let link: HostConnection
     private let previewer = AgentPreviews()
-    private let routes = HostRoutes()
+    private let routes: HostRoutes
     private let smoother = AgentStatusSmoother()
     // Raw agents from the latest snapshot, re-presented when a pending
     // status de-escalation matures without a new snapshot arriving.
@@ -38,6 +38,16 @@ final class AgentDirectory {
     // this matches the latency probe's cadence rather than inventing a new
     // rhythm to reason about.
     private static let reposInterval: Duration = .seconds(30)
+
+    // Tests hand in their own transport and socket, the seam the link and
+    // the routes already have, so no unit test opens a real one (#99).
+    init(
+        transport: @escaping HostClient.Transport = { try await HostSession.shared.data(for: $0) },
+        makeSocket: @escaping @Sendable (URLRequest) -> any HostEventsSocketing = { NetworkWebSocketTask(request: $0) }
+    ) {
+        link = HostConnection(transport: transport, makeSocket: makeSocket)
+        routes = HostRoutes(transport: transport)
+    }
 
     // What the home reads about the link, from the type that owns it.
     var health: HostHealth { link.health }

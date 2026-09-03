@@ -47,9 +47,12 @@ enum HostPairing {
     // Redeems the single-use secret. The host answers with its fingerprint;
     // a mismatch with the one on the code means the phone reached a
     // different machine than the one it was shown, and the grant is dropped.
-    static func redeem(_ payload: PairingPayload) async throws -> Grant {
+    static func redeem(
+        _ payload: PairingPayload,
+        transport: @escaping HostClient.Transport = { try await HostSession.shared.data(for: $0) }
+    ) async throws -> Grant {
         // The exchange that mints the credential is the one call that has none.
-        let client = HostClient(endpoint: payload.endpoint, credential: "")
+        let client = HostClient(endpoint: payload.endpoint, credential: "", transport: transport)
         let reply: HostClient.Reply<GrantResponse> = await client.fetch(
             "POST",
             "/api/pair",
@@ -88,8 +91,12 @@ enum HostPairing {
 
     // Progressive proof that the credential works and the path is direct,
     // shown step by step on the done screen.
-    static func verify(endpoint: HostEndpoint, credential: String) async throws -> Checks {
-        let client = HostClient(endpoint: endpoint, credential: credential)
+    static func verify(
+        endpoint: HostEndpoint,
+        credential: String,
+        transport: @escaping HostClient.Transport = { try await HostSession.shared.data(for: $0) }
+    ) async throws -> Checks {
+        let client = HostClient(endpoint: endpoint, credential: credential, transport: transport)
         guard let request = client.request("GET", "/api/agents", timeout: 15) else {
             throw Failure.unreachable("The host address is invalid.")
         }

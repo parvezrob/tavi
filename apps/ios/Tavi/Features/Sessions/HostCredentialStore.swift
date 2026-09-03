@@ -6,6 +6,26 @@ import Security
 // available when unlocked — never in UserDefaults. One item per paired
 // host, keyed by the host's id, so unpairing one computer removes exactly
 // its credential and leaves the others alone.
+protocol HostCredentialStoring {
+    func load(hostId: String) -> String
+    func save(_ credential: String, hostId: String)
+    func delete(hostId: String)
+    func deleteAll()
+    func migrateLegacyCredential(toHostId hostId: String) -> Bool
+}
+
+// The Keychain itself, as something HostFleet can be handed; a unit test
+// hands in its own so the fleet's bookkeeping is testable off-device (#105).
+struct KeychainCredentials: HostCredentialStoring {
+    func load(hostId: String) -> String { HostCredentialStore.load(hostId: hostId) }
+    func save(_ credential: String, hostId: String) { HostCredentialStore.save(credential, hostId: hostId) }
+    func delete(hostId: String) { HostCredentialStore.delete(hostId: hostId) }
+    func deleteAll() { HostCredentialStore.deleteAll() }
+    func migrateLegacyCredential(toHostId hostId: String) -> Bool {
+        HostCredentialStore.migrateLegacyCredential(toHostId: hostId)
+    }
+}
+
 enum HostCredentialStore {
     private static let service = "com.farfield.tavi.host-token"
     // Pre-#50: the single credential of the one paired host.
