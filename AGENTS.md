@@ -16,6 +16,7 @@ Keep this file lean. It routes work and protects shared boundaries; detailed eng
 - Treat pairing credentials as shell access. Never commit or log secrets, tokens, prompts, terminal contents, or private files.
 - Clean, readable, reusable production code is mandatory. Follow SOLID, correct ACID boundaries, strict Swift concurrency, explicit ownership, and the repository definition of done.
 - Reuse before creating. Add a shared abstraction only after a second real consumer proves the boundary.
+- **SwiftUI performance (#68, #69):** heavy work belongs in `.task`/`.onChange` and lands in `@State`, never in `body` or in a computed property `body` reads — SwiftUI re-runs those on every redraw. Every `Task` and timer a view starts is cancelled when it disappears. A `UIViewRepresentable`'s `updateUIView` applies only what changed; it must never rebuild or reconfigure the view it is handed.
 
 ## Multi-session workflow
 

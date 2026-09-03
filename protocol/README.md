@@ -2,7 +2,10 @@
 
 **Status:** current prototype contract
 **Protocol:** `tavi.v1`
+**Host:** `tavi-host` 0.1.17
 **Updated:** 2026-09-03
+
+Each route section (`###`) names the host version that first shipped it; the [changelog](#changelog) says what every version changed here.
 
 This document preserves the transport contract used by the native Tavi client. It is platform-neutral and is the compatibility baseline while the protocol evolves toward versioned capability negotiation.
 
@@ -41,7 +44,7 @@ with status `401`.
 
 ## HTTP endpoints
 
-### `GET /api/health`
+### `GET /api/health` · host 0.1.0
 
 Unauthenticated liveness and version check.
 
@@ -49,7 +52,7 @@ Unauthenticated liveness and version check.
 { "ok": true, "version": "0.1.0" }
 ```
 
-### `POST /api/pair/begin`
+### `POST /api/pair/begin` · host 0.1.0
 
 Host-token only. Mints a single-use pairing secret that expires in 5 minutes (at most 5 may be outstanding; `429` beyond that). This is what `tavi pair` calls before printing the QR.
 
@@ -57,7 +60,7 @@ Host-token only. Mints a single-use pairing secret that expires in 5 minutes (at
 { "secret": "…", "expiresAt": "2026-08-31T12:00:00.000Z", "host": { "name": "studio-mac", "fingerprint": "8F2A 19C4 · 7B10 D6E9" } }
 ```
 
-### `POST /api/pair`
+### `POST /api/pair` · host 0.1.0
 
 **Unauthenticated.** Redeems a pairing secret for a device credential. The QR carries `tavi://pair?u=<https url>&s=<secret>&f=<fingerprint>&n=<host name>`; the phone shows `n`/`f` for the person to confirm against the Mac before calling this.
 
@@ -67,11 +70,11 @@ Host-token only. Mints a single-use pairing secret that expires in 5 minutes (at
 
 `201` → `{ "credential", "device": { "id", "name", "pairedAt" }, "host": { "name", "fingerprint" } }`. The credential is returned exactly once; the host stores only its hash. A client must refuse to keep the credential if `host.fingerprint` differs from the QR's `f`. `401` for an unknown, spent, or expired secret.
 
-### `GET /api/devices`, `DELETE /api/devices/{id}`, `DELETE /api/devices/me`
+### `GET /api/devices`, `DELETE /api/devices/{id}`, `DELETE /api/devices/me` · host 0.1.0
 
 Host-token only: list paired devices (`{ "devices": [{ "id", "name", "pairedAt", "lastSeenAt"? }] }`) and revoke one (`204`, or `404`). A paired phone may call `DELETE /api/devices/me` with its own credential to unpair itself (`204`); the host token gets `400` there. Revocation is immediate: open event streams and terminals for that device close with WebSocket code `4401` within two seconds.
 
-### `GET /api/host`
+### `GET /api/host` · host 0.1.0
 
 ```json
 {
@@ -86,7 +89,7 @@ Host-token only: list paired devices (`{ "devices": [{ "id", "name", "pairedAt",
 
 `connection` (host ≥ 0.1.17, #86) is the caller's path per the computer's own Tailscale: `direct` (peer to peer), `relay` with the DERP region (`relay`), or `unknown` (Tailscale not installed or not asked, the caller not a tailnet peer, a direct localhost call). The phone shows it in words — "Live · 40 ms · relay" — instead of blaming the computer for a slow link. It is a fact for a screen, never a guardrail; an older host simply omits it.
 
-### `POST /api/files/upload?cwd=<folder>`
+### `POST /api/files/upload?cwd=<folder>` · host 0.1.17
 
 An image attached from the composer (#88; host ≥ 0.1.17). The body is the image itself (`Content-Type: image/jpeg | png | gif | webp | heic`, 10 MB at most); `cwd` is the agent's folder and must be inside the roots. The file lands in `<cwd>/.tavi/uploads/<date>-<time>-<id>.<ext>`, kept out of git through the repository's `.git/info/exclude`, and swept after seven days.
 
@@ -96,7 +99,7 @@ An image attached from the composer (#88; host ≥ 0.1.17). The body is the imag
 
 Refusals: `403` outside the roots (`outsideRoots: true`), `413` too large, `415` not an image, `404` no such folder.
 
-### `GET /api/projects`
+### `GET /api/projects` · host 0.1.0
 
 Everything a client needs to choose where a new agent starts.
 
@@ -128,7 +131,7 @@ Everything a client needs to choose where a new agent starts.
 
 `roots` may be empty — a host with none of the default project directories and no `TAVI_ROOTS` configures no roots at all, and then *every* create requires the confirmation below. Path comparison is case- and Unicode-normalization-insensitive, matching the default macOS filesystem.
 
-### `POST /api/herdr/tabs`
+### `POST /api/herdr/tabs` · host 0.1.0
 
 Creates a Herdr tab and launches an agent in it.
 
@@ -147,7 +150,7 @@ Creates a Herdr tab and launches an agent in it.
 
 **Compatibility.** Requiring `cwd` is a breaking change to this endpoint, made while Tavi is pre-MVP with a single first-party client shipped alongside the host. A client that omits `cwd` gets `400` on every create and must be updated with the host; there is no negotiated fallback. Deploy the host and the app together.
 
-### `PATCH /api/herdr/tabs/{tabId}`
+### `PATCH /api/herdr/tabs/{tabId}` · host 0.1.0
 
 Renames a Herdr tab (#55) — the user's own name for the task the pane is doing.
 
@@ -164,7 +167,7 @@ Renames a Herdr tab (#55) — the user's own name for the task the pane is doing
 | `404` | Herdr is not configured on this host. |
 | `503` | Herdr is configured but could not rename the tab. |
 
-### `GET /api/changes?cwd=…` — what an agent changed (#25)
+### `GET /api/changes?cwd=…` — what an agent changed (#25) · host 0.1.11
 
 Read-only view of the uncommitted work in the git repository that contains `cwd` (an absolute path inside the configured roots; `403` + `{ "outsideRoots": true }` otherwise, `404` + `{ "notRepository": true }` when no repository contains it). Response:
 
@@ -176,11 +179,11 @@ Read-only view of the uncommitted work in the git repository that contains `cwd`
 
 `state` is one of `modified`, `added`, `deleted`, `renamed`, `untracked`, `conflict`, `other`; `path` is relative to `repository`. Counts are working tree vs `HEAD` and absent for binary files. `secret: true` marks a file the redaction rule refuses to show (by name: `.env*`, `*.pem`, `*.key`, `id_rsa*`, anything with `credentials`/`secret`, `.npmrc`/`.netrc`/`.pypirc`) — listed, never diffed. At most 500 files (`truncated`). Three fixed git invocations run under `execFile` with a timeout; no mutating git operation exists on this path.
 
-### `GET /api/changes/file?cwd=…&path=…` — one file's diff
+### `GET /api/changes/file?cwd=…&path=…` — one file's diff · host 0.1.11
 
 `path` is a `files[].path` from `/api/changes`. Unified diff of the working tree against `HEAD` (staged and unstaged together); untracked files come back as all additions. `{ "path", "diff", "truncated", "binary" }`; the diff is cut at 256 KB on a line boundary and marked `truncated`. `400` for a path that leaves the repository, `403` for a secret, `404` when git knows no such file.
 
-### `GET /api/files…` — read-only files (#57, #61)
+### `GET /api/files…` — read-only files (#57, #61) · host 0.1.11
 
 All four routes take `cwd` (absolute) and `path` (absolute, or relative to `cwd`). Resolution is: join, **`realpath`**, then containment against the configured roots (themselves realpath'd) — a symlink that points out of a root is refused *after* realpath, which is the rule that makes "nothing outside the roots is reachable" true. Refusals: `403` + `{ "outsideRoots": true }` for anything outside (existing or not — the host says nothing more), `403` for anything under a `.git` directory, `404` for a missing file inside the roots, `400` for a malformed path.
 
@@ -191,7 +194,7 @@ All four routes take `cwd` (absolute) and `path` (absolute, or relative to `cwd`
 
 Nothing under `/api/files` or `/api/changes` writes, renames, deletes, or runs anything but the fixed git reads above.
 
-### `GET /api/repos` — worktree and branch visibility (#59a)
+### `GET /api/repos` — worktree and branch visibility (#59a) · host 0.1.15
 
 Every git repository reachable from the configured roots, with every worktree git itself knows about (a linked worktree may live outside the roots — git found it, so this route does not hide it; the roots guardrail governs where a *new* worktree is created, not what an existing one shows). Read-only: `worktree list --porcelain -z`, `status`, `for-each-ref`, nothing else.
 
@@ -211,7 +214,7 @@ Every git repository reachable from the configured roots, with every worktree gi
 
 `branch` is `null` for a detached `HEAD`. `head` is the full SHA. `pullRequest` (#74) is the open pull request for the branch per the host user's own `gh` login (`gh pr list --head <branch>`), remembered for a minute per branch; `null` when there is none, when `gh` is not installed or not logged in, when the remote is not GitHub, for a detached worktree, or when the lookup did not answer within the call's 3 s budget (at most four `gh` at a time per repository; the rest are stopped, not left running — #85) — a client shows no badge and says nothing. `dirty` is a count of changed-or-untracked entries (`status --porcelain=v2`), not the files themselves — see `/api/changes` for those. `ahead`/`behind` are commits relative to `defaultBranch` (the remote's default branch, else a local `main` or `master`, else `null` and both `0`), measured as `refs/heads/<default>` or, with no local copy, `refs/remotes/origin/<default>`; a worktree already on the default branch reports `0`/`0`; a detached worktree is measured by its `head`. `defaultBranch` is `null` when none of those resolve. `withinRoots` (#83) says whether the worktree is inside the configured roots — the source-control routes below answer only there. Each repository's `truncated` is `true` when its worktrees (cap 40) or `branches` (cap 200) were cut; the top-level `truncated` when the repositories were (cap 40). When git itself is not installed the answer is `{ "repos": [], "truncated": false, "error": "git is not installed on this computer." }` — an empty list with no `error` means there are none.
 
-### `POST /api/worktrees` — create a worktree (#75)
+### `POST /api/worktrees` — create a worktree (#75) · host 0.1.15
 
 ```json
 { "repo": "/Users/me/Projects/app", "branch": "fix/login", "base": "main", "allowOutsideRoots": false }
@@ -227,7 +230,7 @@ What runs, as fixed arguments: `git worktree add --no-track -b <branch> <path> <
 
 `503` carries git's own message when `worktree add` fails. Nothing else in the repository is touched; a client then starts an agent there with `POST /api/herdr/tabs`. `GET /api/repos` also gained `branches` (local branch names, default first, at most 200) for the "start from" choice.
 
-### `/api/worktrees/status`, `stage`, `unstage`, `commit`, `commit-message` — Source Control, Changes (#77)
+### `/api/worktrees/status`, `stage`, `unstage`, `commit`, `commit-message` — Source Control, Changes (#77) · host 0.1.15
 
 Every route takes the worktree's own `path` (query on the GET, body on the POSTs), realpath'd then checked against the roots exactly as `/api/changes` (`403` + `outsideRoots` outside; `404` + `notRepository` when no repository contains it).
 
@@ -236,7 +239,7 @@ Every route takes the worktree's own `path` (query on the GET, body on the POSTs
 - `POST /api/worktrees/commit` `{ "path", "message" }` → `201 { "commit": { "sha", "summary", "files" } }` of exactly the staged set. `400` for an empty message; `409` with a sentence when nothing is staged or git has no identity on the computer.
 - `POST /api/worktrees/commit-message` `{ "path" }` → `{ "message" }`: one conventional-commit line for the staged diff, written by the `claude` CLI on the computer (`claude -p`, resolved on the login-shell PATH, 45 s), with secret-looking files left out of the diff by name (they are named, never shown). `409` when nothing is staged; `503` with a sentence when claude is not installed or answered nothing — the phone offers to type one.
 
-### `/api/worktrees/log`, `push`, `pull-base` — Source Control, Commits (#78)
+### `/api/worktrees/log`, `push`, `pull-base` — Source Control, Commits (#78) · host 0.1.15
 
 Same `path` rule as above.
 
@@ -244,7 +247,7 @@ Same `path` rule as above.
 - `POST /api/worktrees/push` `{ "path" }` → `201 { "pushed": n, "upstream": "origin/feat/x" }`. `git push <remote> HEAD:refs/heads/<branch>` to the upstream's remote, or `git push --set-upstream <remote> <branch>:refs/heads/<branch>` the first time — always an explicit refspec, so `push.default` never widens it. Never `--force`. `409` with a sentence when HEAD is detached, there is no remote, the upstream already has everything, or the remote has commits this branch lacks; `503` with git's first line when the remote refuses (not signed in, unreachable). Prompts are impossible (`GIT_TERMINAL_PROMPT=0`, SSH batch mode); 90 s budget.
 - `POST /api/worktrees/pull-base` `{ "path" }` → `201 { "merged": n, "fastForward", "sha", "fetched", "from" }` after `git merge --no-edit <from>`; `200 { "merged": 0, … }` when there is nothing to bring in. The base's upstream is fetched first (`git fetch <remote> <branch>`, 15 s, best effort — #83): when the local base is behind it and checked out nowhere it is fast-forwarded and merged (`from` = the base); when it is checked out somewhere, the fresh remote-tracking ref is merged instead (`from` = `origin/main`); when it has diverged, or there is no upstream, or the fetch failed, the local base is merged as it stands and `fetched` is `false` — a client says "as of the last fetch". `409` with a sentence when uncommitted changes would be overwritten (nothing is touched) or the merge conflicts — the merge is aborted first and the files are named; a merge stopped by its 30 s budget is aborted too (`503`, said as such). The sentence says whether the tree was put back.
 
-### `/api/worktrees/pull-request`, `…/pull-request/link`, `/api/repos/issues` — Source Control, Pull request (#79)
+### `/api/worktrees/pull-request`, `…/pull-request/link`, `/api/repos/issues` — Source Control, Pull request (#79) · host 0.1.15
 
 Everything here runs the person's own `gh` on that computer (found on the login-shell PATH; Tavi holds no GitHub token). When gh is missing, logged out, or the remote is not GitHub, the answer carries a sentence (`gh: { "ok": false, "reason" }` on reads, `503 { "error" }` on writes) — never a prompt.
 
@@ -253,14 +256,14 @@ Everything here runs the person's own `gh` on that computer (found on the login-
 - `POST /api/worktrees/pull-request/link` `{ "path", "number" | "url" }` → `200 { "pullRequest" }` after `gh pr view` confirms it exists on this repository; remembered as `branch.<b>.tavi-pull-request` in the repository's config. `400` for neither a number nor a link; `404` when there is no such pull request.
 - `GET /api/repos/issues?repo=…` → `{ "issues": [{ "number", "title" }…], "gh" }` — open issues, newest first, at most 30, for naming a branch from one.
 
-### `/api/worktrees/removal`, `DELETE /api/worktrees` — Source Control, Remove (#81)
+### `/api/worktrees/removal`, `DELETE /api/worktrees` — Source Control, Remove (#81) · host 0.1.15
 
-Two steps, so what the person confirms is what goes. The main checkout is always refused (`409`); a locked worktree (`git worktree lock` — Claude Code locks every one it makes) is refused with `409` unless the body carries `"unlock": true`, which runs `git worktree unlock` first; `path` follows the roots rule above. Every count is measured or the request is refused (`503`): a git read that fails never reads as "nothing would be lost".
+Two steps, so what the person confirms is what goes. The main checkout is always refused (`409`); a locked worktree (`git worktree lock` — Claude Code locks every one it makes) is refused with `409` unless the body carries `"unlock": true` (0.1.16), which runs `git worktree unlock` first; `path` follows the roots rule above. Every count is measured or the request is refused (`503`): a git read that fails never reads as "nothing would be lost".
 
 - `GET /api/worktrees/removal?path=…` → `{ "path", "branch", "isMain", "locked", "repoRoot", "base", "uncommitted": { "files", "additions", "deletions" }, "unpushed": { "commits", "upstream": string | null, "remote": string | null }, "agents": [{ "paneId", "tabId", "kind", "status" }…], "alsoClosed": [{ "paneId", "tabId", "kind", "status", "cwd" }…], "branchMerged" }` — what removing would lose. `unpushed.commits` is what the upstream lacks, or on a never-pushed branch everything over the base, or on a detached HEAD every commit no branch, tag, or remote holds. `agents` are herdr's agents whose cwd is inside the worktree; `alsoClosed` (#83) are agents *outside* it that share a herdr tab with one inside — herdr closes tabs whole, so they go too; `branchMerged` is whether every commit on the branch is reachable from `base`.
 - `DELETE /api/worktrees` `{ "path", "confirm": { "uncommitted", "unpushed" }, "pushFirst"?, "deleteBranch"?, "unlock"? }` → `200 { "removed": { "path", "branch", "branchDeleted", "branchKept", "branchNote", "closedAgents", "pushed" } }`. `confirm` must equal the counts the host sees now, else `409` with `preview` (the fresh counts) and nothing touched. `pushFirst: true` pushes the branch before removing (the `push` route's rules; a failed push removes nothing). Then: the herdr tabs of the agents inside are closed (`closedAgents` counts the agents), the checkout is renamed aside, `git worktree prune` deregisters it, and the folder is deleted in the background (a failed delete is logged; the host retries every `*.removing-*` folder under the roots on start and hourly, never lists one in `/api/projects` `workspaces`, and `tavi doctor` names any that remain — #82). The branch is deleted only on live proof its commits exist elsewhere — merged into its base (`git branch -d`) or pushed by this very call — or with `deleteBranch: true`, which deletes it even when unmerged (`-D`) because the person confirmed the exact commit count; `deleteBranch: false` keeps it. A local remote-tracking ref alone is not proof (it may be stale), so a branch that is merely "fully on origin" is kept. A kept branch is named in `branchKept` with `branchNote` saying why.
 
-### `/api/preview…` — private dev-server preview (#58)
+### `/api/preview…` — private dev-server preview (#58) · host 0.1.13
 
 An agent starts something on `localhost:<port>`; the phone shows it in a WebKit view without the server being started any differently, and nobody but the paired phone can open it. Two listeners are involved:
 
@@ -276,7 +279,7 @@ An agent starts something on `localhost:<port>`; the phone shows it in a WebKit 
 
 Only the device that opened a preview can keep it alive or close it (`404` for anyone else). Every ticket lives in memory: a host restart ends every preview. Tailscale Funnel is never involved; the door is as reachable as the host's own address — from the tailnet, by ticket holders only.
 
-## Terminal WebSocket
+## Terminal WebSocket · host 0.1.0
 
 Connect to:
 
@@ -346,7 +349,7 @@ Connection liveness probe:
 
 The shared compatibility fixtures live in [`fixtures/terminal-v1/`](./fixtures/terminal-v1/). They are synthetic and contain no captured prompts, terminal contents, credentials, or private paths.
 
-## Terminal WebSocket v2 (`tavi.v2`)
+## Terminal WebSocket v2 (`tavi.v2`) · host 0.1.0
 
 Clients should offer the `tavi.v2` subprotocol; the server prefers it and falls back to `tavi.v1` when only that is offered. v2 changes output delivery and reconnect semantics; client messages (`input`, `resize`, `ping`) and the `pong`/`exit`/`error` server messages are unchanged and remain JSON text frames.
 
@@ -387,7 +390,19 @@ The client's next resume offset is `start offset + payload length`. Frames are b
 - Never replay unacknowledged input after reconnect. Ambiguous duplication is worse than requiring the user to resend.
 - Treat disconnect as normal. Reconnect with bounded exponential backoff and surface the connection state.
 - Keep rendering, transport, session durability, and optional provider semantics as separate components.
+- A route this host does not serve answers `404`. Say "update the computer's Tavi to 0.1.N" — the version that section names — rather than reporting a failure.
 
 ## Planned evolution
 
 The next protocol version adds a handshake, stable machine identity, per-device credentials, capability negotiation, provider/target identifiers, resumable event cursors, bounded frames, and a typed error taxonomy. Until then, changes to the contract above require corresponding host tests and native-client compatibility fixtures.
+
+## Changelog
+
+Versions are the npm package `tavi-host`; a route is listed under the release that first shipped it (`git log -- apps/host/package.json` against the publish dates). Only releases that changed this document are listed — the others were host-side fixes.
+
+- **0.1.17** (2026-09-03) — `POST /api/files/upload` (#88); `GET /api/host` gained `connection`, the caller's Tailscale path (#86, #84); `GET /api/repos` gained `truncated`, `error`, and per-worktree `withinRoots`, `/api/worktrees/pull-base` gained `fetched` and `from`, and `GET /api/worktrees/removal` gained `alsoClosed` (#83, #82).
+- **0.1.16** (2026-09-02) — `DELETE /api/worktrees` takes `unlock` so a locked worktree can be removed.
+- **0.1.15** (2026-09-02) — Source Control: `GET /api/repos` (#59a) carrying each branch's pull request (#74), `POST /api/worktrees` (#75), `status`/`stage`/`unstage`/`commit`/`commit-message` (#77), `log`/`push`/`pull-base` (#78), `pull-request` and `/api/repos/issues` (#79), `removal` and `DELETE /api/worktrees` (#81).
+- **0.1.13** (2026-09-02) — `/api/preview…` and the ticketed dev-server door (#58).
+- **0.1.11** (2026-09-02) — `GET /api/changes`, `GET /api/changes/file`, and the four `/api/files…` reads (#25, #57, #61).
+- **0.1.0** (2026-09-01, the first published host) — everything above not listed under a later version: health, the pairing exchange and devices (#45, #46), `GET /api/host`, `GET /api/projects` and `POST /api/herdr/tabs` (#24, #41, #42), `PATCH /api/herdr/tabs/{tabId}` (#55), and the agent terminal WebSocket in both `tavi.v1` and `tavi.v2`. The `mocha.*` → `tavi.*` namespace migration (#62) shipped in the same release; there is no negotiation across it.
