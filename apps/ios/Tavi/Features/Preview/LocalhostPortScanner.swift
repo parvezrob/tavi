@@ -33,23 +33,31 @@ final class MentionedPorts {
 
     private static let debounce: Duration = .seconds(2)
     private var task: Task<Void, Never>?
+    private var pending: String?
 
     // One regex over one transcript, replaced by the next transcript and
     // dropped with the terminal: nothing outlives the screen that asked.
+    // The wait is a max wait, not a restarting timer: one scan is in flight
+    // at a time and it takes the newest text, so a terminal that reprints
+    // 4x/s still lands a scan every 2 s instead of never (#104).
     func update(from transcript: String) {
-        task?.cancel()
+        pending = transcript
+        guard task == nil else { return }
         task = Task { [weak self] in
             try? await Task.sleep(for: Self.debounce)
+            guard !Task.isCancelled, let self, let text = pending else { return }
+            pending = nil
+            let scanned = await Task.detached(priority: .utility) { LocalhostPortScanner.scan(text) }.value
             guard !Task.isCancelled else { return }
-            let scanned = await Task.detached(priority: .utility) { LocalhostPortScanner.scan(transcript) }.value
-            guard !Task.isCancelled, let self, scanned != ports else { return }
-            ports = scanned
+            task = nil
+            if scanned != ports { ports = scanned }
         }
     }
 
     func clear() {
         task?.cancel()
         task = nil
+        pending = nil
         ports = []
     }
 }

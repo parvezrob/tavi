@@ -203,7 +203,7 @@ struct TerminalSessionView: View {
                     agent: agent,
                     client: agentDirectory?.previewClient,
                     computerName: computerName,
-                    transcript: controller.latestTranscript
+                    mentionedPorts: controller.mentionedPorts
                 )
             }
         }

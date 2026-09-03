@@ -44,19 +44,22 @@ struct SessionsView: View {
     // Files for one agent from the home (#25): a long-press on its row.
     @State private var filesAgent: AgentSummary?
     @State private var previewAgent: AgentSummary?
-    // Grouping re-sorts and re-scans every card, and the home reads it
-    // twice per redraw: it is regrouped only when the computers' own state
-    // changes (#68 phone 4).
+    // Grouping re-sorts and re-scans every card, and filtering it by the
+    // selected chip walks it again: both happen only when the computers'
+    // state or the chip changes (#68 phone 4, #104).
     @State private var layouts = HomeLayoutCache()
 
     var body: some View {
+        // Read once per pass and handed down: the toolbar's computer list
+        // and the home below it are the same grouping (#104).
+        let sections = layouts.sections(for: homeInputs, selectedHostId: selectedHostId)
         NavigationStack {
             ScrollView {
                 // Deliberately not lazy: the home holds a handful of rows,
                 // and LazyVStack's subview caching served a stale card (old
                 // status pill) after a row moved sections.
                 VStack(alignment: .leading, spacing: 20) {
-                    homeContent
+                    homeContent(sections)
                 }
                 .padding(.horizontal, TaviTheme.Spacing.screen)
                 .padding(.top, 2)
@@ -87,7 +90,7 @@ struct SessionsView: View {
                             // Which computers are paired, one tap from the
                             // home, with their health (#50).
                             Section("Paired computers") {
-                                ForEach(homeLayout.computers) { computer in
+                                ForEach(sections.computers) { computer in
                                     Button {
                                         chipSheet = fleet.entries.first { $0.id == computer.id }
                                     } label: {
@@ -220,7 +223,7 @@ struct SessionsView: View {
                     agent: agent,
                     client: fleet.directory(for: agent.hostId)?.previewClient,
                     computerName: computerLabel(for: agent.hostId),
-                    transcript: nil
+                    mentionedPorts: []
                 )
             }
             .sheet(item: $decisionAgent) { target in
@@ -321,7 +324,7 @@ struct SessionsView: View {
     // MARK: - Home sections
 
     @ViewBuilder
-    private var homeContent: some View {
+    private func homeContent(_ sections: HomeSections) -> some View {
         if !fleet.isConfigured {
             // The first impression owns the middle of the screen, not the
             // top edge of an otherwise empty page (#54).
@@ -332,33 +335,20 @@ struct SessionsView: View {
             }
             .containerRelativeFrame(.vertical) { length, _ in length * 0.7 }
         } else {
-            let layout = homeLayout
-            let shown = layout.computers.filter { selectedHostId == nil || $0.id == selectedHostId }
-            let severalShown = shown.count > 1
-            let needsYou = layout.needsYou.filter { agent in shown.contains { $0.id == agent.hostId } }
-            let projects = shown.flatMap { computer in
-                // A folder whose every agent is waiting above has nothing to
-                // show here; a header pointing upward was noise (owner,
-                // 2026-09-02 — supersedes the #26 "keeps its header" rule).
-                computer.projects
-                    .filter(\.hasRows)
-                    .map { HomeProjectItem(computer: computer, project: $0) }
-            }
-
-            ComputerStrip(computers: layout.computers, selectedHostId: $selectedHostId) { computer in
+            ComputerStrip(computers: sections.computers, selectedHostId: $selectedHostId) { computer in
                 chipSheet = fleet.entries.first { $0.id == computer.id }
             }
 
             // A computer in trouble says so once, right under the strip,
             // whatever else is on screen; its last known cards stay below.
-            ForEach(shown.filter { $0.hasLoaded && ($0.health == .stale || $0.health == .offline) }) { computer in
+            ForEach(sections.shown.filter { $0.hasLoaded && ($0.health == .stale || $0.health == .offline) }) { computer in
                 LastKnownBanner(computer: computer)
             }
 
-            if !needsYou.isEmpty {
+            if !sections.needsYou.isEmpty {
                 NeedsYouSection(
-                    agents: needsYou,
-                    computerName: { severalShown ? computerName(for: $0.hostId) : nil },
+                    agents: sections.needsYou,
+                    computerName: { sections.severalShown ? computerName(for: $0.hostId) : nil },
                     preview: { fleet.directory(for: $0.hostId)?.previews[$0.id] },
                     observedAt: { fleet.directory(for: $0.hostId)?.statusObservedAt[$0.id] },
                     expandedStacks: $expandedWaitingStacks,
@@ -369,46 +359,51 @@ struct SessionsView: View {
                 )
             }
 
-            // Project → agents (#26), one list across every computer shown
-            // (#50): each folder is one card, naming its computer when more
-            // than one is on screen. A blocked agent is only in the block
-            // above — its folder never repeats it.
-            if !projects.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    SectionHeader(title: "Projects")
-                    ForEach(projects, id: \.id) { item in
-                        ProjectCard(
-                            project: item.project,
-                            computerName: severalShown ? item.computer.name : nil,
-                            preview: { fleet.directory(for: $0.hostId)?.previews[$0.id] },
-                            observedAt: { fleet.directory(for: $0.hostId)?.statusObservedAt[$0.id] },
-                            onOpen: { openAgent($0) },
-                            onShowFiles: { filesAgent = $0 },
-                            onShowPreview: { previewAgent = $0 },
-                            onNewWorktree: { project in
-                                newWorktreeIn = (hostId: item.computer.id, path: project.path)
-                                showingNewAgent = true
-                            },
-                            onOpenWorktree: { worktree in
-                                sourceControlTarget = SourceControlTarget(hostId: item.computer.id, repoName: item.project.name, worktree: worktree)
-                            }
-                        )
-                    }
-                }
-            }
+            projectsSection(sections.projects, severalShown: sections.severalShown)
 
             // Whatever is not projects: a computer that is still connecting,
             // cannot be reached, has no usable feed, or was unpaired — one
             // card each. When every shown computer is simply idle, one line.
-            ForEach(shown.filter { $0.projects.isEmpty && !$0.isQuietlyIdle }) { computer in
+            ForEach(sections.shown.filter { $0.projects.isEmpty && !$0.isQuietlyIdle }) { computer in
                 ComputerStateCard(
                     computer: computer,
                     onPairAgain: { showingPairing = true },
                     onRemove: { removingHostId = computer.id }
                 )
             }
-            if !shown.isEmpty, needsYou.isEmpty, shown.allSatisfy({ $0.projects.isEmpty && $0.isQuietlyIdle }) {
-                IdleCard(computers: shown) { showingNewAgent = true }
+            if !sections.shown.isEmpty, sections.needsYou.isEmpty, sections.shown.allSatisfy({ $0.projects.isEmpty && $0.isQuietlyIdle }) {
+                IdleCard(computers: sections.shown) { showingNewAgent = true }
+            }
+        }
+    }
+
+    // Project → agents (#26), one list across every computer shown (#50):
+    // each folder is one card, naming its computer when more than one is on
+    // screen. A blocked agent is only in the block above — its folder never
+    // repeats it.
+    @ViewBuilder
+    private func projectsSection(_ projects: [HomeProjectItem], severalShown: Bool) -> some View {
+        if !projects.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionHeader(title: "Projects")
+                ForEach(projects, id: \.id) { item in
+                    ProjectCard(
+                        project: item.project,
+                        computerName: severalShown ? item.computer.name : nil,
+                        preview: { fleet.directory(for: $0.hostId)?.previews[$0.id] },
+                        observedAt: { fleet.directory(for: $0.hostId)?.statusObservedAt[$0.id] },
+                        onOpen: { openAgent($0) },
+                        onShowFiles: { filesAgent = $0 },
+                        onShowPreview: { previewAgent = $0 },
+                        onNewWorktree: { project in
+                            newWorktreeIn = (hostId: item.computer.id, path: project.path)
+                            showingNewAgent = true
+                        },
+                        onOpenWorktree: { worktree in
+                            sourceControlTarget = SourceControlTarget(hostId: item.computer.id, repoName: item.project.name, worktree: worktree)
+                        }
+                    )
+                }
             }
         }
     }
@@ -433,10 +428,6 @@ struct SessionsView: View {
         let repoName: String
         let worktree: HomeWorktree
         var id: String { "\(hostId)|\(worktree.id)" }
-    }
-
-    private var homeLayout: HomeLayout {
-        layouts.layout(for: homeInputs)
     }
 
     private var homeInputs: [HomeHostInput] {
@@ -465,14 +456,6 @@ struct SessionsView: View {
     private func computerLabel(for hostId: String) -> String? {
         guard fleet.hosts.count > 1 else { return nil }
         return computerName(for: hostId)
-    }
-
-    // A folder on a computer: two computers can hold the same path, so the
-    // list identity is both.
-    private struct HomeProjectItem: Identifiable {
-        let computer: HomeComputer
-        let project: HomeProject
-        var id: String { "\(computer.id)|\(project.id)" }
     }
 
     // One agent to decide on, keyed by host + pane so two computers'
@@ -517,23 +500,6 @@ struct SessionsView: View {
                 }
             }
         #endif
-    }
-}
-
-// The last grouping and the input it was made from. Deliberately not
-// observable, and deliberately not @State + .onChange: measured 2026-09-03,
-// that state write cost the home a second body pass per snapshot (30 -> 62
-// per minute) to save one regrouping.
-@MainActor
-final class HomeLayoutCache {
-    private var inputs: [HomeHostInput]?
-    private var cached = HomeLayout(needsYou: [], computers: [])
-
-    func layout(for inputs: [HomeHostInput]) -> HomeLayout {
-        guard inputs != self.inputs else { return cached }
-        self.inputs = inputs
-        cached = HomeGrouping.layout(hosts: inputs)
-        return cached
     }
 }
 

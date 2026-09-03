@@ -1,5 +1,4 @@
-// Over the 600-line line; split by screen in #101, which removes this line.
-// swiftlint:disable file_length
+// swiftlint:disable file_length - over the 600-line line; removed when #101 splits this suite by screen.
 
 import XCTest
 

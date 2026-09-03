@@ -105,7 +105,7 @@ private extension HostPreviewClient.Outcome {
         return nil
     }
 
-    var refusal: PreviewRefusal? {
+    var refusal: Refusal? {
         if case let .refused(_, refusal) = self { return refusal }
         return nil
     }

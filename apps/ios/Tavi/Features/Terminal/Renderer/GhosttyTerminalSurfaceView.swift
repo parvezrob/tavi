@@ -113,9 +113,11 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         configuration.platform_tag = GHOSTTY_PLATFORM_IOS
         configuration.platform = ghostty_platform_u(
             ios: ghostty_platform_ios_s(
+                // Unretained: Ghostty holds this pointer until ghostty_surface_free, which only shutdown() calls, and deinit asserts shutdown() ran — so the view outlives the surface.
                 uiview: Unmanaged.passUnretained(self).toOpaque()
             )
         )
+        // Unretained for the same reason, and handed back only to callbacks the surface makes before that free.
         configuration.userdata = Unmanaged.passUnretained(self).toOpaque()
         configuration.scale_factor = traitCollection.displayScale
         configuration.font_size = Float(self.fontSize)
@@ -132,6 +134,7 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         ghostty_surface_set_write_callback(
             surface,
             ghosttySurfaceWrite,
+            // Unretained: `callback` is this view's own stored property, and shutdown() clears this pointer (set_write_callback(nil)) before freeing the surface.
             Unmanaged.passUnretained(callback).toOpaque()
         )
 

@@ -122,7 +122,7 @@ private extension HostFilesClient.Outcome {
         return nil
     }
 
-    var refusal: FileRefusal? {
+    var refusal: Refusal? {
         if case let .refused(_, refusal) = self { return refusal }
         return nil
     }

@@ -24,14 +24,10 @@ struct HostFilesClient: Sendable {
         HostClient.Sentences(answer: answer, tooOld: tooOld, genericNotFound: .isARefusal)
     }
 
-    enum Outcome<Value: Sendable>: Sendable {
-        case value(Value)
-        // The host answered with a reason (a refusal, a missing file, not a
-        // repository); the words are the host's and can be shown as-is.
-        case refused(status: Int, FileRefusal)
-        // No usable answer: network, or a shape this client cannot read.
-        case failure(String)
-    }
+    // The refusal (a missing file, not a repository) carries which kind of
+    // file and how big, not only the sentence, so the sheet can say
+    // "binary, 2.3 MB".
+    typealias Outcome<Value: Sendable> = HostClient.Outcome<Value, FileRefusal>
 
     func changes(cwd: String) async -> Outcome<ChangesResponse> {
         await get("/api/changes", query: ["cwd": cwd])
@@ -63,7 +59,7 @@ struct HostFilesClient: Sendable {
             return .failure(reason)
         case let .answered(status, body, mime):
             guard status == 200 else {
-                return Self.outcome(HostClient.refusal(status: status, body: body, saying: Self.sentences(answer: "a file answer")))
+                return HostClient.outcome(HostClient.refusal(status: status, body: body, saying: Self.sentences(answer: "a file answer")))
             }
             return .value((body, mime))
         }
@@ -81,25 +77,11 @@ struct HostFilesClient: Sendable {
         case let .failure(reason):
             return .failure(reason)
         case let .answered(status, body, _):
-            return Self.outcome(HostClient.reply(status: status, body: body, saying: Self.sentences(answer: "an upload answer")))
+            return HostClient.outcome(HostClient.reply(status: status, body: body, saying: Self.sentences(answer: "an upload answer")))
         }
     }
 
     private func get<Value: Decodable & Sendable>(_ path: String, query: [String: String]) async -> Outcome<Value> {
-        Self.outcome(await client.fetch("GET", path, query: query, saying: Self.sentences(answer: "a file answer")))
-    }
-
-    // The refusal carries which kind of file and how big, not only the
-    // sentence, so the sheet can say "binary, 2.3 MB".
-    private static func outcome<Value: Sendable>(_ reply: HostClient.Reply<Value>) -> Outcome<Value> {
-        switch reply {
-        case let .value(value):
-            return .value(value)
-        case let .refused(status, sentence, body):
-            guard let refusal = try? JSONDecoder().decode(FileRefusal.self, from: body) else { return .failure(sentence) }
-            return .refused(status: status, refusal)
-        case let .failure(reason):
-            return .failure(reason)
-        }
+        HostClient.outcome(await client.fetch("GET", path, query: query, saying: Self.sentences(answer: "a file answer")))
     }
 }

@@ -52,6 +52,34 @@ struct HostClient: Sendable {
         case failure(String)
     }
 
+    // What a feature's routes answer with, once it has read the reply. The
+    // refusal shape is the feature's own — a file's kind and size, a
+    // preview door's state — so it is the parameter (#104).
+    // HostSourceControlClient keeps its own `Outcome` with a String: it
+    // reads no body beyond the sentence, so it has no shape to name here.
+    enum Outcome<Value: Sendable, Refusal: Decodable & Sendable>: Sendable {
+        case value(Value)
+        // The host answered with a reason; the words are the host's and can
+        // be shown as-is, and `Refusal` carries the fields beside them.
+        case refused(status: Int, Refusal)
+        // No usable answer: network, or a shape this client cannot read.
+        case failure(String)
+    }
+
+    // A refusal whose body does not carry the feature's own shape keeps the
+    // host's sentence, which is always there, and nothing more.
+    static func outcome<Value: Sendable, Refusal: Decodable & Sendable>(_ reply: Reply<Value>) -> Outcome<Value, Refusal> {
+        switch reply {
+        case let .value(value):
+            return .value(value)
+        case let .refused(status, sentence, body):
+            guard let refusal = try? JSONDecoder().decode(Refusal.self, from: body) else { return .failure(sentence) }
+            return .refused(status: status, refusal)
+        case let .failure(reason):
+            return .failure(reason)
+        }
+    }
+
     // The bytes as the host sent them, with its content type.
     enum Answer: Sendable {
         case answered(status: Int, body: Data, mime: String)

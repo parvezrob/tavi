@@ -107,6 +107,7 @@ final class GhosttyWriteCallback: @unchecked Sendable {
 // background queue keeps VT parsing (and the grid read behind the
 // accessibility transcript) out of the main thread's way, so keyboard and
 // touch handling stay responsive during agent redraw storms.
+// The invariant `@unchecked Sendable` rests on: after init, every stored property below is read and written only on `queue`, and the `…OnQueue` suffix marks the methods that already run there.
 final class GhosttyOutputPump: @unchecked Sendable {
     // Ghostty's feed path and its render thread share one unfair lock, so
     // feeding chunk-after-chunk with no gap can starve rendering entirely.
@@ -251,6 +252,7 @@ func ghosttySurfaceWrite(
     _ count: Int
 ) {
     guard let userdata, let bytes, count > 0 else { return }
+    // Unretained, and safe only while the surface still holds the pointer: the view keeps `callback` alive and clears it in shutdown() before ghostty_surface_free.
     let callback = Unmanaged<GhosttyWriteCallback>
         .fromOpaque(userdata)
         .takeUnretainedValue()

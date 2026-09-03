@@ -197,13 +197,25 @@ private struct TextFileView: View {
 struct MarkdownBlocksView: View {
     let markdown: String
 
+    // Splitting the file into blocks is a scan of the whole text; in
+    // `body` it ran again on every redraw, including each scroll (#104).
+    // Seeded here rather than in a .task so the first frame is the
+    // rendered file, not a blank one.
+    @State private var parsed: [Block]
+
+    init(markdown: String) {
+        self.markdown = markdown
+        _parsed = State(initialValue: Self.blocks(markdown))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(Array(Self.blocks(markdown).enumerated()), id: \.offset) { _, block in
+            ForEach(Array(parsed.enumerated()), id: \.offset) { _, block in
                 blockView(block)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onChange(of: markdown) { parsed = Self.blocks($1) }
     }
 
     enum Block: Equatable {

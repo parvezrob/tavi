@@ -1,30 +1,22 @@
 import SwiftUI
 
 // The two reading tabs of the Source Control sheet (#77; PRD §7.12). Both
-// are drawing only: the sheet beside this file owns the state they show and
-// runs the work their buttons ask for (#100).
+// are drawing only: they read the sheet's draft and hand a tap back to it,
+// and the draft is the one thing they take (#100, #104).
 
 // Per the canvas: no pull request → a title, the sentence that says
 // creating pushes first, one amber Create, and "Link an existing one".
 // With one → its title and state, one amber Open in GitHub. Trouble
 // with gh on the computer is the host's sentence, and no button.
 struct PullRequestTab: View {
-    let pullRequest: Loadable<PullRequestStatus>
+    @Bindable var draft: SourceControlDraft
     let computerName: String?
-    // The branch this one would open against, from the sheet's status.
-    let base: String
-    let notice: String?
-    @Binding var title: String
-    let creating: Bool
-    let linking: Bool
-    let onCreate: () -> Void
-    let onLink: () -> Void
 
     @Environment(\.openURL) private var openURL
 
     @ViewBuilder
     var body: some View {
-        switch pullRequest {
+        switch draft.pullRequest {
         case .loading:
             LoadingRow("Asking GitHub on \(computerName ?? "the computer")…", font: .subheadline)
         case let .failed(reason):
@@ -46,7 +38,7 @@ struct PullRequestTab: View {
                     } else {
                         noPullRequest(status)
                     }
-                    if let notice {
+                    if let notice = draft.pullRequestNotice {
                         Text(notice)
                             .font(.footnote)
                             .foregroundStyle(TaviTheme.textSecondary)
@@ -75,7 +67,7 @@ struct PullRequestTab: View {
                 // Prefilled from the newest commit over the base: with
                 // several commits gh would otherwise title the pull request
                 // after the branch (`demo/79 pr`) (#83). Cleared, gh fills.
-                TextField("Title", text: $title, axis: .vertical)
+                TextField("Title", text: $draft.pullRequestTitle, axis: .vertical)
                     .lineLimit(1...3)
                     .font(.subheadline)
                     .foregroundStyle(TaviTheme.textPrimary)
@@ -85,15 +77,15 @@ struct PullRequestTab: View {
                     .background(TaviTheme.groupFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .padding(.top, 20)
                     .accessibilityIdentifier("sourceControl.pr.title")
-                Button(creating ? "Creating…" : "Create pull request", action: onCreate)
+                Button(draft.creatingPullRequest ? "Creating…" : "Create pull request") { draft.createPullRequest() }
                     .buttonStyle(.taviProminent)
-                    .disabled(creating || linking)
+                    .disabled(draft.creatingPullRequest || draft.linking)
                     .padding(.top, TaviTheme.Spacing.screen)
                     .accessibilityIdentifier("sourceControl.pr.create")
-                Button(linking ? "Linking…" : "Link an existing one", action: onLink)
+                Button(draft.linking ? "Linking…" : "Link an existing one") { draft.askForLink() }
                     .font(.subheadline)
                     .foregroundStyle(TaviTheme.textSecondary)
-                    .disabled(creating || linking)
+                    .disabled(draft.creatingPullRequest || draft.linking)
                     .padding(.top, TaviTheme.Spacing.screen)
                     .padding(.leading, 4)
                     .accessibilityIdentifier("sourceControl.pr.link")
@@ -105,7 +97,7 @@ struct PullRequestTab: View {
         guard status.branch != nil else { return "This worktree is not on a branch, so there is nothing to open a pull request for." }
         guard let remote = status.remote else { return "This repository has no remote, so there is nowhere to open a pull request. Add one on the computer first." }
         switch status.unpushed {
-        case 0: return "Everything on this branch is on \(remote). Creating a pull request opens it against \(base)."
+        case 0: return "Everything on this branch is on \(remote). Creating a pull request opens it against \(draft.worktreeBase)."
         case 1: return "1 commit on this branch isn't on \(remote). Creating a pull request pushes it first."
         default: return "\(status.unpushed) commits on this branch aren't on \(remote). Creating a pull request pushes them first."
         }
@@ -165,18 +157,13 @@ struct PullRequestTab: View {
 // "N BEHIND MAIN · Pull main in" over the base's. Both actions are
 // text in the section header — the tab's job is reading the list.
 struct CommitsTab: View {
-    let log: Loadable<WorktreeLog>
+    let draft: SourceControlDraft
     let worktreeTitle: String
     let computerName: String?
-    let notice: String?
-    let pushing: Bool
-    let pulling: Bool
-    let onPush: () -> Void
-    let onPullBase: () -> Void
 
     @ViewBuilder
     var body: some View {
-        switch log {
+        switch draft.log {
         case .loading:
             LoadingRow("Reading commits on \(computerName ?? "the computer")…", font: .subheadline)
         case let .failed(reason):
@@ -196,8 +183,8 @@ struct CommitsTab: View {
                                 }
                             } header: {
                                 SectionHeader(title: log.ahead.count == 1 ? "1 ahead of \(base)" : "\(log.ahead.count) ahead of \(base)") {
-                                    Button(pushLabel(log), action: onPush)
-                                        .disabled(pushing || pulling || !canPush(log))
+                                    Button(pushLabel(log)) { draft.push() }
+                                        .disabled(draft.pushing || draft.pulling || !canPush(log))
                                         .accessibilityIdentifier("sourceControl.push")
                                 }
                             } footer: {
@@ -212,8 +199,8 @@ struct CommitsTab: View {
                                 }
                             } header: {
                                 SectionHeader(title: log.behind.count == 1 ? "1 behind \(base)" : "\(log.behind.count) behind \(base)") {
-                                    Button(pulling ? "Pulling…" : "Pull \(base) in", action: onPullBase)
-                                        .disabled(pushing || pulling)
+                                    Button(draft.pulling ? "Pulling…" : "Pull \(base) in") { draft.pullBase() }
+                                        .disabled(draft.pushing || draft.pulling)
                                         .accessibilityIdentifier("sourceControl.pullBase")
                                 }
                             }
@@ -222,7 +209,7 @@ struct CommitsTab: View {
                     .listStyle(.insetGrouped)
                     .scrollContentBackground(.hidden)
                 }
-                if let notice {
+                if let notice = draft.commitsNotice {
                     Text(notice)
                         .font(.footnote)
                         .foregroundStyle(TaviTheme.textSecondary)
@@ -261,7 +248,7 @@ struct CommitsTab: View {
     }
 
     private func pushLabel(_ log: WorktreeLog) -> String {
-        if pushing { return "Pushing…" }
+        if draft.pushing { return "Pushing…" }
         if log.upstream == nil, log.remote == nil { return "No remote" }
         if let upstream = log.upstream, upstream.ahead == 0 { return "Pushed" }
         return "Push"
@@ -274,7 +261,7 @@ struct SourceControlHeader: View {
     let repoName: String
     let computerName: String?
     let worktree: HomeWorktree
-    let status: Loadable<WorktreeStatus>
+    let draft: SourceControlDraft
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -300,7 +287,7 @@ struct SourceControlHeader: View {
     }
 
     private var syncSuffix: String {
-        guard case let .loaded(status) = status, let base = status.base else { return "" }
+        guard case let .loaded(status) = draft.status, let base = status.base else { return "" }
         var parts: [String] = []
         if status.ahead > 0 { parts.append("↑\(status.ahead)") }
         if status.behind > 0 { parts.append("↓\(status.behind)") }

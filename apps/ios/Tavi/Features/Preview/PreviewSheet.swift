@@ -14,9 +14,11 @@ struct PreviewSheet: View {
     let agent: AgentSummary
     let client: HostPreviewClient?
     let computerName: String?
-    // The terminal's transcript when opened from a terminal: the ports it
-    // mentions are offered before the host is asked anything.
-    let transcript: String?
+    // The ports the terminal has talked about, already scanned and
+    // debounced by its controller (#68 phone 1): they are offered before
+    // the host is asked anything. Empty from the home, which has no
+    // transcript to read.
+    let mentionedPorts: [Int]
 
     @Environment(\.dismiss) private var dismiss
     @State private var stage: Stage = .choosing
@@ -40,10 +42,6 @@ struct PreviewSheet: View {
     private var folderName: String {
         let name = (agent.cwd as NSString).lastPathComponent
         return name.isEmpty ? "this folder" : name
-    }
-
-    private var mentionedPorts: [Int] {
-        transcript.map(LocalhostPortScanner.scan) ?? []
     }
 
     var body: some View {
@@ -182,12 +180,12 @@ struct PreviewSheet: View {
                 }
 
                 section("Another port") {
-                    HStack(spacing: 12) {
+                    HStack(spacing: TaviTheme.Spacing.snug) {
                         TextField("5173", text: $typedPort)
                             .keyboardType(.numberPad)
                             .font(.body.monospacedDigit())
                             .textFieldStyle(.plain)
-                            .padding(.horizontal, 12)
+                            .padding(.horizontal, TaviTheme.Spacing.snug)
                             .padding(.vertical, 10)
                             .background(TaviTheme.well, in: RoundedRectangle(cornerRadius: TaviTheme.wellRadius))
                             .accessibilityIdentifier("preview.port.field")
@@ -202,11 +200,11 @@ struct PreviewSheet: View {
                         .disabled(Int(typedPort).map { !(1...65_535).contains($0) } ?? true)
                         .accessibilityIdentifier("preview.port.open")
                     }
-                    .padding(12)
+                    .padding(TaviTheme.Spacing.snug)
                     .taviCard()
                 }
             }
-            .padding(16)
+            .padding(TaviTheme.Spacing.screen)
         }
         .accessibilityIdentifier("preview.chooser")
     }
@@ -227,7 +225,7 @@ struct PreviewSheet: View {
         Button {
             Task { await proceed(to: server) }
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: TaviTheme.Spacing.snug) {
                 Image(systemName: "globe")
                     .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(TaviTheme.accent)
@@ -248,8 +246,8 @@ struct PreviewSheet: View {
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(TaviTheme.textSecondary)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .padding(.horizontal, TaviTheme.Spacing.card)
+            .padding(.vertical, TaviTheme.Spacing.snug)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -262,7 +260,7 @@ struct PreviewSheet: View {
     private func consent(_ server: PreviewServer) -> some View {
         VStack(spacing: 0) {
             Spacer()
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: TaviTheme.Spacing.card) {
                 Image(systemName: "globe")
                     .font(.system(size: 30, weight: .medium))
                     .foregroundStyle(TaviTheme.accent)
@@ -273,7 +271,7 @@ struct PreviewSheet: View {
                     .font(.callout)
                     .foregroundStyle(TaviTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 12) {
+                HStack(spacing: TaviTheme.Spacing.snug) {
                     Button("Not now") { stage = .choosing }
                         .buttonStyle(.bordered)
                         .accessibilityIdentifier("preview.consent.cancel")
@@ -291,7 +289,7 @@ struct PreviewSheet: View {
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
             .taviCard()
-            .padding(16)
+            .padding(TaviTheme.Spacing.screen)
             Spacer()
             Spacer()
         }
@@ -342,7 +340,7 @@ struct PreviewSheet: View {
                 .accessibilityIdentifier("preview.web")
             }
             if let banner = pageBanner(server) {
-                HStack(spacing: 12) {
+                HStack(spacing: TaviTheme.Spacing.snug) {
                     Text(banner.text)
                         .font(.footnote)
                         .foregroundStyle(TaviTheme.textPrimary)
@@ -357,11 +355,11 @@ struct PreviewSheet: View {
                             .accessibilityIdentifier("preview.reopen")
                     }
                 }
-                .padding(12)
+                .padding(TaviTheme.Spacing.snug)
                 .frame(maxWidth: .infinity)
                 .background(TaviTheme.card, in: RoundedRectangle(cornerRadius: TaviTheme.cardRadius))
                 .overlay(RoundedRectangle(cornerRadius: TaviTheme.cardRadius).stroke(TaviTheme.hairline))
-                .padding(12)
+                .padding(TaviTheme.Spacing.snug)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("preview.banner")
             }
@@ -414,9 +412,9 @@ struct PreviewSheet: View {
     // MARK: - Failure
 
     private func failure(_ message: String, retry server: PreviewServer?) -> some View {
-        VStack(spacing: 14) {
+        VStack(spacing: TaviTheme.Spacing.card) {
             MessageCard(message, identifier: "preview.failed", fillsTab: false)
-            HStack(spacing: 12) {
+            HStack(spacing: TaviTheme.Spacing.snug) {
                 Button("Choose a port") { stage = .choosing }
                     .buttonStyle(.bordered)
                 if let server {

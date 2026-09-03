@@ -36,7 +36,7 @@ struct FilesSheet: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
+                .padding(.horizontal, TaviTheme.Spacing.screen)
                 .padding(.vertical, 10)
                 .accessibilityIdentifier("files.tabs")
 
@@ -117,7 +117,7 @@ struct FilesSheet: View {
     }
 
     private func changedRow(_ file: ChangedFile) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: TaviTheme.Spacing.snug) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(file.name)
                     .font(.subheadline.weight(.medium))
@@ -143,7 +143,7 @@ struct FilesSheet: View {
                     .font(.caption)
                     .foregroundStyle(TaviTheme.textSecondary)
             } else if let additions = file.additions, let deletions = file.deletions {
-                HStack(spacing: 6) {
+                HStack(spacing: TaviTheme.Spacing.tight) {
                     Text("+\(additions)")
                         .foregroundStyle(TaviTheme.statusDone)
                     Text("−\(deletions)")
@@ -228,7 +228,7 @@ struct FilesSheet: View {
                     title: stat.name
                 )
             } label: {
-                HStack(spacing: 12) {
+                HStack(spacing: TaviTheme.Spacing.snug) {
                     Image(systemName: stat.preview == .directory ? "folder" : "doc.text")
                         .foregroundStyle(TaviTheme.textSecondary)
                     VStack(alignment: .leading, spacing: 2) {
@@ -253,7 +253,7 @@ struct FilesSheet: View {
         } else {
             // Refused, and said so: hiding it would make the list lie about
             // what the agent talked about.
-            HStack(spacing: 12) {
+            HStack(spacing: TaviTheme.Spacing.snug) {
                 Image(systemName: "lock")
                     .foregroundStyle(TaviTheme.textSecondary)
                 VStack(alignment: .leading, spacing: 2) {
@@ -389,7 +389,7 @@ struct BrowseView: View {
                     .padding(20)
                     .frame(maxWidth: .infinity)
                     .taviCard()
-                    .padding(16)
+                    .padding(TaviTheme.Spacing.screen)
                 Spacer()
             case let .loaded(directory):
                 List {
@@ -425,7 +425,7 @@ struct BrowseView: View {
     }
 
     private func entryRow(_ entry: DirectoryEntry) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: TaviTheme.Spacing.snug) {
             Image(systemName: entry.isDirectory ? "folder" : glyph(for: entry.preview))
                 .foregroundStyle(TaviTheme.textSecondary)
                 .frame(width: 20)

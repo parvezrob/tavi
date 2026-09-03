@@ -55,10 +55,17 @@ enum TaviTheme {
         static let tight: CGFloat = 6
         // Inside a row: the gap that separates lines of one thought.
         static let snug: CGFloat = 12
-        // A card's own inset, which is also the radius it is cut with.
+        // A card's own inset, which is also the radius it is cut with, and
+        // the air it keeps between the blocks it stacks.
         static let card: CGFloat = 14
         // The margin of a screen or a sheet.
         static let screen: CGFloat = 16
+        // 8 and 20 are deliberately not steps (counted 2026-09-04, #104):
+        // 8 is 39 sites — an inline gap beside a glyph, a header over its
+        // cards, a pill's own vertical padding — and 20 is 17 — a block's
+        // inset, air above a control, the home's gap between sections.
+        // Neither is one role, so a name for either would look like a
+        // decision nothing made.
     }
 }
 

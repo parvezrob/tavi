@@ -1,5 +1,4 @@
-// Over the 400-line line; split on its own seams in #101, which removes this line.
-// swiftlint:disable file_length
+// swiftlint:disable file_length - over the 400-line line; removed when #101 splits this suite on its own seams.
 
 import Foundation
 @testable import Tavi

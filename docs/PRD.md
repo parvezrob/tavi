@@ -200,7 +200,7 @@ The everyday case is a phone on a mobile network: 40–120 ms round trips, a pat
 
 ### 7.15 Design pass close-out (#54 with #52, 2026-09-03)
 
-The audit, the P1/P2 pass, and the direction correction (pure graphite, one amber) are on the issue; `TaviTheme.swift` is the one source of colour, radius, and spacing. What the close-out fixed and keeps:
+The audit, the P1/P2 pass, and the direction correction (pure graphite, one amber) are on the issue; `TaviTheme.swift` is the one source of colour, radius, and a spacing scale for insets (inline gaps stay literal). What the close-out fixed and keeps:
 
 - **Section labels** are 12 pt small caps with wide tracking, one `SectionHeader` on the home and in every sheet; its trailing slot holds a section's one quiet action (Stage all, Push, Pull main in) so no sheet re-draws the register by hand.
 - **A raised group** (a worktree inside its card) is a hair lighter than the card with a 1 pt highlight along its top edge that fades out down the first 16 pt of its sides — drawn, never a hit target — so the corners stay 1 pt (a flat 1.5 pt slice through the curve thickened them) and a tap at the group's edge reaches the row beneath.

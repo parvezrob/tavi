@@ -22,14 +22,9 @@ struct HostPreviewClient: Sendable {
 
     private static let sentences = HostClient.Sentences(answer: "a preview answer", tooOld: tooOld)
 
-    enum Outcome<Value: Sendable>: Sendable {
-        case value(Value)
-        // The host answered with a reason; the words are the host's and can
-        // be shown as-is.
-        case refused(status: Int, PreviewRefusal)
-        // No usable answer: network, or a shape this client cannot read.
-        case failure(String)
-    }
+    // The refusal carries the door's state beyond the sentence, so the
+    // sheet can tell a missing door from a port it may not reach.
+    typealias Outcome<Value: Sendable> = HostClient.Outcome<Value, PreviewRefusal>
 
     // The computer's name as the web view will address it, and the door's
     // address: `https://<name>.ts.net:<doorPort>/`. Same host as the API,
@@ -71,20 +66,6 @@ struct HostPreviewClient: Sendable {
     }
 
     private func send<Value: Decodable & Sendable>(_ method: String, _ path: String, query: [String: String], body: [String: Any]?) async -> Outcome<Value> {
-        Self.outcome(await client.fetch(method, path, query: query, body: body, saying: Self.sentences))
-    }
-
-    // The refusal carries the door's state beyond the sentence, so the
-    // sheet can tell a missing door from a port it may not reach.
-    private static func outcome<Value: Sendable>(_ reply: HostClient.Reply<Value>) -> Outcome<Value> {
-        switch reply {
-        case let .value(value):
-            return .value(value)
-        case let .refused(status, sentence, body):
-            guard let refusal = try? JSONDecoder().decode(PreviewRefusal.self, from: body) else { return .failure(sentence) }
-            return .refused(status: status, refusal)
-        case let .failure(reason):
-            return .failure(reason)
-        }
+        HostClient.outcome(await client.fetch(method, path, query: query, body: body, saying: Self.sentences))
     }
 }
