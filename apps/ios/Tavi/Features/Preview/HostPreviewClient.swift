@@ -6,17 +6,17 @@ import Foundation
 // calls only; the web view gets a *ticket* the host minted, never the
 // credential itself.
 struct HostPreviewClient: Sendable {
-    let endpoint: HostEndpoint
-    private let credential: String
+    private let client: HostClient
 
     init(endpoint: HostEndpoint, credential: String) {
-        self.endpoint = endpoint
-        self.credential = credential
+        client = HostClient(endpoint: endpoint, credential: credential)
     }
 
-    // Same no-disk-trace policy as the directory's requests (#36).
-    // One pool for the whole app (#86); this client's budget rides on each request.
-    private static var session: URLSession { HostSession.shared }
+    var endpoint: HostEndpoint { client.endpoint }
+
+    static let tooOld = "This computer's Tavi host is too old to show dev servers. Update it with `npx tavi-host update`."
+
+    private static let sentences = HostClient.Sentences(answer: "a preview answer", tooOld: tooOld)
 
     enum Outcome<Value: Sendable>: Sendable {
         case value(Value)
@@ -58,8 +58,8 @@ struct HostPreviewClient: Sendable {
 
     // Fire-and-forget on dismiss; the host would also let it lapse.
     func close(id: String) async {
-        guard let request = request("DELETE", "/api/preview/\(id)", query: [:], body: nil) else { return }
-        _ = try? await Self.session.data(for: request)
+        guard let request = client.request("DELETE", "/api/preview/\(id)") else { return }
+        _ = await client.send(request)
     }
 
     func stop(cwd: String, port: Int) async -> Outcome<PreviewStopped> {
@@ -67,48 +67,20 @@ struct HostPreviewClient: Sendable {
     }
 
     private func send<Value: Decodable & Sendable>(_ method: String, _ path: String, query: [String: String], body: [String: Any]?) async -> Outcome<Value> {
-        guard let request = request(method, path, query: query, body: body) else { return .failure("The host address is invalid.") }
-        do {
-            let (data, response) = try await Self.session.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return .failure("The host did not answer.") }
-            guard (200..<300).contains(http.statusCode) else { return Self.refusal(status: http.statusCode, data: data) }
-            do {
-                return .value(try JSONDecoder().decode(Value.self, from: data))
-            } catch {
-                return .failure("This host sent a preview answer Tavi does not understand. Update the Tavi host and the app to matching versions.")
-            }
-        } catch {
-            return .failure(error.localizedDescription)
-        }
+        Self.outcome(await client.fetch(method, path, query: query, body: body, saying: Self.sentences))
     }
 
-    private static func refusal<Value>(status: Int, data: Data) -> Outcome<Value> {
-        if let refusal = try? JSONDecoder().decode(PreviewRefusal.self, from: data) {
-            // An older host answers 404 with its generic "Not found." — that
-            // is not a preview that ended, it is a host without the feature.
-            if status == 404, refusal.error == "Not found." {
-                return .failure(Self.tooOld)
-            }
+    // The refusal carries the door's state beyond the sentence, so the
+    // sheet can tell a missing door from a port it may not reach.
+    private static func outcome<Value: Sendable>(_ reply: HostClient.Reply<Value>) -> Outcome<Value> {
+        switch reply {
+        case let .value(value):
+            return .value(value)
+        case let .refused(status, sentence, body):
+            guard let refusal = try? JSONDecoder().decode(PreviewRefusal.self, from: body) else { return .failure(sentence) }
             return .refused(status: status, refusal)
+        case let .failure(reason):
+            return .failure(reason)
         }
-        if status == 404 { return .failure(Self.tooOld) }
-        return .failure("The host could not answer (HTTP \(status)).")
-    }
-
-    static let tooOld = "This computer's Tavi host is too old to show dev servers. Update it with `npx tavi-host update`."
-
-    private func request(_ method: String, _ path: String, query: [String: String], body: [String: Any]?) -> URLRequest? {
-        guard var components = URLComponents(url: endpoint.baseURL, resolvingAgainstBaseURL: false) else { return nil }
-        components.path = path
-        components.queryItems = query.isEmpty ? nil : query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
-        guard let url = components.url else { return nil }
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
-        if let body {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        }
-        return request
     }
 }

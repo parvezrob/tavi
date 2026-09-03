@@ -224,13 +224,13 @@ struct SourceControlSheet: View {
     private var changesTab: some View {
         switch status {
         case .loading:
-            loadingRow("Reading changes on \(computerName ?? "the computer")…")
+            LoadingRow("Reading changes on \(computerName ?? "the computer")…", font: .subheadline)
         case let .failed(reason):
-            messageCard(reason, identifier: "sourceControl.failed")
+            MessageCard(reason, identifier: "sourceControl.failed", font: .subheadline)
         case let .loaded(status):
             VStack(spacing: 0) {
                 if status.files.isEmpty {
-                    messageCard("Nothing uncommitted on \(worktree.info.title).", identifier: "sourceControl.empty")
+                    MessageCard("Nothing uncommitted on \(worktree.info.title).", identifier: "sourceControl.empty", font: .subheadline)
                 } else {
                     List {
                         Section {
@@ -394,9 +394,9 @@ struct SourceControlSheet: View {
     private var pullRequestTab: some View {
         switch pullRequest {
         case .loading:
-            loadingRow("Asking GitHub on \(computerName ?? "the computer")…")
+            LoadingRow("Asking GitHub on \(computerName ?? "the computer")…", font: .subheadline)
         case let .failed(reason):
-            messageCard(reason, identifier: "sourceControl.pr.failed")
+            MessageCard(reason, identifier: "sourceControl.pr.failed", font: .subheadline)
         case let .loaded(status):
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -595,14 +595,14 @@ struct SourceControlSheet: View {
     private var commitsTab: some View {
         switch log {
         case .loading:
-            loadingRow("Reading commits on \(computerName ?? "the computer")…")
+            LoadingRow("Reading commits on \(computerName ?? "the computer")…", font: .subheadline)
         case let .failed(reason):
-            messageCard(reason, identifier: "sourceControl.commitsFailed")
+            MessageCard(reason, identifier: "sourceControl.commitsFailed", font: .subheadline)
         case let .loaded(log):
             let base = log.base ?? "the base"
             VStack(spacing: 0) {
                 if log.ahead.isEmpty, log.behind.isEmpty {
-                    messageCard(log.base == nil ? "\(worktree.info.title) has no base branch to compare with." : "\(worktree.info.title) is level with \(base).", identifier: "sourceControl.commitsEmpty")
+                    MessageCard(log.base == nil ? "\(worktree.info.title) has no base branch to compare with." : "\(worktree.info.title) is level with \(base).", identifier: "sourceControl.commitsEmpty", font: .subheadline)
                 } else {
                     List {
                         if !log.ahead.isEmpty {
@@ -792,32 +792,5 @@ struct SourceControlSheet: View {
         case .value: notice = nil
         case let .refused(_, reason), let .failure(reason): notice = reason
         }
-    }
-
-    // MARK: - Shared
-
-    private func loadingRow(_ text: String) -> some View {
-        HStack(spacing: 10) {
-            ProgressView()
-            Text(text)
-                .font(.subheadline)
-                .foregroundStyle(TaviTheme.textSecondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func messageCard(_ text: String, identifier: String) -> some View {
-        VStack {
-            Text(text)
-                .font(.subheadline)
-                .foregroundStyle(TaviTheme.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(20)
-                .frame(maxWidth: .infinity)
-                .taviCard()
-                .accessibilityIdentifier(identifier)
-            Spacer()
-        }
-        .padding(16)
     }
 }

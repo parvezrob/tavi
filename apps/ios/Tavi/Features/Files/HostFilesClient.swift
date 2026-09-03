@@ -5,17 +5,20 @@ import Foundation
 // credential never leaves that owner. Every call is a GET; there is no
 // write here to misuse.
 struct HostFilesClient: Sendable {
-    let endpoint: HostEndpoint
-    private let credential: String
+    private let client: HostClient
 
     init(endpoint: HostEndpoint, credential: String) {
-        self.endpoint = endpoint
-        self.credential = credential
+        client = HostClient(endpoint: endpoint, credential: credential)
     }
 
-    // Same no-disk-trace policy as the directory's requests (#36).
-    // One pool for the whole app (#86); this client's budget rides on each request.
-    private static var session: URLSession { HostSession.shared }
+    private static let tooOld = "This computer's Tavi host is too old to show files. Update it with `npx tavi-host update`."
+
+    // A file route's own 404 is "No such file.", so the host's sentence
+    // stands as the refusal; a 404 with no sentence at all is an older host
+    // that has none of these routes, and says so rather than "404".
+    private static func sentences(answer: String) -> HostClient.Sentences {
+        HostClient.Sentences(answer: answer, tooOld: tooOld, genericNotFound: .isARefusal)
+    }
 
     enum Outcome<Value: Sendable>: Sendable {
         case value(Value)
@@ -48,77 +51,51 @@ struct HostFilesClient: Sendable {
 
     // Bytes of an image or PDF, with the host's content type.
     func raw(cwd: String, path: String) async -> Outcome<(data: Data, mime: String)> {
-        guard let request = request("/api/files/raw", query: ["cwd": cwd, "path": path]) else {
+        guard let request = client.request("GET", "/api/files/raw", query: ["cwd": cwd, "path": path]) else {
             return .failure("The host address is invalid.")
         }
-        do {
-            let (data, response) = try await Self.session.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return .failure("The host did not answer.") }
-            if http.statusCode == 200 {
-                return .value((data, http.value(forHTTPHeaderField: "Content-Type") ?? "application/octet-stream"))
+        switch await client.send(request) {
+        case let .failure(reason):
+            return .failure(reason)
+        case let .answered(status, body, mime):
+            guard status == 200 else {
+                return Self.outcome(HostClient.refusal(status: status, body: body, saying: Self.sentences(answer: "a file answer")))
             }
-            return Self.refusal(status: http.statusCode, data: data)
-        } catch {
-            return .failure(error.localizedDescription)
+            return .value((body, mime))
         }
     }
 
     // An image attached from the composer (#88): the body is the image,
     // the answer is where it landed on the computer.
     func upload(cwd: String, data: Data, mime: String) async -> Outcome<UploadReceipt> {
-        guard var request = request("/api/files/upload", query: ["cwd": cwd]) else { return .failure("The host address is invalid.") }
-        request.httpMethod = "POST"
-        request.timeoutInterval = 90
+        guard var request = client.request("POST", "/api/files/upload", query: ["cwd": cwd], timeout: 90) else {
+            return .failure("The host address is invalid.")
+        }
         request.setValue(mime, forHTTPHeaderField: "Content-Type")
         request.httpBody = data
-        do {
-            let (body, response) = try await Self.session.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return .failure("The host did not answer.") }
-            guard http.statusCode == 201 else { return Self.refusal(status: http.statusCode, data: body) }
-            do {
-                return .value(try JSONDecoder().decode(UploadReceipt.self, from: body))
-            } catch {
-                return .failure("This host sent an upload answer Tavi does not understand. Update the Tavi host and the app to matching versions.")
-            }
-        } catch {
-            return .failure(error.localizedDescription)
+        switch await client.send(request) {
+        case let .failure(reason):
+            return .failure(reason)
+        case let .answered(status, body, _):
+            return Self.outcome(HostClient.reply(status: status, body: body, saying: Self.sentences(answer: "an upload answer")))
         }
     }
 
     private func get<Value: Decodable & Sendable>(_ path: String, query: [String: String]) async -> Outcome<Value> {
-        guard let request = request(path, query: query) else { return .failure("The host address is invalid.") }
-        do {
-            let (data, response) = try await Self.session.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return .failure("The host did not answer.") }
-            guard http.statusCode == 200 else { return Self.refusal(status: http.statusCode, data: data) }
-            do {
-                return .value(try JSONDecoder().decode(Value.self, from: data))
-            } catch {
-                return .failure("This host sent a file answer Tavi does not understand. Update the Tavi host and the app to matching versions.")
-            }
-        } catch {
-            return .failure(error.localizedDescription)
-        }
+        Self.outcome(await client.fetch("GET", path, query: query, saying: Self.sentences(answer: "a file answer")))
     }
 
-    private static func refusal<Value>(status: Int, data: Data) -> Outcome<Value> {
-        if let refusal = try? JSONDecoder().decode(FileRefusal.self, from: data) {
+    // The refusal carries which kind of file and how big, not only the
+    // sentence, so the sheet can say "binary, 2.3 MB".
+    private static func outcome<Value: Sendable>(_ reply: HostClient.Reply<Value>) -> Outcome<Value> {
+        switch reply {
+        case let .value(value):
+            return .value(value)
+        case let .refused(status, sentence, body):
+            guard let refusal = try? JSONDecoder().decode(FileRefusal.self, from: body) else { return .failure(sentence) }
             return .refused(status: status, refusal)
+        case let .failure(reason):
+            return .failure(reason)
         }
-        // An older host has none of these routes: say so, not "404".
-        if status == 404 {
-            return .failure("This computer's Tavi host is too old to show files. Update it with `npx tavi-host update`.")
-        }
-        return .failure("The host could not answer (HTTP \(status)).")
-    }
-
-    private func request(_ path: String, query: [String: String]) -> URLRequest? {
-        guard var components = URLComponents(url: endpoint.baseURL, resolvingAgainstBaseURL: false) else { return nil }
-        components.path = path
-        components.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
-        guard let url = components.url else { return nil }
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
-        return request
     }
 }

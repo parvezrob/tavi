@@ -6,16 +6,16 @@ import Foundation
 // credential never leaves that owner. These are the first git *writes* the
 // phone can ask for; each is one explicit tap on the sheet.
 struct HostSourceControlClient: Sendable {
-    let endpoint: HostEndpoint
-    private let credential: String
+    private let client: HostClient
 
     init(endpoint: HostEndpoint, credential: String) {
-        self.endpoint = endpoint
-        self.credential = credential
+        client = HostClient(endpoint: endpoint, credential: credential)
     }
 
-    // One pool for the whole app (#86); this client's budget rides on each request.
-    private static var session: URLSession { HostSession.shared }
+    private static let sentences = HostClient.Sentences(
+        answer: "an answer",
+        tooOld: "This computer's Tavi host is too old for Source Control. Update it with `npx tavi-host update`."
+    )
 
     enum Outcome<Value: Sendable>: Sendable {
         case value(Value)
@@ -116,55 +116,26 @@ struct HostSourceControlClient: Sendable {
     }
 
     private func send<Value: Decodable & Sendable>(_ route: String, method: String, query: [String: String], body: [String: Any]?) async -> Outcome<Value> {
-        guard var components = URLComponents(url: endpoint.baseURL, resolvingAgainstBaseURL: false) else {
-            return .failure("The host address is invalid.")
-        }
-        components.path = route
-        if !query.isEmpty {
-            components.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
-        }
-        guard let url = components.url else { return .failure("The host address is invalid.") }
-        var request = URLRequest(url: url)
-        request.httpMethod = method
         // Reads answer in well under 20 s or the link is gone; writes (push,
         // pull, PR create, removal) may legitimately take a minute.
-        request.timeoutInterval = method == "GET" ? 20 : 90
-        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
-        if let body {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        }
-        do {
-            let (data, response) = try await Self.session.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return .failure("The host did not answer.") }
-            return Self.interpret(status: http.statusCode, data: data)
-        } catch {
-            return .failure(error.localizedDescription)
-        }
+        let reply: HostClient.Reply<Value> = await client.fetch(method, route, query: query, body: body, timeout: method == "GET" ? 20 : 90, saying: Self.sentences)
+        return Self.outcome(reply)
     }
 
-    // The host's answer as an Outcome. A route the host does not have
-    // answers `404 {"error":"Not found."}` — that is an old host, not a
-    // refusal, and the sentence says what to do about it (#81 review: the
-    // refusal decode used to run first, so this sentence never showed).
+    // The host's answer as an Outcome, with the sentence it sent.
     static func interpret<Value: Decodable>(status: Int, data: Data) -> Outcome<Value> {
-        guard (200...299).contains(status) else {
-            let refusal = try? JSONDecoder().decode(HostSentence.self, from: data)
-            if status == 404, refusal == nil || refusal?.error == "Not found." {
-                return .failure("This computer's Tavi host is too old for Source Control. Update it with `npx tavi-host update`.")
-            }
-            if let refusal { return .refused(status: status, refusal.error) }
-            return .failure("The host could not answer (HTTP \(status)).")
-        }
-        do {
-            return .value(try JSONDecoder().decode(Value.self, from: data))
-        } catch {
-            return .failure("This host sent an answer Tavi does not understand. Update the Tavi host and the app to matching versions.")
-        }
+        outcome(HostClient.reply(status: status, body: data, saying: sentences))
     }
 
-    private struct HostSentence: Decodable {
-        let error: String
+    private static func outcome<Value: Sendable>(_ reply: HostClient.Reply<Value>) -> Outcome<Value> {
+        switch reply {
+        case let .value(value):
+            return .value(value)
+        case let .refused(status, sentence, _):
+            return .refused(status: status, sentence)
+        case let .failure(reason):
+            return .failure(reason)
+        }
     }
 }
 

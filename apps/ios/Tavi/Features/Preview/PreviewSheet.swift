@@ -55,7 +55,7 @@ struct PreviewSheet: View {
                 case let .consent(server):
                     consent(server)
                 case let .opening(server):
-                    loadingRow("Opening localhost:\(server.port) on \(computerName ?? "the computer")…")
+                    LoadingRow("Opening localhost:\(server.port) on \(computerName ?? "the computer")…")
                 case let .open(opened, server):
                     page(opened, server)
                 case let .failed(message, server):
@@ -153,15 +153,15 @@ struct PreviewSheet: View {
             VStack(alignment: .leading, spacing: 18) {
                 switch candidates {
                 case .loading:
-                    loadingRow("Looking for dev servers in \(folderName) on \(computerName ?? "the computer")…")
+                    LoadingRow("Looking for dev servers in \(folderName) on \(computerName ?? "the computer")…")
                         .frame(maxHeight: 80)
                 case let .failed(message):
-                    messageCard(message, identifier: "preview.candidates.failed")
+                    MessageCard(message, identifier: "preview.candidates.failed", fillsTab: false)
                 case let .loaded(response):
                     if response.available == false, let reason = response.reason {
-                        messageCard(reason, identifier: "preview.candidates.unavailable")
+                        MessageCard(reason, identifier: "preview.candidates.unavailable", fillsTab: false)
                     } else if response.servers.isEmpty {
-                        messageCard("Nothing is listening in \(folderName) right now. Start a dev server in the terminal, or type a port below.", identifier: "preview.candidates.empty")
+                        MessageCard("Nothing is listening in \(folderName) right now. Start a dev server in the terminal, or type a port below.", identifier: "preview.candidates.empty", fillsTab: false)
                     } else {
                         section("Running in \(folderName)") {
                             ForEach(response.servers) { server in
@@ -415,7 +415,7 @@ struct PreviewSheet: View {
 
     private func failure(_ message: String, retry server: PreviewServer?) -> some View {
         VStack(spacing: 14) {
-            messageCard(message, identifier: "preview.failed")
+            MessageCard(message, identifier: "preview.failed", fillsTab: false)
             HStack(spacing: 12) {
                 Button("Choose a port") { stage = .choosing }
                     .buttonStyle(.bordered)
@@ -429,31 +429,6 @@ struct PreviewSheet: View {
             }
             Spacer()
         }
-    }
-
-    // MARK: - Bits
-
-    private func loadingRow(_ text: String) -> some View {
-        HStack(spacing: 10) {
-            ProgressView()
-            Text(text)
-                .font(.callout)
-                .foregroundStyle(TaviTheme.textSecondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func messageCard(_ text: String, identifier: String) -> some View {
-        Text(text)
-            .font(.callout)
-            .foregroundStyle(TaviTheme.textSecondary)
-            .multilineTextAlignment(.center)
-            .padding(20)
-            .frame(maxWidth: .infinity)
-            .taviCard()
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .accessibilityIdentifier(identifier)
     }
 }
 

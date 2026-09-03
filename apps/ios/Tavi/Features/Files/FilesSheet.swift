@@ -73,12 +73,12 @@ struct FilesSheet: View {
     private var changedList: some View {
         switch changes {
         case .loading:
-            loadingRow("Reading changes on \(computerName ?? "the computer")…")
+            LoadingRow("Reading changes on \(computerName ?? "the computer")…")
         case let .failed(message):
-            messageCard(message, identifier: "files.changes.failed")
+            MessageCard(message, identifier: "files.changes.failed")
         case let .loaded(response):
             if response.files.isEmpty {
-                messageCard(
+                MessageCard(
                     "Nothing uncommitted in \(HomeGrouping.projectName(of: response.repository))" + (response.branch.map { " on \($0)." } ?? "."),
                     identifier: "files.changes.empty"
                 )
@@ -188,12 +188,12 @@ struct FilesSheet: View {
     private var mentionedList: some View {
         switch mentioned {
         case .loading:
-            loadingRow("Looking for files the agent mentioned…")
+            LoadingRow("Looking for files the agent mentioned…")
         case let .failed(message):
-            messageCard(message, identifier: "files.mentioned.failed")
+            MessageCard(message, identifier: "files.mentioned.failed")
         case let .loaded(files):
             if files.isEmpty {
-                messageCard(
+                MessageCard(
                     transcript == nil
                         ? "Open the agent's terminal to see the files it mentions."
                         : "No file paths on this screen yet. Paths the agent prints — “I wrote the plan to docs/PLAN.md” — show up here.",
@@ -314,42 +314,9 @@ struct FilesSheet: View {
         mentioned = .loaded(files)
     }
 
-    // MARK: - Shared
-
-    private func loadingRow(_ text: String) -> some View {
-        HStack(spacing: 10) {
-            ProgressView()
-            Text(text)
-                .font(.callout)
-                .foregroundStyle(TaviTheme.textSecondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func messageCard(_ text: String, identifier: String) -> some View {
-        VStack {
-            Text(text)
-                .font(.callout)
-                .foregroundStyle(TaviTheme.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(20)
-                .frame(maxWidth: .infinity)
-                .taviCard()
-                .accessibilityIdentifier(identifier)
-            Spacer()
-        }
-        .padding(16)
-    }
-
     static func sizeLabel(_ bytes: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
-}
-
-enum Loadable<Value> {
-    case loading
-    case loaded(Value)
-    case failed(String)
 }
 
 // What the viewer opens: a file (content), one file's diff, a folder, or a

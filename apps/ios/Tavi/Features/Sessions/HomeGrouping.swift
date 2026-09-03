@@ -34,6 +34,8 @@ struct HomeProject: Identifiable, Equatable {
     // trailing slashes trimmed. The phone does not try to be cleverer about
     // paths than the host that produced them.
     let path: String
+    // Folded to "~" once here: the home draws it on every redraw (#92).
+    let abbreviatedPath: String
     let name: String
     // Agents in this folder that no worktree claims — every agent, for a
     // folder the host knows no repository for. Needs-you is rendered flat
@@ -45,7 +47,6 @@ struct HomeProject: Identifiable, Equatable {
     let worktrees: [HomeWorktree]
 
     var id: String { path }
-    var abbreviatedPath: String { path.abbreviatingHomeDirectory }
     var isRepository: Bool { !worktrees.isEmpty }
     var agentCount: Int {
         needsYou.count + active.count + recent.count + worktrees.reduce(0) { $0 + $1.agentCount }
@@ -252,6 +253,7 @@ enum HomeGrouping {
                     let loose = folderAgents[key] ?? []
                     return HomeProject(
                         path: key,
+                        abbreviatedPath: key.abbreviatingHomeDirectory,
                         name: repo.name,
                         needsYou: loose.filter { $0.homeSection == .needsYou },
                         active: loose.filter { $0.homeSection == .active },
@@ -270,6 +272,7 @@ enum HomeGrouping {
                 let members = folderAgents[key] ?? []
                 return HomeProject(
                     path: key,
+                    abbreviatedPath: key.abbreviatingHomeDirectory,
                     name: projectName(of: key),
                     needsYou: members.filter { $0.homeSection == .needsYou },
                     active: members.filter { $0.homeSection == .active },
@@ -378,6 +381,10 @@ extension String {
     // The path with the home prefix folded to "~" — the phone doesn't know
     // the host's home, so this is a display heuristic only.
     var abbreviatingHomeDirectory: String {
-        replacingOccurrences(of: "^/(?:Users|home)/[^/]+", with: "~", options: .regularExpression)
+        Self.homePrefix.stringByReplacingMatches(in: self, range: NSRange(startIndex..., in: self), withTemplate: "~")
     }
+
+    // Compiled once: a pattern that must not survive being wrong.
+    // swiftlint:disable:next force_try
+    private static let homePrefix = try! NSRegularExpression(pattern: "^/(?:Users|home)/[^/]+")
 }
