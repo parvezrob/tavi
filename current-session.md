@@ -2,11 +2,13 @@
 
 > Every agent starts here. This file holds the live state of the project *right now* and the next piece of work. Update it before ending a session (or at any significant milestone); move the previous state into [`handoffs.md`](./handoffs.md). Keep it short — details belong in the linked docs.
 
-**Last updated:** 2026-09-03 ~19:40 (session closed; **#54 and #52 closed** — design pass done, app icon picked; phone runs the #54 build 29327dc over USB, the Mac's service still the checkout at 14c75a4, which the host code still equals; **next work is #37**)
+**Last updated:** 2026-09-03 ~21:30 (live; **#54 #52 closed**, `testflight-1` tagged at 29327dc; **#69 under way with Opus sub-agents** — P1 #89 and P2 #90 closed (lint/format/fixtures on both sides); the host on the Mac is still 14c75a4 = 0.1.17, behaviour-identical to `main`'s host after the lint pass; **next: #69 P3 (server.ts split) and P4 (one HostClient + Features/Shared)**, in parallel, then P5, P6; #37 on the owner's side)
 
 ## Next work
 
-**1. #37 App Store readiness — START HERE.** The paid developer account (ends the 7-day profile), the privacy strings (camera, Face ID, microphone, speech are already in the target's Info keys — check them against what the app does), the App Store screenshots (the #54 close-out left the audit captures as the raw material), then the TestFlight build itself. The app icon and dark launch screen are in (PRD §7.15).
+**1. #69 code health — START HERE, with the sub-agent loop in AGENTS.md** (Opus implementer in an isolated worktree → two cold Opus verifiers → fix round → orchestrator runs the gates and commits). Done: P1 #89 (biome, lint in CI, `testConfig`), P2 #90 (swiftformat layout-only, swiftlint house rules, `lint.sh`, `Fixtures.swift`). Next packages, non-overlapping files: **P3** `server.ts` → `routes/*` + dispatcher (item 1; accept: no file over 400 lines, tests unchanged, `protocol/README.md` sections map 1:1); **P4** one `HostClient` + `Features/Shared/` (items 4, 5; accept: `URLSessionConfiguration.ephemeral` once, zero duplicated view helpers); then **P5** the phone splits (items 2, 6 — pair with #68 phone items 1–4), **P6** herdr contract test, docs, protocol versioning (items 3, 11–15). Open owner decision: hosted phone CI (item 8) needs the 537 MB GhosttyKit xcframework as a private release asset or stays owner-run.
+
+**2. #37 App Store readiness (owner-driven, in parallel).** The paid developer account (ends the 7-day profile), the privacy strings (camera, Face ID, microphone, speech are already in the target's Info keys — check them against what the app does), the App Store screenshots (the #54 close-out left the audit captures as the raw material), then the TestFlight build itself. The app icon and dark launch screen are in (PRD §7.15).
 
 **The #54 build is on the phone** (installed over USB 2026-09-03 ~19:50, profile to 2026-09-08 13:01 UTC): icon, launch screen, partly-staged dash, shared 12 pt headers, New agent on the idle card — the idle card is the one screen not yet looked at live (the Mac always has agents; look once with every tab closed).
 
