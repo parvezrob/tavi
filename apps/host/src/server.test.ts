@@ -12,7 +12,7 @@ import WebSocket from "ws";
 import { AgentKindDetector } from "./agent-kinds.js";
 import { AttentionOverlay } from "./attention.js";
 import { EVENTS_PROTOCOL, TERMINAL_PROTOCOL } from "./protocol.js";
-import type { HerdrAgentSource, HerdrTabRequest } from "./herdr.js";
+import type { HerdrAgentSource, HerdrTabRequest } from "./herdr-types.js";
 import { DeviceRegistry, PairingSessions } from "./pairing.js";
 import { ProjectHistory } from "./projects.js";
 import { createTaviServer } from "./server.js";

@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { HerdrAgentInfo } from "./types.js";
-import { awaitPendingDeletes, createWorktree, previewRemoval, removeWorktree, worktreePath } from "./worktrees.js";
+import { previewRemoval } from "./removal-preview.js";
+import { awaitPendingDeletes, removeWorktree } from "./removal.js";
+import { createWorktree, worktreePath } from "./worktrees.js";
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
@@ -68,6 +70,28 @@ test("createWorktree adds the branch off the default base, sets the configs, cop
   assert.equal(readFileSync(path.join(created.path, ".env"), "utf8"), "SECRET=1\n");
   // --no-track: no upstream, so status never says "behind".
   assert.throws(() => git(created.path, "rev-parse", "--abbrev-ref", "fix/foo@{upstream}"));
+});
+
+// Skipped as root, where a mode of 000 stops nothing.
+test("a setup file that cannot be copied is named in the result, never reported as 0 copied (#98)", {
+  skip: process.getuid?.() === 0,
+}, async () => {
+  const { dir, parent } = repo();
+  // Unreadable to its own owner: `copyFile` fails with EACCES, exactly as a
+  // `.env` written by another user under a shared checkout would.
+  chmodSync(path.join(dir, ".env"), 0o000);
+  try {
+    const result = await createWorktree({ repo: dir, branch: "fix/perms" }, [parent], { allowOutsideRoots: false });
+    assert.ok(result.ok, JSON.stringify(result));
+    assert.equal(result.worktree.copiedSetupFiles, 0);
+    assert.match(result.worktree.setupFilesFailed ?? "", /1 setup file could not be copied/);
+    assert.match(result.worktree.setupFilesFailed ?? "", /EACCES/);
+    // The names of the files never travel, only how many and why.
+    assert.doesNotMatch(result.worktree.setupFilesFailed ?? "", /\.env/);
+    assert.ok(!existsSync(path.join(result.worktree.path, ".env")));
+  } finally {
+    chmodSync(path.join(dir, ".env"), 0o600);
+  }
 });
 
 test("createWorktree refuses an existing branch, a bad name, a missing base, and a folder that is not a repo", async () => {

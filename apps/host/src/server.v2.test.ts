@@ -9,7 +9,7 @@ import path from "node:path";
 import test from "node:test";
 import type { IPty } from "node-pty";
 import WebSocket from "ws";
-import type { HerdrAgentSource } from "./herdr.js";
+import type { HerdrAgentSource } from "./herdr-types.js";
 import { OUTPUT_FRAME_HEADER_BYTES, OUTPUT_FRAME_TYPE, TERMINAL_PROTOCOL_V2 } from "./protocol.js";
 import { AgentKindDetector } from "./agent-kinds.js";
 import { ProjectHistory } from "./projects.js";

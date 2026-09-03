@@ -76,6 +76,8 @@ async function realpathOfNearestAncestor(target: string): Promise<string> {
     try {
       return path.join(await fs.realpath(head), ...tail);
     } catch {
+      // This path component does not exist yet; step up to its parent and
+      // realpath the deepest ancestor that does.
       const parent = path.dirname(head);
       if (parent === head) return target;
       tail.unshift(path.basename(head));
@@ -342,6 +344,8 @@ function decodeText(bytes: Buffer): { encoding: FileContent["encoding"]; text: s
   try {
     return { encoding: "utf-8", text: new TextDecoder("utf-8", { fatal: true }).decode(utf8) };
   } catch {
+    // Not valid UTF-8, so it is some single-byte encoding; latin1 round-trips
+    // every byte rather than losing them to replacement characters.
     return { encoding: "latin1", text: utf8.toString("latin1") };
   }
 }

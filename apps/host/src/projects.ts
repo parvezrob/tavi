@@ -52,6 +52,8 @@ export function normalizeProjectPath(value: string): ProjectPathCheck {
       return { ok: false, reason: "cwd must be a directory that exists on this Mac." };
     }
   } catch {
+    // Missing, or a path we cannot stat: the same answer either way, and
+    // the sentence is the one a person can act on.
     return { ok: false, reason: "cwd must be a directory that exists on this Mac." };
   }
   return { ok: true, path: resolved };
@@ -221,6 +223,8 @@ function isExistingDirectory(candidate: string): boolean {
   try {
     return statSync(candidate).isDirectory();
   } catch {
+    // A remembered folder that has been deleted or moved is simply not
+    // there any more; the list drops it.
     return false;
   }
 }

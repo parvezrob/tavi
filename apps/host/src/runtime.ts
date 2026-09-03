@@ -77,6 +77,8 @@ export function currentVersion(layout: RuntimeLayout): string | undefined {
   try {
     return path.basename(readlinkSync(layout.currentLink));
   } catch {
+    // No `current` symlink yet (nothing installed) — undefined is the
+    // answer, and the caller installs rather than reading a version.
     return undefined;
   }
 }
@@ -106,6 +108,8 @@ export function readPending(layout: RuntimeLayout): PendingUpdate | undefined {
         }
       : undefined;
   } catch {
+    // No pending file, or one half-written by a killed install: either way
+    // there is no update in flight to count attempts against.
     return undefined;
   }
 }
@@ -157,16 +161,28 @@ let pending;
 try {
   pending = JSON.parse(readFileSync(pendingFile, "utf8"));
 } catch {
+  // No pending update (the ordinary start), or a file a killed install left
+  // half-written: either way there is nothing to count attempts against.
   pending = undefined;
 }
 if (pending && typeof pending.version === "string") {
   pending.attempts = (pending.attempts || 0) + 1;
   if (pending.attempts > MAX_ATTEMPTS && pending.previous) {
     const temporary = currentLink + ".rollback";
-    try { unlinkSync(temporary); } catch {}
+    try {
+      unlinkSync(temporary);
+    } catch {
+      // No leftover from an earlier rollback to clear; the symlink below is
+      // created either way, and renameSync replaces current atomically.
+    }
     symlinkSync(path.join("versions", pending.previous), temporary);
     renameSync(temporary, currentLink);
-    try { unlinkSync(pendingFile); } catch {}
+    try {
+      unlinkSync(pendingFile);
+    } catch {
+      // The rollback itself is done; this file is only the attempt counter,
+      // and one that stays costs a single extra counted start.
+    }
     // The one console.* left in the host: this file runs standalone, before
     // any version is loaded, so it cannot import log.ts.
     console.error("[tavi] " + pending.version + " failed to start " + MAX_ATTEMPTS + " times; rolled back to " + pending.previous);

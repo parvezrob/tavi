@@ -2,7 +2,7 @@ import type * as pty from "node-pty";
 import type { RawData, WebSocket } from "ws";
 import type { AttachmentClient, AttachmentStore } from "./attachment.js";
 import type { HostConfig } from "./config.js";
-import type { TerminalSize } from "./herdr.js";
+import type { TerminalSize } from "./herdr-types.js";
 import {
   chunkTerminalOutput,
   encodeOutputFrame,
@@ -187,6 +187,8 @@ export function bridgeTerminalV2(
           break;
       }
     } catch {
+      // Not swallowed: a frame the codec refused becomes an `error` frame
+      // the phone shows; the pty never sees an input it cannot trust.
       sendTerminal(websocket, { type: "error", message: "Invalid terminal message." });
     }
   });
@@ -309,6 +311,8 @@ export function bridgeTerminal(websocket: WebSocket, target: TerminalTarget): vo
           break;
       }
     } catch {
+      // Not swallowed: a frame the codec refused becomes an `error` frame
+      // the phone shows; the pty never sees an input it cannot trust.
       sendTerminal(websocket, { type: "error", message: "Invalid terminal message." });
     }
   });

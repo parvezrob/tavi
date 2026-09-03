@@ -53,6 +53,8 @@ function writable(directory: string): boolean {
     accessSync(directory, constants.W_OK);
     return true;
   } catch {
+    // Not writable (or not there): the next candidate directory is tried,
+    // which is the whole question this asks.
     return false;
   }
 }
@@ -74,6 +76,8 @@ export function isOurCommandLink(file: string): boolean {
   try {
     return readFileSync(file, "utf8").split("\n").slice(0, 3).includes(COMMAND_LINK_MARKER);
   } catch {
+    // No such file, or one we cannot read, is not a shim of ours — which
+    // is exactly what the caller needs to know before removing anything.
     return false;
   }
 }

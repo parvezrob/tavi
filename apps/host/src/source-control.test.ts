@@ -4,15 +4,9 @@ import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import {
-  commitStaged,
-  pullBase,
-  pushBranch,
-  stageFiles,
-  worktreeLog,
-  worktreeStatus,
-  writeCommitMessage,
-} from "./source-control.js";
+import { writeCommitMessage } from "./commit-message.js";
+import { pullBase, pushBranch, worktreeLog } from "./commits.js";
+import { commitStaged, stageFiles, worktreeStatus } from "./source-control.js";
 
 const identity = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
 
@@ -342,4 +336,53 @@ test("commit message comes from the model with secrets left out of the diff, and
   });
   assert.equal(missing.ok, false);
   if (!missing.ok) assert.match(missing.error, /not installed/);
+});
+
+// #98: the read paths that used to degrade silently.
+
+test("status says why ahead/behind is unknown rather than reporting 0/0 when git cannot compare (#98)", async () => {
+  const parent = realpathSync(mkdtempSync(path.join(tmpdir(), "tavi-sc-ab-")));
+  const dir = path.join(parent, "repo");
+  git(parent, "init", "-q", "-b", "work", "repo");
+  git(dir, "config", "user.name", "t");
+  git(dir, "config", "user.email", "t@t");
+  writeFileSync(path.join(dir, "a.txt"), "one\n");
+  git(dir, "add", ".");
+  git(dir, "commit", "-q", "-m", "init");
+  // The repository's default branch is `main` per origin/HEAD, but no such
+  // ref exists here — so `rev-list work...main` fails, the way an index lock
+  // or a timeout would.
+  git(dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+  writeFileSync(path.join(dir, "a.txt"), "two\n");
+
+  const result = await worktreeStatus(dir);
+  assert.ok(result.ok, JSON.stringify(result));
+  assert.equal(result.status.base, "main");
+  assert.match(result.status.aheadBehindFailed ?? "", /main/);
+  // The counts today's phone decodes are still there, so it keeps working.
+  assert.equal(result.status.ahead, 0);
+  assert.equal(result.status.behind, 0);
+});
+
+test('a failed `diff --cached` is a 503 with git\'s sentence, never "Nothing is staged" (#98)', async () => {
+  const notARepository = realpathSync(mkdtempSync(path.join(tmpdir(), "tavi-sc-staged-")));
+
+  const commit = await commitStaged(notARepository, "feat: something");
+  assert.equal(commit.ok, false);
+  if (!commit.ok) {
+    assert.equal(commit.status, 503);
+    assert.match(commit.error, /git could not read what is staged/);
+  }
+
+  const message = await writeCommitMessage(notARepository, {
+    shell: "/bin/sh",
+    runClaude: async () => {
+      throw new Error("claude must never be asked when git could not answer");
+    },
+  });
+  assert.equal(message.ok, false);
+  if (!message.ok) {
+    assert.equal(message.status, 503);
+    assert.match(message.error, /git could not read what is staged/);
+  }
 });

@@ -72,6 +72,8 @@ export async function saveUpload(options: {
   try {
     folderStat = await fs.stat(resolved.path);
   } catch {
+    // Not swallowed: a folder that cannot be stat'd is a 404 with the
+    // sentence, and stat's own message would name the path back.
     return { ok: false, status: 404, error: "That folder does not exist on this computer." };
   }
   if (!folderStat.isDirectory()) return { ok: false, status: 400, error: "cwd must be a folder." };
@@ -99,6 +101,8 @@ async function sweep(folder: string, olderThanMs: number, keep: string): Promise
   try {
     entries = await fs.readdir(folder);
   } catch {
+    // The sweep is housekeeping behind a successful upload; a folder that
+    // will not list is retried by the next upload's sweep.
     return;
   }
   await Promise.all(
@@ -125,6 +129,8 @@ async function excludeFromGit(folder: string): Promise<void> {
     excludePath = stdout.trim();
     if (!excludePath) return;
   } catch {
+    // Not a git repository, so there is no exclude file to write — which
+    // this function's own comment already calls best effort.
     return;
   }
   try {

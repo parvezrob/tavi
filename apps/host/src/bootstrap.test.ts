@@ -3,15 +3,10 @@ import { existsSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import {
-  bootstrap,
-  BootstrapError,
-  type BootstrapDeps,
-  diagnose,
-  durablePackageRoot,
-  formatChecks,
-  serviceEntrypoint,
-} from "./bootstrap.js";
+import { bootstrap, BootstrapError } from "./bootstrap.js";
+import type { BootstrapDeps } from "./bootstrap-deps.js";
+import { diagnose, formatChecks } from "./doctor.js";
+import { durablePackageRoot, serviceEntrypoint } from "./package-root.js";
 import { type HostConfig, VERSION } from "./config.js";
 import { testConfig } from "./testing/config.js";
 

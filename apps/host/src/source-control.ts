@@ -1,10 +1,7 @@
-import { spawn } from "node:child_process";
 import path from "node:path";
-import { resolveOnLoginPath } from "./login-shell.js";
 import { listChanges, type ChangedFile } from "./changes.js";
-import { looksLikeASecret } from "./files.js";
 import { describeGitError, git } from "./git-exec.js";
-import { aheadBehind, findDefaultBranch, refExists } from "./git.js";
+import { aheadBehind, baseBranch } from "./git-refs.js";
 
 // Source Control — Changes (#77, #73 part 3; PRD §7.12): one worktree's
 // changed files, staging, and committing, from the phone. The first git
@@ -21,6 +18,9 @@ export interface WorktreeStatus {
   base: string | null;
   ahead: number;
   behind: number;
+  // Why ahead/behind could not be measured, as a sentence (#98). Absent
+  // when they were: a git failure must not render as "in sync".
+  aheadBehindFailed?: string;
   files: ChangedFile[];
   staged: number;
   truncated: boolean;
@@ -41,15 +41,18 @@ export async function worktreeStatus(worktreePath: string): Promise<StatusResult
     };
   const branch = changes.branch ?? null;
   const base = await baseBranch(worktreePath, branch);
-  const [ahead, behind] = await aheadBehind(worktreePath, branch, base);
+  const distance = await aheadBehind(worktreePath, branch, base);
   return {
     ok: true,
     status: {
       path: worktreePath,
       branch,
       base,
-      ahead,
-      behind,
+      // The zeros stay beside the reason so a phone built against 0.1.17,
+      // which decodes `ahead`/`behind` as required numbers, keeps working.
+      ahead: distance.ok ? distance.ahead : 0,
+      behind: distance.ok ? distance.behind : 0,
+      ...(distance.ok ? {} : { aheadBehindFailed: distance.error }),
       files: changes.files,
       staged: changes.files.filter((file) => file.staged).length,
       truncated: changes.truncated,
@@ -114,7 +117,9 @@ export async function commitStaged(worktreePath: string, message: string): Promi
   if (trimmed.length > MAX_MESSAGE_CHARACTERS || trimmed.includes("\0")) {
     return { ok: false, status: 400, error: "That commit message is too long." };
   }
-  const stagedFiles = await stagedPaths(worktreePath);
+  const staged = await stagedPaths(worktreePath);
+  if (!staged.ok) return staged;
+  const stagedFiles = staged.paths;
   if (stagedFiles.length === 0)
     return { ok: false, status: 409, error: "Nothing is staged. Stage a file, then commit." };
   try {
@@ -136,495 +141,25 @@ export async function commitStaged(worktreePath: string, message: string): Promi
     const [sha = "", summary = ""] = stdout.split("\n");
     return { ok: true, commit: { sha, summary, files: stagedFiles.length } };
   } catch {
+    // The commit is made; only its sha could not be read back, and the
+    // summary the person typed is the one the commit carries.
     return { ok: true, commit: { sha: "", summary: trimmed.split("\n")[0] ?? trimmed, files: stagedFiles.length } };
   }
 }
 
-export type MessageResult = { ok: true; message: string } | { ok: false; status: 409 | 503; error: string };
+export type StagedPaths = { ok: true; paths: string[] } | { ok: false; status: 503; error: string };
 
-export interface MessageWriterDeps {
-  shell: string;
-  // Runs the model with a prompt and stdin, returns its text. Injectable so
-  // tests need no `claude`.
-  runClaude?: (prompt: string, input: string) => Promise<string>;
-}
-
-const MAX_DIFF_FOR_MESSAGE = 200 * 1024;
-const CLAUDE_TIMEOUT_MS = 45_000;
-const MESSAGE_PROMPT =
-  "Write a git commit message for the staged diff on stdin: one line in conventional-commit form " +
-  "(type(scope): summary), at most 72 characters, imperative, no quotes, no trailing period, " +
-  "then nothing else. Output only the message.";
-
-// A one-line conventional message for the staged set, written by the
-// `claude` CLI on this computer — the same login the terminals use — from
-// the staged diff with secret-looking files left out by name. 409 when
-// nothing is staged, 503 when claude is missing or says nothing.
-export async function writeCommitMessage(worktreePath: string, deps: MessageWriterDeps): Promise<MessageResult> {
-  const staged = await stagedPaths(worktreePath);
-  if (staged.length === 0) return { ok: false, status: 409, error: "Nothing is staged. Stage a file first." };
-  const shown = staged.filter((file) => !looksLikeASecret(file));
-  let diff = "";
-  if (shown.length > 0) {
-    try {
-      diff = (await git(worktreePath, ["diff", "--cached", "--", ...shown], MAX_DIFF_FOR_MESSAGE + 1)).stdout.slice(
-        0,
-        MAX_DIFF_FOR_MESSAGE,
-      );
-    } catch (error) {
-      return { ok: false, status: 503, error: `git could not read the staged diff: ${describeGitError(error)}` };
-    }
-  }
-  const header = `Staged files: ${staged.join(", ")}\n\n`;
-  try {
-    const run = deps.runClaude ?? ((prompt, input) => runClaudeCli(deps.shell, prompt, input));
-    const text = (await run(MESSAGE_PROMPT, header + diff)).trim().split("\n")[0]?.trim() ?? "";
-    if (!text) return { ok: false, status: 503, error: "Claude did not write a message. Type one instead." };
-    return { ok: true, message: text.slice(0, 200) };
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    if (/not installed|ENOENT|command not found/i.test(reason)) {
-      return {
-        ok: false,
-        status: 503,
-        error: "Claude Code is not installed on this computer, so it cannot write the message. Type one instead.",
-      };
-    }
-    return { ok: false, status: 503, error: `Claude could not write a message: ${reason}` };
-  }
-}
-
-// MARK: Commits (#78, #73 part 4)
-
-export interface CommitSummary {
-  sha: string;
-  summary: string;
-  author: string;
-  // ISO 8601 author date; the phone renders "12 min".
-  when: string;
-}
-
-export interface UpstreamInfo {
-  name: string;
-  // Commits not yet pushed / not yet pulled, against the tracking ref.
-  ahead: number;
-  behind: number;
-}
-
-export interface WorktreeLog {
-  path: string;
-  branch: string | null;
-  base: string | null;
-  // Commits this branch has over the base, newest first, and the base's
-  // over this branch — the two sections of the Commits tab.
-  ahead: CommitSummary[];
-  behind: CommitSummary[];
-  upstream: UpstreamInfo | null;
-  // Where a first push would go; null when the repository has no remote.
-  remote: string | null;
-  truncated: boolean;
-}
-
-export type LogResult = { ok: true; log: WorktreeLog } | { ok: false; status: 400 | 404 | 503; error: string };
-
-const MAX_LOG_COMMITS = 100;
-
-// The checked-out branch, or null on a detached HEAD. Throws when the path
-// is not a worktree git can read.
-export async function currentBranch(worktreePath: string): Promise<string | null> {
-  const { stdout } = await git(worktreePath, ["symbolic-ref", "--quiet", "--short", "HEAD"], undefined, [0, 1]);
-  return stdout.trim() || null;
-}
-
-export async function worktreeLog(worktreePath: string): Promise<LogResult> {
-  let branch: string | null;
-  try {
-    branch = await currentBranch(worktreePath);
-  } catch (error) {
-    return { ok: false, status: 503, error: `git could not read that worktree: ${describeGitError(error)}` };
-  }
-  const base = await baseBranch(worktreePath, branch);
-  const [ahead, behind] = await Promise.all([
-    branch && base && branch !== base
-      ? readLog(worktreePath, `${base}..${branch}`)
-      : Promise.resolve({ commits: [], truncated: false }),
-    branch && base && branch !== base
-      ? readLog(worktreePath, `${branch}..${base}`)
-      : Promise.resolve({ commits: [], truncated: false }),
-  ]);
-  const upstream = branch ? await upstreamInfo(worktreePath, branch) : null;
-  const remote = branch ? await pushRemote(worktreePath, branch) : null;
-  return {
-    ok: true,
-    log: {
-      path: worktreePath,
-      branch,
-      base,
-      ahead: ahead.commits,
-      behind: behind.commits,
-      upstream,
-      remote,
-      truncated: ahead.truncated || behind.truncated,
-    },
-  };
-}
-
-async function readLog(worktreePath: string, range: string): Promise<{ commits: CommitSummary[]; truncated: boolean }> {
-  try {
-    const { stdout } = await git(worktreePath, [
-      "log",
-      `--max-count=${MAX_LOG_COMMITS + 1}`,
-      "--format=%H%x00%s%x00%an%x00%aI%x1e",
-      range,
-    ]);
-    const commits: CommitSummary[] = [];
-    for (const record of stdout.split("\x1e")) {
-      const [sha = "", summary = "", author = "", when = ""] = record.replace(/^\n/, "").split("\0");
-      if (/^[0-9a-f]{40}$/.test(sha)) commits.push({ sha, summary, author, when: when.trim() });
-    }
-    return { commits: commits.slice(0, MAX_LOG_COMMITS), truncated: commits.length > MAX_LOG_COMMITS };
-  } catch {
-    return { commits: [], truncated: false };
-  }
-}
-
-export async function upstreamInfo(worktreePath: string, branch: string): Promise<UpstreamInfo | null> {
-  try {
-    const name = (
-      await git(worktreePath, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${branch}@{upstream}`])
-    ).stdout.trim();
-    if (!name) return null;
-    const { stdout } = await git(worktreePath, ["rev-list", "--left-right", "--count", `${branch}...${name}`]);
-    const [ahead = 0, behind = 0] = stdout
-      .trim()
-      .split(/\s+/)
-      .map((value) => Number.parseInt(value, 10) || 0);
-    return { name, ahead, behind };
-  } catch {
-    // No upstream configured, or it was deleted on the remote.
-    return null;
-  }
-}
-
-// `branch.<b>.pushRemote` → `remote.pushDefault` → `origin` → the only
-// remote there is. null when the repository has none.
-export async function pushRemote(worktreePath: string, branch: string): Promise<string | null> {
-  let remotes: string[];
-  try {
-    remotes = (await git(worktreePath, ["remote"])).stdout
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-  } catch {
-    return null;
-  }
-  if (remotes.length === 0) return null;
-  for (const key of [`branch.${branch}.pushRemote`, "remote.pushDefault"]) {
-    try {
-      const configured = (await git(worktreePath, ["config", "--get", key])).stdout.trim();
-      if (configured && remotes.includes(configured)) return configured;
-    } catch {
-      // Not set.
-    }
-  }
-  if (remotes.includes("origin")) return "origin";
-  return remotes.length === 1 ? (remotes[0] ?? null) : null;
-}
-
-export type PushResult =
-  | { ok: true; pushed: number; upstream: string }
-  | { ok: false; status: 409 | 503; error: string };
-
-const PUSH_TIMEOUT_MS = 90_000;
-
-// Pushes the branch: to its upstream when it has one, else to the push
-// remote, setting the upstream on the way (the first push of a worktree
-// Tavi did not create). Never `--force`; a rejected push is a sentence.
-export async function pushBranch(worktreePath: string): Promise<PushResult> {
-  let branch: string | null;
-  try {
-    branch = await currentBranch(worktreePath);
-  } catch (error) {
-    return { ok: false, status: 503, error: `git could not read that worktree: ${describeGitError(error)}` };
-  }
-  if (!branch)
-    return { ok: false, status: 409, error: "This worktree is not on a branch, so there is nothing to push." };
-  const upstream = await upstreamInfo(worktreePath, branch);
-  if (upstream && upstream.ahead === 0) {
-    return { ok: false, status: 409, error: `${upstream.name} already has everything on ${branch}.` };
-  }
-  const remote = await pushRemote(worktreePath, branch);
-  if (!upstream && !remote) {
-    return {
-      ok: false,
-      status: 409,
-      error:
-        "This repository has no remote to push to. Add one on the computer (git remote add origin …), then push again.",
-    };
-  }
-  // What goes up: the commits the upstream lacks, or on a first push every
-  // commit the branch has over its base.
-  const pushed = upstream
-    ? upstream.ahead
-    : (await aheadBehind(worktreePath, branch, await baseBranch(worktreePath, branch)))[0];
-  // Always name the remote and the refspec: a bare `git push` obeys
-  // `push.default`, and `matching` would publish every branch that has a
-  // namesake on the remote (#81 review).
-  const target = upstream ? await upstreamRemote(worktreePath, branch, remote) : (remote as string);
-  const args = upstream
-    ? ["push", "--quiet", "--porcelain", target, `HEAD:refs/heads/${upstreamBranch(upstream.name, target)}`]
-    : ["push", "--quiet", "--porcelain", "--set-upstream", target, `${branch}:refs/heads/${branch}`];
-  try {
-    await git(worktreePath, args, undefined, [0], PUSH_TIMEOUT_MS);
-  } catch (error) {
-    const reason = describeGitError(error);
-    if (/non-fast-forward|fetch first|rejected/i.test(reason)) {
-      return {
-        ok: false,
-        status: 409,
-        error: `${upstream?.name ?? remote} has commits this branch does not. Pull them in on the computer first, then push again.`,
-      };
-    }
-    if (/Permission denied|Authentication failed|could not read Username|publickey|403/i.test(reason)) {
-      return {
-        ok: false,
-        status: 503,
-        error: `The remote refused the push: git on the computer is not signed in to it. (${firstLine(reason)})`,
-      };
-    }
-    if (/Could not resolve host|Connection timed out|Network is unreachable|ETIMEDOUT|SIGTERM/i.test(reason)) {
-      return {
-        ok: false,
-        status: 503,
-        error: `The remote could not be reached from the computer. (${firstLine(reason)})`,
-      };
-    }
-    return { ok: false, status: 503, error: `git could not push: ${firstLine(reason)}` };
-  }
-  const after = await upstreamInfo(worktreePath, branch);
-  return { ok: true, pushed, upstream: after?.name ?? `${remote}/${branch}` };
-}
-
-// The remote the branch's upstream lives on (`branch.<b>.remote`), else the
-// push remote; and the upstream's branch name without the remote prefix.
-async function upstreamRemote(worktreePath: string, branch: string, fallback: string | null): Promise<string> {
-  try {
-    const configured = (await git(worktreePath, ["config", "--get", `branch.${branch}.remote`])).stdout.trim();
-    if (configured && configured !== ".") return configured;
-  } catch {
-    // Not configured.
-  }
-  return fallback ?? "origin";
-}
-
-function upstreamBranch(upstreamName: string, remote: string): string {
-  return upstreamName.startsWith(`${remote}/`) ? upstreamName.slice(remote.length + 1) : upstreamName;
-}
-
-export type PullBaseResult =
-  | { ok: true; merged: number; fastForward: boolean; sha: string; fetched: boolean; from: string }
-  | { ok: false; status: 409 | 503; error: string };
-
-const FETCH_TIMEOUT_MS = 15_000;
-
-// Merges the base branch into the worktree with a merge commit or a
-// fast-forward. The base's upstream is fetched first, so "pull main in"
-// means today's main, not the last fetch's (#83): the local base is moved
-// up when it can be (behind its upstream and not checked out anywhere),
-// else the fresh remote-tracking ref is what gets merged; when the fetch
-// cannot happen (no upstream, offline, too slow) the local base is merged
-// as it stands and `fetched` says so. A conflict is aborted before anyone
-// sees it, and named.
-export async function pullBase(worktreePath: string): Promise<PullBaseResult> {
-  let branch: string | null;
-  try {
-    branch = await currentBranch(worktreePath);
-  } catch (error) {
-    return { ok: false, status: 503, error: `git could not read that worktree: ${describeGitError(error)}` };
-  }
-  if (!branch)
-    return { ok: false, status: 409, error: "This worktree is not on a branch, so there is nothing to merge into." };
-  const base = await baseBranch(worktreePath, branch);
-  if (!base || base === branch) return { ok: false, status: 409, error: "This branch has no base branch to pull in." };
-  const refreshed = await refreshBase(worktreePath, base);
-  const from = refreshed.ref;
-  const [, behind] = await aheadBehind(worktreePath, branch, from);
-  if (behind === 0) {
-    const sha = await headSha(worktreePath);
-    return { ok: true, merged: 0, fastForward: false, sha, fetched: refreshed.fetched, from };
-  }
-  try {
-    await git(worktreePath, ["merge", "--quiet", "--no-edit", "--no-stat", from], undefined, [0], 30_000);
-  } catch (error) {
-    const reason = describeGitError(error);
-    if (/would be overwritten|uncommitted changes|unmerged files|not possible because you have/i.test(reason)) {
-      return {
-        ok: false,
-        status: 409,
-        error: `Uncommitted changes on ${branch} would be overwritten by ${base}. Commit or stash them first.`,
-      };
-    }
-    const conflicts = await conflictedFiles(worktreePath);
-    // Whatever stopped the merge — a conflict, a killed merge driver, the
-    // budget — the tree is put back before anyone hears about it.
-    let aborted = true;
-    try {
-      await git(worktreePath, ["merge", "--abort"]);
-    } catch {
-      aborted = !(await mergeInProgress(worktreePath));
-    }
-    const restored = aborted
-      ? "nothing was changed here"
-      : "the merge is still half-done there — finish or abort it on the computer";
-    if (conflicts.length > 0 || /CONFLICT|Automatic merge failed/i.test(reason)) {
-      const named =
-        conflicts.slice(0, 5).join(", ") + (conflicts.length > 5 ? ` and ${conflicts.length - 5} more` : "");
-      return {
-        ok: false,
-        status: 409,
-        error: `${base} conflicts with ${branch}${named ? ` in ${named}` : ""}. Resolve that on the computer; ${restored}.`,
-      };
-    }
-    const killed =
-      /SIGTERM|ETIMEDOUT/i.test(error instanceof Error ? error.message : "") && !/fatal:|error:/i.test(reason);
-    if (killed) return { ok: false, status: 503, error: `Merging ${base} took too long and was stopped; ${restored}.` };
-    return { ok: false, status: 503, error: `git could not merge ${base}: ${firstLine(reason)}; ${restored}.` };
-  }
-  const sha = await headSha(worktreePath);
-  let fastForward = false;
-  try {
-    const parents = (await git(worktreePath, ["rev-list", "--parents", "-n", "1", "HEAD"])).stdout.trim().split(/\s+/);
-    fastForward = parents.length <= 2;
-  } catch {
-    // Reported as a merge; the count is what matters.
-  }
-  return { ok: true, merged: behind, fastForward, sha, fetched: refreshed.fetched, from };
-}
-
-// The freshest ref for the base: its upstream fetched (best effort, one
-// short budget, never a prompt), then the local branch fast-forwarded to
-// it when git allows — `branch -f` refuses a branch checked out in any
-// worktree, and the main checkout usually stands on the base — else the
-// remote-tracking ref itself when the local base is merely behind it. A
-// local base that has moved on its own (diverged) is the person's, and it
-// is what gets merged.
-async function refreshBase(worktreePath: string, base: string): Promise<{ ref: string; fetched: boolean }> {
-  let upstream: string | null = null;
-  try {
-    upstream =
-      (
-        await git(worktreePath, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${base}@{upstream}`])
-      ).stdout.trim() || null;
-  } catch {
-    upstream = null;
-  }
-  if (!upstream) return { ref: base, fetched: false };
-  const remote = upstream.split("/")[0] ?? "";
-  const remoteBranch = upstream.slice(remote.length + 1);
-  if (!remote || !remoteBranch) return { ref: base, fetched: false };
-  try {
-    await git(worktreePath, ["fetch", "--quiet", remote, remoteBranch], undefined, [0], FETCH_TIMEOUT_MS);
-  } catch {
-    return { ref: base, fetched: false };
-  }
-  try {
-    await git(worktreePath, ["merge-base", "--is-ancestor", base, upstream]);
-  } catch {
-    // Diverged, or something did not resolve: the local base stands.
-    return { ref: base, fetched: true };
-  }
-  try {
-    await git(worktreePath, ["branch", "-f", base, upstream]);
-    return { ref: base, fetched: true };
-  } catch {
-    return { ref: upstream, fetched: true };
-  }
-}
-
-async function mergeInProgress(worktreePath: string): Promise<boolean> {
-  try {
-    await git(worktreePath, ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"]);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function conflictedFiles(worktreePath: string): Promise<string[]> {
-  try {
-    const { stdout } = await git(worktreePath, ["diff", "--name-only", "--diff-filter=U", "-z"]);
-    return stdout.split("\0").filter((entry) => entry.length > 0);
-  } catch {
-    return [];
-  }
-}
-
-async function headSha(worktreePath: string): Promise<string> {
-  try {
-    return (await git(worktreePath, ["rev-parse", "HEAD"])).stdout.trim();
-  } catch {
-    return "";
-  }
-}
-
-function firstLine(text: string): string {
-  return (
-    text
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line && !/^(To |remote: *$|!\s)/.test(line))[0] ?? text.trim()
-  );
-}
-
-// `claude -p <prompt>` with the diff on stdin, resolved on the login-shell
-// PATH the way agent kinds are (the launchd service's own PATH is bare).
-async function runClaudeCli(shell: string, prompt: string, input: string): Promise<string> {
-  const binary = await resolveOnLoginPath(shell, "claude");
-  if (!binary) throw new Error("claude is not installed");
-  return new Promise((resolve, reject) => {
-    const child = spawn(binary, ["-p", prompt, "--output-format", "text"], {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
-    });
-    const out: Buffer[] = [];
-    const err: Buffer[] = [];
-    const timer = setTimeout(() => child.kill(), CLAUDE_TIMEOUT_MS);
-    child.stdout.on("data", (chunk: Buffer) => out.push(chunk));
-    child.stderr.on("data", (chunk: Buffer) => err.push(chunk));
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve(Buffer.concat(out).toString("utf8"));
-      else reject(new Error(Buffer.concat(err).toString("utf8").trim() || `claude exited with ${code}`));
-    });
-    child.stdin.on("error", () => undefined);
-    child.stdin.end(input);
-  });
-}
-
-async function stagedPaths(worktreePath: string): Promise<string[]> {
+// What `diff --cached` lists, or why it could not be read. Never an empty
+// list on failure (#98): "Nothing is staged" is a fact about the index that
+// sends a person back to stage files they already staged, and a commit
+// route that believed it would refuse a commit that should have happened.
+export async function stagedPaths(worktreePath: string): Promise<StagedPaths> {
   try {
     const { stdout } = await git(worktreePath, ["diff", "--cached", "--name-only", "-z"]);
-    return stdout.split("\0").filter((entry) => entry.length > 0);
-  } catch {
-    return [];
+    return { ok: true, paths: stdout.split("\0").filter((entry) => entry.length > 0) };
+  } catch (error) {
+    return { ok: false, status: 503, error: `git could not read what is staged: ${describeGitError(error)}` };
   }
-}
-
-export async function baseBranch(worktreePath: string, branch: string | null): Promise<string | null> {
-  if (branch) {
-    try {
-      const configured = (await git(worktreePath, ["config", "--get", `branch.${branch}.base`])).stdout.trim();
-      if (configured && (await refExists(worktreePath, configured))) return configured;
-    } catch {
-      // Not configured: fall through to the repository's default.
-    }
-  }
-  const fallback = await findDefaultBranch(worktreePath);
-  return fallback;
 }
 
 function normalizeRelative(file: string): string | null {

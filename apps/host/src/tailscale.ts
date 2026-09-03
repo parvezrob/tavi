@@ -156,6 +156,8 @@ export async function connectionPath(
   try {
     return describePeerPath(await status(runner, wait), address);
   } catch {
+    // `/api/host` says how the phone reached this computer; "unknown" is an
+    // honest answer, and no route depends on it.
     return { path: "unknown" };
   }
 }

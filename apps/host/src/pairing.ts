@@ -251,6 +251,8 @@ export function decodePairingPayload(text: string): PairingPayload | undefined {
   try {
     url = new URL(text.trim());
   } catch {
+    // Not a URL at all, so not one of our pairing links — which is the
+    // question this function answers.
     return undefined;
   }
   if (url.protocol !== "tavi:" || url.host !== "pair") return undefined;

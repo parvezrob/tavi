@@ -7,21 +7,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import WebSocket, { WebSocketServer } from "ws";
+import { PreviewRegistry, TICKET_COOKIE, validPort } from "./preview.js";
 import {
-  PreviewRegistry,
-  TICKET_COOKIE,
   createPreviewDoor,
   forwardHeaders,
-  listProjectServers,
-  loopbackPort,
-  parseCwds,
-  parseListeners,
   relativizeLocalhost,
-  stopProjectServer,
   stripTicketCookie,
   ticketFrom,
-  validPort,
-} from "./preview.js";
+} from "./preview-door.js";
+import { listProjectServers, loopbackPort, parseCwds, parseListeners, stopProjectServer } from "./preview-servers.js";
 
 // --- registry ---------------------------------------------------------------
 
@@ -328,6 +322,34 @@ test("stop server: re-discovers, kills only this project's owner of that port, n
   const notOurs = await stopProjectServer(app, 8000, [root], deps);
   assert.equal(notOurs.ok, false);
   assert.deepEqual(killed, [4242]);
+});
+
+test("an upstream that accepts but never answers gets a 504 page, not a socket held open (#98)", async () => {
+  // Accepts the connection and says nothing — a dev server wedged mid-compile.
+  const silent = createServer(() => undefined);
+  await listen(silent);
+  const registry = new PreviewRegistry({ probe: async () => "127.0.0.1" });
+  const door = createPreviewDoor({
+    registry,
+    target: () => ({ host: "127.0.0.1", port: (silent.address() as AddressInfo).port }),
+    answerTimeoutMs: 150,
+  });
+  await listen(door);
+  const origin = `http://127.0.0.1:${(door.address() as AddressInfo).port}`;
+
+  try {
+    const opened = await registry.open({ deviceId: "d1", port: 5173, cwd: "/p" });
+    assert.ok(opened.ok);
+    if (!opened.ok) return;
+    const answer = await fetch(`${origin}/slow`, {
+      headers: { cookie: `${TICKET_COOKIE}=${opened.opened.ticket}` },
+    });
+    assert.equal(answer.status, 504);
+    assert.match(await answer.text(), /is not answering/);
+  } finally {
+    await close(door);
+    await close(silent);
+  }
 });
 
 async function listen(server: Server): Promise<void> {

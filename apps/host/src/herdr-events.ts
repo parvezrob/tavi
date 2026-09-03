@@ -1,6 +1,6 @@
 import { createConnection, type Socket } from "node:net";
 import { SHELL_KIND } from "./agent-kinds.js";
-import type { HerdrAgentSource } from "./herdr.js";
+import type { HerdrAgentSource } from "./herdr-types.js";
 import type { HerdrAgentInfo } from "./types.js";
 
 const RECONNECT_DELAY_MILLISECONDS = 2_000;
@@ -157,6 +157,8 @@ export class HerdrEventFeed implements AgentEventSource {
     try {
       message = JSON.parse(line) as Record<string, unknown>;
     } catch {
+      // A line herdr sent that is not JSON tells us nothing; the next line
+      // (or the next full snapshot) is what the feed acts on.
       return;
     }
 

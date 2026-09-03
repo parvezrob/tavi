@@ -12,6 +12,7 @@ import {
   type ListReposOptions,
   type RepoInfo,
 } from "./git.js";
+import { aheadBehind, countedPair } from "./git-refs.js";
 
 // Tests never shell out to the developer's real `gh`.
 const noPullRequests = { pullRequests: async () => null };
@@ -368,4 +369,47 @@ test("listReposCached serves the last answer at once, refreshes behind it, and f
   invalidateRepos();
   const after = (await listReposCached([parent], noPr)).repos;
   assert.equal(after.find((r) => r.root === dir)?.worktrees[0]?.dirty, 2);
+});
+
+test("only two integers count as a measured pair; anything else is unknown, never 0/0 (#98)", async () => {
+  assert.deepEqual(countedPair("3 1"), { ok: true, ahead: 3, behind: 1 });
+  assert.deepEqual(countedPair("  0   0 \n"), { ok: true, ahead: 0, behind: 0 });
+  // What `%(ahead-behind:<target>)` prints when the target does not resolve,
+  // and the shapes `parseInt(x) || 0` used to turn into a confident 0/0.
+  for (const answer of ["", "   ", "3", "3 1 7", "x y", "-1 2"]) {
+    assert.equal(countedPair(answer), undefined, JSON.stringify(answer));
+  }
+
+  // And the same rule against a real git: a ref that does not resolve is a
+  // failure with git's own sentence, never a pair of zeros.
+  const parent = realpathSync(mkdtempSync(path.join(tmpdir(), "tavi-git-ab-")));
+  const dir = path.join(parent, "repo");
+  git(parent, "init", "-q", "-b", "work", "repo");
+  writeFileSync(path.join(dir, "a.txt"), "one\n");
+  git(dir, "add", ".");
+  git(dir, "commit", "-q", "-m", "init");
+
+  assert.deepEqual(await aheadBehind(dir, "work", "work"), { ok: true, ahead: 0, behind: 0 });
+  const unresolvable = await aheadBehind(dir, "work", "main");
+  assert.equal(unresolvable.ok, false);
+  if (!unresolvable.ok) assert.equal(unresolvable.status, 503);
+});
+
+test("a default branch with no ref that resolves marks every row unknown, not in sync (#98)", async () => {
+  const parent = realpathSync(mkdtempSync(path.join(tmpdir(), "tavi-git-noref-")));
+  const dir = path.join(parent, "repo");
+  git(parent, "init", "-q", "-b", "work", "repo");
+  writeFileSync(path.join(dir, "a.txt"), "one\n");
+  git(dir, "add", ".");
+  git(dir, "commit", "-q", "-m", "init");
+  // origin/HEAD names `main`, but neither refs/heads/main nor
+  // refs/remotes/origin/main exists — there is nothing to compare against.
+  git(dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+
+  const repo = (await listRepos([parent], noPullRequests)).repos.find((candidate) => candidate.root === dir);
+  assert.equal(repo?.defaultBranch, "main");
+  const worktree = repo?.worktrees[0];
+  assert.equal(worktree?.ahead, 0);
+  assert.equal(worktree?.behind, 0);
+  assert.match(worktree?.aheadBehindFailed ?? "", /could not find a ref for main/);
 });

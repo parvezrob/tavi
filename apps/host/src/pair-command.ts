@@ -71,6 +71,8 @@ function tailscaleDnsName(): Promise<string | undefined> {
         const name = status.Self?.DNSName?.replace(/\.$/, "");
         resolve(name || undefined);
       } catch {
+        // Tailscale answered with something that is not JSON: no name to
+        // print, and `--url` is how a person overrides it anyway.
         resolve(undefined);
       }
     });

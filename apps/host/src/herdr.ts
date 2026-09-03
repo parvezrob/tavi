@@ -1,7 +1,23 @@
-import { randomBytes } from "node:crypto";
-import { createConnection } from "node:net";
 import { SHELL_KIND } from "./agent-kinds.js";
-import { parsePermissionDialog, type PermissionDialog } from "./dialog.js";
+import { parsePermissionDialog } from "./dialog.js";
+import { asArray, asRecord, asString, describeConnectionFailure, HerdrRpc, sleep } from "./herdr-rpc.js";
+import { closeTab, createTab, listTree, renameTab } from "./herdr-tabs.js";
+import type {
+  DialogDecision,
+  HerdrAgentLookup,
+  HerdrAgentSource,
+  HerdrDecisionResult,
+  HerdrDialogResult,
+  HerdrOptions,
+  HerdrPreviewResult,
+  HerdrPromptResult,
+  HerdrTabCloseResult,
+  HerdrTabRenameResult,
+  HerdrTabRequest,
+  HerdrTabResult,
+  HerdrTreeResult,
+  TerminalSize,
+} from "./herdr-types.js";
 import type { AgentStatus, AttachCommand, HerdrAgentInfo, HerdrAgentsResult } from "./types.js";
 
 // Verified against herdr 0.7.5. The socket speaks newline-delimited JSON:
@@ -14,108 +30,38 @@ import type { AgentStatus, AttachCommand, HerdrAgentInfo, HerdrAgentsResult } fr
 // agent.list that still has the shape Tavi reads. A newer herdr that keeps
 // the shape just works; one that breaks it degrades to "unavailable" with an
 // update hint rather than mis-parsing.
+const AGENT_STATUSES: readonly AgentStatus[] = ["idle", "working", "blocked", "done", "unknown"];
 const MIN_PROTOCOL = 17;
-const REQUEST_TIMEOUT_MILLISECONDS = 2_000;
 // Enough lines to always capture a dialog's option list plus its footer.
 const DIALOG_READ_LINES = 40;
-const AGENT_STATUSES: readonly AgentStatus[] = ["idle", "working", "blocked", "done", "unknown"];
-
-export interface HerdrOptions {
-  socketPath: string;
-  bin?: string;
-  requestTimeoutMilliseconds?: number;
-  promptSettleMilliseconds?: number;
-}
-
-export type HerdrAgentLookup = { available: true; agent?: HerdrAgentInfo } | { available: false; reason: string };
-
-export type HerdrPreviewResult = { available: true; preview: string } | { available: false; reason: string };
-
-export type HerdrPromptResult = { submitted: true } | { submitted: false; reason: string };
-
-// approve = Enter (confirm the highlighted option); deny = Esc (cancel);
-// { option } = pick a specific numbered option by pressing its digit, which
-// Claude Code treats as select-and-confirm.
-export type DialogDecision = "approve" | "deny" | { option: number };
-
-export type HerdrDialogResult =
-  | { present: true; dialog: PermissionDialog }
-  | { present: false }
-  | { available: false; reason: string };
-
-export type HerdrDecisionResult =
-  | { decided: true; sent: string }
-  // The dialog we were told about is no longer on screen — never fire a key
-  // at whatever replaced it. The caller surfaces this so a stale card can't
-  // answer a prompt that already resolved.
-  | { decided: false; reason: string; stale?: boolean };
-
-export interface HerdrTabRequest {
-  agent?: string | undefined;
-  cwd?: string | undefined;
-  label?: string | undefined;
-}
-
-export type HerdrTabResult = { created: true; paneId: string; tabId: string } | { created: false; reason: string };
-
-export interface HerdrTreeTab {
-  tabId: string;
-  label: string;
-  focused: boolean;
-  agents: HerdrAgentInfo[];
-}
-
-export interface HerdrTreeWorkspace {
-  workspaceId: string;
-  label: string;
-  focused: boolean;
-  tabs: HerdrTreeTab[];
-}
-
-export type HerdrTreeResult =
-  | { available: true; workspaces: HerdrTreeWorkspace[] }
-  | { available: false; reason: string };
-
-export type HerdrTabCloseResult = { closed: true } | { closed: false; reason: string };
-
-export type HerdrTabRenameResult = { renamed: true; label: string } | { renamed: false; reason: string };
-
-export interface TerminalSize {
-  cols: number;
-  rows: number;
-}
-
-export interface HerdrAgentSource {
-  listAgents(): Promise<HerdrAgentsResult>;
-  // The pane's cell size in herdr's own viewer layout — what the Mac shows.
-  // Optional: a source that cannot report it leaves the pane untouched.
-  paneSize?(paneId: string): Promise<TerminalSize | undefined>;
-  listTree(): Promise<HerdrTreeResult>;
-  closeTab(tabId: string): Promise<HerdrTabCloseResult>;
-  renameTab(tabId: string, label: string): Promise<HerdrTabRenameResult>;
-  findAgent(paneId: string): Promise<HerdrAgentLookup>;
-  attachCommand(paneId: string): AttachCommand;
-  readAgent(paneId: string, lines: number): Promise<HerdrPreviewResult>;
-  readDialog(paneId: string): Promise<HerdrDialogResult>;
-  // Terminal panes Tavi reported as "shell" (#66). Optional: a source that
-  // cannot do these leaves such panes labelled as they are.
-  releaseShellAuthority?(paneId: string): Promise<void>;
-  reportShellPane?(paneId: string): Promise<void>;
-  paneExists?(paneId: string): Promise<boolean>;
-  decideAgent(paneId: string, decision: DialogDecision): Promise<HerdrDecisionResult>;
-  promptAgent(paneId: string, text: string): Promise<HerdrPromptResult>;
-  createTab(request: HerdrTabRequest): Promise<HerdrTabResult>;
-}
 
 export class HerdrService implements HerdrAgentSource {
-  private requestCounter = 0;
+  private readonly rpc: HerdrRpc;
 
-  constructor(private readonly options: HerdrOptions) {}
+  constructor(private readonly options: HerdrOptions) {
+    this.rpc = new HerdrRpc(options);
+  }
+
+  renameTab(tabId: string, label: string): Promise<HerdrTabRenameResult> {
+    return renameTab(this.rpc, tabId, label);
+  }
+
+  async listTree(): Promise<HerdrTreeResult> {
+    return listTree(this.rpc, await this.listAgents());
+  }
+
+  createTab(request: HerdrTabRequest): Promise<HerdrTabResult> {
+    return createTab(this.rpc, request, (paneId) => this.reportShellPane(paneId));
+  }
+
+  closeTab(tabId: string): Promise<HerdrTabCloseResult> {
+    return closeTab(this.rpc, tabId);
+  }
 
   async listAgents(): Promise<HerdrAgentsResult> {
     let protocol: number;
     try {
-      const pong = asRecord(await this.request("ping", {}));
+      const pong = asRecord(await this.rpc.request("ping", {}));
       protocol = typeof pong.protocol === "number" ? pong.protocol : -1;
     } catch (error) {
       return unavailable(describeConnectionFailure(error));
@@ -133,17 +79,10 @@ export class HerdrService implements HerdrAgentSource {
       // the list (one round-trip of latency, not two) and as enrichment
       // only: a failed tab.list must never take the agent list down.
       const [result, labels] = await Promise.all([
-        this.request("agent.list", {}).then(asRecord),
-        this.request("tab.list", {})
-          .then((tabsRaw) => {
-            const map = new Map<string, string>();
-            for (const tab of asArray(asRecord(tabsRaw).tabs).map(asRecord)) {
-              const tabId = asString(tab.tab_id);
-              const label = asString(tab.label);
-              if (tabId && label) map.set(tabId, label);
-            }
-            return map;
-          })
+        this.rpc.request("agent.list", {}).then(asRecord),
+        this.rpc
+          .request("tab.list", {})
+          .then(tabLabels)
           .catch(() => new Map<string, string>()),
       ]);
       if (!Array.isArray(result.agents)) {
@@ -172,75 +111,6 @@ export class HerdrService implements HerdrAgentSource {
     }
   }
 
-  // Verified live on the socket: tab.rename answers { type: "tab_info",
-  // tab: { ..., label } } with the applied label.
-  async renameTab(tabId: string, label: string): Promise<HerdrTabRenameResult> {
-    try {
-      const result = asRecord(await this.request("tab.rename", { tab_id: tabId, label }));
-      const applied = asString(asRecord(result.tab).label);
-      return { renamed: true, label: applied || label };
-    } catch (error) {
-      return { renamed: false, reason: describeConnectionFailure(error) };
-    }
-  }
-
-  // Workspace → tab → agents hierarchy for the Jump-to sheet. Composed from
-  // workspace.list + tab.list (verified shapes: {workspaces: [{workspace_id,
-  // label, focused, ...}]} and {tabs: [{tab_id, workspace_id, label, focused,
-  // ...}]}) plus the protocol-gated agent list, so every displayed agent
-  // carries the same identity the events feed uses.
-  async listTree(): Promise<HerdrTreeResult> {
-    const agentsResult = await this.listAgents();
-    if (!agentsResult.available) {
-      return { available: false, reason: agentsResult.reason ?? "Herdr is unavailable." };
-    }
-
-    try {
-      const [workspacesRaw, tabsRaw] = await Promise.all([
-        this.request("workspace.list", {}),
-        this.request("tab.list", {}),
-      ]);
-      const workspaces = asArray(asRecord(workspacesRaw).workspaces).map(asRecord);
-      const tabs = asArray(asRecord(tabsRaw).tabs).map(asRecord);
-
-      const agentsByTab = new Map<string, HerdrAgentInfo[]>();
-      for (const agent of agentsResult.agents) {
-        const existing = agentsByTab.get(agent.tabId) ?? [];
-        existing.push(agent);
-        agentsByTab.set(agent.tabId, existing);
-      }
-
-      const tabsByWorkspace = new Map<string, HerdrTreeTab[]>();
-      for (const tab of tabs) {
-        const workspaceId = asString(tab.workspace_id);
-        const tabId = asString(tab.tab_id);
-        if (!workspaceId || !tabId) continue;
-        const existing = tabsByWorkspace.get(workspaceId) ?? [];
-        existing.push({
-          tabId,
-          label: asString(tab.label),
-          focused: tab.focused === true,
-          agents: agentsByTab.get(tabId) ?? [],
-        });
-        tabsByWorkspace.set(workspaceId, existing);
-      }
-
-      return {
-        available: true,
-        workspaces: workspaces
-          .filter((workspace) => asString(workspace.workspace_id) !== "")
-          .map((workspace) => ({
-            workspaceId: asString(workspace.workspace_id),
-            label: asString(workspace.label),
-            focused: workspace.focused === true,
-            tabs: tabsByWorkspace.get(asString(workspace.workspace_id)) ?? [],
-          })),
-      };
-    } catch (error) {
-      return { available: false, reason: describeConnectionFailure(error) };
-    }
-  }
-
   // Verified live (#44): an external attach sets the pane's *terminal* size
   // and herdr keeps whatever the last attach said even after that client
   // leaves — it does not clamp to its own viewer. The viewer's layout rect
@@ -248,7 +118,7 @@ export class HerdrService implements HerdrAgentSource {
   // displays, so it is the size to hand back on detach.
   async paneSize(paneId: string): Promise<TerminalSize | undefined> {
     try {
-      const snapshot = asRecord(asRecord(await this.request("session.snapshot", {})).snapshot);
+      const snapshot = asRecord(asRecord(await this.rpc.request("session.snapshot", {})).snapshot);
       for (const layout of asArray(snapshot.layouts).map(asRecord)) {
         for (const pane of asArray(layout.panes).map(asRecord)) {
           if (asString(pane.pane_id) !== paneId) continue;
@@ -260,6 +130,8 @@ export class HerdrService implements HerdrAgentSource {
       }
       return undefined;
     } catch {
+      // The size is a nicety for the hand-back; not knowing it leaves the
+      // pane at whatever size it already has.
       return undefined;
     }
   }
@@ -272,7 +144,7 @@ export class HerdrService implements HerdrAgentSource {
   // status from the screen). When that agent exits, the pane leaves
   // agent.list entirely — reporting shell again brings the Terminal back.
   async reportShellPane(paneId: string): Promise<void> {
-    await this.request("pane.report_agent", {
+    await this.rpc.request("pane.report_agent", {
       pane_id: paneId,
       source: "tavi",
       agent: SHELL_KIND,
@@ -281,7 +153,7 @@ export class HerdrService implements HerdrAgentSource {
   }
 
   async releaseShellAuthority(paneId: string): Promise<void> {
-    await this.request("pane.release_agent", {
+    await this.rpc.request("pane.release_agent", {
       pane_id: paneId,
       source: "tavi",
       agent: SHELL_KIND,
@@ -292,9 +164,10 @@ export class HerdrService implements HerdrAgentSource {
   // error for one that is gone.
   async paneExists(paneId: string): Promise<boolean> {
     try {
-      const result = asRecord(await this.request("pane.get", { pane_id: paneId }));
+      const result = asRecord(await this.rpc.request("pane.get", { pane_id: paneId }));
       return asRecord(result.pane).pane_id === paneId;
     } catch {
+      // pane.get errors for a pane that is gone, which is the answer.
       return false;
     }
   }
@@ -325,14 +198,17 @@ export class HerdrService implements HerdrAgentSource {
   async readAgent(paneId: string, lines: number, source: "recent" | "visible" = "recent"): Promise<HerdrPreviewResult> {
     try {
       const result = asRecord(
-        await this.request("agent.read", {
+        await this.rpc.request("agent.read", {
           target: paneId,
           source,
           lines,
           format: "text",
         }),
       );
-      return { available: true, preview: extractPreviewText(result) };
+      // Verified live shape: { type: "pane_read", read: { text, truncated, … } }.
+      const read = asRecord(result.read);
+      const preview = typeof read.text === "string" ? read.text : typeof result.text === "string" ? result.text : "";
+      return { available: true, preview };
     } catch (error) {
       return { available: false, reason: describeConnectionFailure(error) };
     }
@@ -389,7 +265,7 @@ export class HerdrService implements HerdrAgentSource {
       key = String(decision.option);
     }
     try {
-      await this.request("agent.send_keys", { target: paneId, keys: [key] });
+      await this.rpc.request("agent.send_keys", { target: paneId, keys: [key] });
       return { decided: true, sent: key };
     } catch (error) {
       return { decided: false, reason: describeConnectionFailure(error) };
@@ -408,7 +284,7 @@ export class HerdrService implements HerdrAgentSource {
     // so after the retries we fall back to typing the prompt.
     for (let attempt = 0; ; attempt += 1) {
       try {
-        await this.request("agent.prompt", { target: paneId, text });
+        await this.rpc.request("agent.prompt", { target: paneId, text });
         await this.ensurePromptSubmitted(paneId, text);
         return { submitted: true };
       } catch (error) {
@@ -444,7 +320,7 @@ export class HerdrService implements HerdrAgentSource {
       return { submitted: false, reason: "The prompt is empty." };
     }
     try {
-      await this.request("agent.send_keys", { target: paneId, keys: [...keys, "Enter"] });
+      await this.rpc.request("agent.send_keys", { target: paneId, keys: [...keys, "Enter"] });
       return { submitted: true };
     } catch (error) {
       return { submitted: false, reason: describeConnectionFailure(error) };
@@ -469,122 +345,20 @@ export class HerdrService implements HerdrAgentSource {
       const read = await this.readAgent(paneId, 6);
       if (!read.available) return;
       if (!normalizeForComparison(read.preview).includes(marker)) return;
-      await this.request("agent.send_keys", { target: paneId, keys: ["Enter"] }).catch(() => undefined);
+      await this.rpc.request("agent.send_keys", { target: paneId, keys: ["Enter"] }).catch(() => undefined);
     }
   }
+}
 
-  // Verified live: tab.create answers { type: "tab_created", tab, root_pane },
-  // and agent.start launches the agent binary in that pane.
-  async createTab(request: HerdrTabRequest): Promise<HerdrTabResult> {
-    try {
-      const created = asRecord(
-        await this.request("tab.create", {
-          cwd: request.cwd ?? null,
-          label: request.label ?? null,
-          focus: false,
-        }),
-      );
-      const tabId = asString(asRecord(created.tab).tab_id);
-      const paneId = asString(asRecord(created.root_pane).pane_id);
-      if (!tabId || !paneId) {
-        return { created: false, reason: "Herdr did not report the new tab." };
-      }
-      if (request.agent === SHELL_KIND) {
-        // Nothing to launch — the pane already is a shell. Report it as an
-        // agent so herdr lists it and lets the pty bridge attach. Herdr
-        // keeps the reported label over its own detection for the pane's
-        // life, so when an agent later starts inside, the events feed hands
-        // the pane back (#66, releaseShellAuthority).
-        try {
-          await this.reportShellPane(paneId);
-        } catch (reportError) {
-          await this.request("tab.close", { tab_id: tabId }).catch(() => undefined);
-          throw reportError;
-        }
-      } else if (request.agent) {
-        try {
-          // The fresh pane's shell needs a moment to boot; until then
-          // agent.start answers "not an available shell". Retry briefly.
-          await retry(10, 300, () =>
-            this.request("agent.start", {
-              // Herdr requires a globally unique agent name; the kind alone
-              // collides as soon as a second claude/codex exists.
-              name: `${request.agent}-${randomBytes(2).toString("hex")}`,
-              kind: request.agent,
-              pane_id: paneId,
-            }),
-          );
-        } catch (startError) {
-          // Don't leave an orphaned empty tab behind a failed launch.
-          await this.request("tab.close", { tab_id: tabId }).catch(() => undefined);
-          throw startError;
-        }
-      }
-      return { created: true, paneId, tabId };
-    } catch (error) {
-      return { created: false, reason: describeConnectionFailure(error) };
-    }
+// tab.list → the user's label per tab id; entries without both are dropped.
+function tabLabels(raw: unknown): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const tab of asArray(asRecord(raw).tabs).map(asRecord)) {
+    const tabId = asString(tab.tab_id);
+    const label = asString(tab.label);
+    if (tabId && label) map.set(tabId, label);
   }
-
-  async closeTab(tabId: string): Promise<HerdrTabCloseResult> {
-    try {
-      await this.request("tab.close", { tab_id: tabId });
-      return { closed: true };
-    } catch (error) {
-      return { closed: false, reason: describeConnectionFailure(error) };
-    }
-  }
-
-  private request(method: string, params: Record<string, unknown>): Promise<unknown> {
-    // biome-ignore lint/suspicious/noAssignInExpressions: the id must be unique per request, and the counter has no other reader.
-    const id = `tavi:${(this.requestCounter += 1)}`;
-    const timeoutMilliseconds = this.options.requestTimeoutMilliseconds ?? REQUEST_TIMEOUT_MILLISECONDS;
-
-    return new Promise((resolve, reject) => {
-      const socket = createConnection({ path: this.options.socketPath });
-      let buffered = "";
-      let settled = false;
-
-      const finish = (action: () => void) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        socket.destroy();
-        action();
-      };
-      const timer = setTimeout(
-        () => finish(() => reject(new Error("Herdr did not respond in time."))),
-        timeoutMilliseconds,
-      );
-
-      socket.once("error", (error) => finish(() => reject(error)));
-      socket.on("connect", () => {
-        socket.write(`${JSON.stringify({ id, method, params })}\n`);
-      });
-      socket.on("data", (chunk) => {
-        buffered += chunk.toString("utf8");
-        const lineEnd = buffered.indexOf("\n");
-        if (lineEnd === -1) return;
-        try {
-          const message = asRecord(JSON.parse(buffered.slice(0, lineEnd)));
-          if (message.id !== id) {
-            finish(() => reject(new Error("Herdr answered with a mismatched request id.")));
-            return;
-          }
-          if (message.error !== undefined) {
-            const detail = asString(asRecord(message.error).message);
-            finish(() =>
-              reject(new Error(detail ? `Herdr rejected ${method}: ${detail}` : `Herdr rejected ${method}.`)),
-            );
-            return;
-          }
-          finish(() => resolve(message.result));
-        } catch {
-          finish(() => reject(new Error("Herdr sent a malformed response.")));
-        }
-      });
-    });
-  }
+  return map;
 }
 
 function parseAgent(agent: Record<string, unknown>): HerdrAgentInfo {
@@ -614,54 +388,11 @@ function parseAgent(agent: Record<string, unknown>): HerdrAgentInfo {
   };
 }
 
-// Verified live shape: { type: "pane_read", read: { text, truncated, ... } }.
-async function retry<T>(attempts: number, delayMilliseconds: number, run: () => Promise<T>): Promise<T> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      return await run();
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, delayMilliseconds));
-    }
-  }
-  throw lastError;
-}
-
-function extractPreviewText(result: Record<string, unknown>): string {
-  const read = asRecord(result.read);
-  if (typeof read.text === "string") return read.text;
-  if (typeof result.text === "string") return result.text;
-  return "";
-}
-
 function unavailable(reason: string): HerdrAgentsResult {
   return { provider: "herdr", available: false, reason, agents: [] };
-}
-
-function describeConnectionFailure(error: unknown): string {
-  const code = error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined;
-  if (code === "ENOENT" || code === "ECONNREFUSED") return "The Herdr server is not running.";
-  return error instanceof Error ? error.message : "Herdr could not be reached.";
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-function asString(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
 }
 
 // Terminal reads wrap and re-space text arbitrarily; compare content only.
 function normalizeForComparison(value: string): string {
   return value.replace(/\s+/g, "");
-}
-
-function sleep(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

@@ -2,17 +2,12 @@
 import { AttentionOverlay, AttentionReconciler, AttentiveAgentEvents } from "./attention.js";
 import { homedir } from "node:os";
 import { removeCommandLink } from "./command-link.js";
-import {
-  bootstrap,
-  BootstrapError,
-  defaultDeps,
-  diagnose,
-  doorReady,
-  durablePackageRoot,
-  formatChecks,
-  serviceEntrypoint,
-} from "./bootstrap.js";
-import { PreviewRegistry, createPreviewDoor } from "./preview.js";
+import { bootstrap, BootstrapError } from "./bootstrap.js";
+import { defaultDeps } from "./bootstrap-deps.js";
+import { diagnose, doorReady, formatChecks } from "./doctor.js";
+import { durablePackageRoot, serviceEntrypoint } from "./package-root.js";
+import { PreviewRegistry } from "./preview.js";
+import { createPreviewDoor } from "./preview-door.js";
 import { installClaudeHooks, removeClaudeHooks } from "./claude-hooks.js";
 import { uninstallHerdrService } from "./herdr-service.js";
 import { uninstall } from "./uninstall.js";
@@ -118,6 +113,8 @@ if (command === "uninstall") {
           Object.values(site.Handlers ?? {}).map((handler): [string, string] => [host, handler.Proxy ?? ""]),
         );
       } catch {
+        // Only used to list what uninstall would remove; a Tailscale that
+        // will not answer means nothing of ours is published through it.
         return [];
       }
     },

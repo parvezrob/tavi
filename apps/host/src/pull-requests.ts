@@ -1,7 +1,7 @@
 import { describeGitError, git } from "./git-exec.js";
 import { describeGhFailure, runGh, type GhRunner } from "./gh.js";
-import { aheadBehind } from "./git.js";
-import { baseBranch, currentBranch, pushBranch, pushRemote, upstreamInfo } from "./source-control.js";
+import { type AheadBehind, aheadBehind, baseBranch, currentBranch, pushRemote, upstreamInfo } from "./git-refs.js";
+import { pushBranch } from "./commits.js";
 
 // Source Control — Pull request (#79, #73 part 5; PRD §7.12): one
 // worktree's pull request, created and read through the person's own `gh`
@@ -31,6 +31,9 @@ export interface PullRequestStatus {
   // Commits a pull request would push first: what the upstream lacks, or
   // on a never-pushed branch everything over its base.
   unpushed: number;
+  // Why that count could not be measured, as a sentence (#98). Absent when
+  // it was: a git failure must not read as "everything is on the remote".
+  unpushedFailed?: string;
   remote: string | null;
   gh: GhState;
 }
@@ -60,10 +63,14 @@ export async function pullRequestStatus(
     return { ok: false, status: 503, error: `git could not read that worktree: ${describeGitError(error)}` };
   }
   const remote = branch ? await pushRemote(worktreePath, branch) : null;
-  const unpushed = branch ? await unpushedCount(worktreePath, branch) : 0;
-  if (!branch)
-    return { ok: true, status: { path: worktreePath, branch, pullRequest: null, unpushed, remote, gh: { ok: true } } };
-  const found = await findPullRequest(worktreePath, branch, gh);
+  // The zero stays beside the reason so a phone built against 0.1.17, which
+  // decodes `unpushed` as a required number, keeps working.
+  const counted = branch ? await unpushedCount(worktreePath, branch) : null;
+  const unpushed = counted?.ok ? counted.ahead : 0;
+  const unpushedFailed = !counted || counted.ok ? {} : { unpushedFailed: counted.error };
+  // A detached HEAD has no branch to look a pull request up by; gh is not
+  // asked, and not asking is not a gh failure.
+  const found = branch ? await findPullRequest(worktreePath, branch, gh) : ({ ok: true, pullRequest: null } as const);
   return {
     ok: true,
     status: {
@@ -71,6 +78,7 @@ export async function pullRequestStatus(
       branch,
       pullRequest: found.ok ? found.pullRequest : null,
       unpushed,
+      ...unpushedFailed,
       remote,
       gh: found.ok ? { ok: true } : { ok: false, reason: found.reason },
     },
@@ -365,15 +373,18 @@ async function linkedNumber(worktreePath: string, branch: string): Promise<numbe
     const number = Number.parseInt(value, 10);
     return Number.isInteger(number) && number > 0 ? number : null;
   } catch {
+    // No `branch.<b>.tavi-pull-request` set (the ordinary case): the
+    // caller falls back to asking gh which PR has this head.
     return null;
   }
 }
 
-async function unpushedCount(worktreePath: string, branch: string): Promise<number> {
+// What a pull request would push first, or why git could not say — never a
+// silent 0, which reads as "everything is already on the remote" (#98).
+async function unpushedCount(worktreePath: string, branch: string): Promise<AheadBehind> {
   const upstream = await upstreamInfo(worktreePath, branch);
-  if (upstream) return upstream.ahead;
-  const base = await baseBranch(worktreePath, branch);
-  return (await aheadBehind(worktreePath, branch, base))[0];
+  if (upstream) return { ok: true, ahead: upstream.ahead, behind: upstream.behind };
+  return aheadBehind(worktreePath, branch, await baseBranch(worktreePath, branch));
 }
 
 function numberFromUrl(text: string): number | null {

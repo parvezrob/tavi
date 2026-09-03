@@ -217,3 +217,23 @@ test("checks roll up to one word, and gh failures to one sentence", () => {
   assert.match(describeGhFailure(ghError("no git remotes found")), /no GitHub remote/);
   assert.match(describeGhFailure(ghError("something odd happened")), /gh said: something odd/);
 });
+
+test('unpushed says why it is unknown rather than reading as "everything is on the remote" (#98)', async () => {
+  const parent = realpathSync(mkdtempSync(path.join(tmpdir(), "tavi-pr-ab-")));
+  const dir = path.join(parent, "repo");
+  git(parent, "init", "-q", "-b", "work", "repo");
+  git(dir, "config", "user.name", "t");
+  git(dir, "config", "user.email", "t@t");
+  writeFileSync(path.join(dir, "a.txt"), "one\n");
+  git(dir, "add", ".");
+  git(dir, "commit", "-q", "-m", "init");
+  // No upstream and a default branch (`main`, per origin/HEAD) with no ref
+  // that resolves, so `rev-list work...main` fails.
+  git(dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+
+  const result = await pullRequestStatus(dir, { gh: async () => ({ stdout: "[]" }) });
+  assert.ok(result.ok, JSON.stringify(result));
+  // The zero a 0.1.17 phone decodes is still there, beside the reason.
+  assert.equal(result.status.unpushed, 0);
+  assert.match(result.status.unpushedFailed ?? "", /main/);
+});

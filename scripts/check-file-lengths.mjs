@@ -14,9 +14,9 @@ import { fileURLToPath } from "node:url";
 const SOURCE_LIMIT = 400;
 const TEST_LIMIT = 1_500;
 
-// Today's offenders, each already named in #96 item 8. #98 splits them and
-// empties this list; nothing new may be added to it.
-const ALLOWED = ["bootstrap.ts", "worktrees.ts", "herdr.ts", "source-control.ts", "preview.ts", "git.ts"];
+// Empty since #98 split the six grab-bags #96 item 8 named, and it stays
+// empty: a file over the limit is split, never allowlisted.
+const ALLOWED = [];
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sourceDir = path.join(root, "apps", "host", "src");

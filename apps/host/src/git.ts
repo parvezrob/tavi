@@ -1,7 +1,14 @@
 import path from "node:path";
-import { runGh } from "./gh.js";
 import { describeGitError, git } from "./git-exec.js";
+import { type AheadBehind, aheadBehind, countedPair, findDefaultBranch, listBranches, refExists } from "./git-refs.js";
+import { monotonicNow } from "./monotonic.js";
 import { isWithinRoots } from "./projects.js";
+import {
+  attachPullRequests,
+  cachedPullRequestLookup,
+  type PullRequestLookup,
+  type PullRequestRef,
+} from "./pull-request-cache.js";
 import { scanWorkspaces } from "./workspaces.js";
 
 // Read-only worktree and branch visibility (#59a): "where is my work
@@ -37,26 +44,15 @@ export interface WorktreeInfo {
   // login (#74). null when there is none, when `gh` is missing or logged
   // out, or for a detached worktree — the row simply shows no badge.
   pullRequest: PullRequestRef | null;
+  // Why ahead/behind could not be measured, as a sentence (#98). Absent
+  // when they were: a git failure must not render as "in sync".
+  aheadBehindFailed?: string;
   // Inside the configured roots. git lists a worktree wherever it lives,
   // but the host's write routes (status, commit, remove…) answer only
   // inside the roots; a client can say so instead of showing a dead
   // button (#83).
   withinRoots: boolean;
 }
-
-export interface PullRequestRef {
-  number: number;
-  url: string;
-}
-
-// How a pull request is looked up for a branch; injectable so tests need
-// no `gh`. The default shells out to `gh pr list`. The signal fires when
-// the pass's budget runs out: a lookup that can stop should.
-export type PullRequestLookup = (
-  repository: string,
-  branch: string,
-  signal?: AbortSignal,
-) => Promise<PullRequestRef | null>;
 
 export interface ListReposOptions {
   pullRequests?: PullRequestLookup;
@@ -85,8 +81,6 @@ export interface ReposAnswer {
   // means there are no repositories (#83).
   error: string | null;
 }
-
-const MAX_BRANCHES = 200;
 
 // Repositories reachable from the configured roots, each with every
 // worktree git knows about (which may live outside the roots — git found
@@ -284,13 +278,20 @@ async function attachAheadBehind(
     : (await refExists(repository, `refs/remotes/origin/${defaultBranch}`))
       ? `refs/remotes/origin/${defaultBranch}`
       : null;
-  if (!target) return;
+  if (!target) {
+    // A named default branch git has no ref for (a stale origin/HEAD, or a
+    // clone with neither the local branch nor its remote-tracking copy):
+    // nothing can be compared, so every row says so instead of zeros (#98).
+    const unresolved = `git could not find a ref for ${defaultBranch} to compare against.`;
+    for (const worktree of worktrees) if (worktree.branch !== defaultBranch) worktree.aheadBehindFailed = unresolved;
+    return;
+  }
   const branches = [
     ...new Set(
       worktrees.flatMap((worktree) => (worktree.branch && worktree.branch !== defaultBranch ? [worktree.branch] : [])),
     ),
   ];
-  const counts = new Map<string, [number, number]>();
+  const counts = new Map<string, AheadBehind>();
   if (branches.length > 0) {
     try {
       const { stdout } = await git(repository, [
@@ -301,147 +302,35 @@ async function attachAheadBehind(
       for (const line of stdout.split("\n")) {
         const [ref, pair] = line.split("\0");
         if (!ref?.startsWith("refs/heads/")) continue;
-        const [ahead = 0, behind = 0] = (pair ?? "")
-          .trim()
-          .split(/\s+/)
-          .map((value) => Number.parseInt(value, 10) || 0);
-        counts.set(ref.slice("refs/heads/".length), [ahead, behind]);
+        const counted = countedPair(pair ?? "");
+        // A field this git left empty (it does that for an unresolvable
+        // target) is not a measurement; only two integers are (#98 review).
+        if (counted) counts.set(ref.slice("refs/heads/".length), counted);
       }
     } catch {
+      // Older git has no `%(ahead-behind:…)`; ask per branch instead. A
+      // branch that fails there carries its own reason to the row.
       for (const branch of branches) counts.set(branch, await aheadBehind(repository, `refs/heads/${branch}`, target));
     }
   }
   for (const worktree of worktrees) {
-    if (worktree.branch) {
-      // Exact names only: `for-each-ref refs/heads/fix` also lists
-      // `refs/heads/fix/foo`, and the map holds both under their own name.
-      const pair = counts.get(worktree.branch);
-      if (pair) [worktree.ahead, worktree.behind] = pair;
-    } else if (worktree.head) {
-      [worktree.ahead, worktree.behind] = await aheadBehind(repository, worktree.head, target);
+    // A worktree standing on the default branch is 0/0 by construction, and
+    // one with neither a branch nor a HEAD has nothing to compare.
+    if (worktree.branch === defaultBranch || (!worktree.branch && !worktree.head)) continue;
+    // Exact names only: `for-each-ref refs/heads/fix` also lists
+    // `refs/heads/fix/foo`, and the map holds both under their own name. A
+    // branch missing from it, or listed without two counts, was not measured
+    // and says so rather than staying at 0/0 (#98).
+    const measured = worktree.branch
+      ? counts.get(worktree.branch)
+      : await aheadBehind(repository, worktree.head, target);
+    if (measured?.ok) {
+      worktree.ahead = measured.ahead;
+      worktree.behind = measured.behind;
+    } else {
+      worktree.aheadBehindFailed =
+        measured?.error ?? `git did not report how ${worktree.branch} compares with ${target}.`;
     }
-  }
-}
-
-// Pull requests for one repository's worktrees, a few at a time and within
-// one budget: the badge is a nicety, so whatever has not answered when the
-// budget runs out is null this poll, and the lookups still running are
-// told to stop (their `gh` is killed) rather than left to finish for
-// nobody (#85). The default branch is skipped (it has no PR of its own by
-// construction); a lookup that throws costs the badge, never the repo.
-const PR_PASS_BUDGET_MS = 3_000;
-const PR_PASS_CONCURRENCY = 4;
-
-async function attachPullRequests(
-  repository: string,
-  worktrees: WorktreeInfo[],
-  defaultBranch: string | null,
-  lookup: PullRequestLookup,
-): Promise<void> {
-  const candidates = worktrees.filter((worktree) => worktree.branch && worktree.branch !== defaultBranch);
-  if (candidates.length === 0) return;
-  const controller = new AbortController();
-  const expired = new Promise<null>((resolve) =>
-    controller.signal.addEventListener("abort", () => resolve(null), { once: true }),
-  );
-  const timer = setTimeout(() => controller.abort(), PR_PASS_BUDGET_MS);
-  timer.unref();
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (next < candidates.length && !controller.signal.aborted) {
-      const worktree = candidates[next] as WorktreeInfo;
-      next += 1;
-      try {
-        // Raced as well as signalled: an injected lookup that ignores the
-        // signal must not hold the whole answer past the budget.
-        const value = await Promise.race([lookup(repository, worktree.branch as string, controller.signal), expired]);
-        worktree.pullRequest = controller.signal.aborted ? null : value;
-      } catch {
-        worktree.pullRequest = null;
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(PR_PASS_CONCURRENCY, candidates.length) }, worker));
-  clearTimeout(timer);
-}
-
-// `gh pr list` under the person's own login. Remembered per repo+branch —
-// a minute for an answer, ten seconds for a failure (a timeout or a moment
-// offline must not blank a real badge for a minute) — least recently used
-// first out, and single-flight, so a phone polling every 30 s while gh is
-// slow never stacks calls for the same branch. Only a PR whose head is
-// *this* repository counts: `--head` alone matches any fork's branch of
-// the same name, and a stranger's PR on the card would be worse than none
-// (found in review, 2026-09-02). Any failure — gh missing, logged out,
-// offline, not a GitHub remote, stopped by the pass's budget — is null,
-// never an error.
-const PR_CACHE_MS = 60_000;
-const PR_FAILURE_CACHE_MS = 10_000;
-const PR_CACHE_MAX_ENTRIES = 2_000;
-const GH_TIMEOUT_MS = 5_000;
-type PullRequestCacheEntry = { at: number; ttl: number; value: Promise<PullRequestRef | null> };
-const pullRequestCache = new Map<string, PullRequestCacheEntry>();
-
-function cachedPullRequestLookup(
-  repository: string,
-  branch: string,
-  signal?: AbortSignal,
-): Promise<PullRequestRef | null> {
-  const key = `${repository}\0${branch}`;
-  const now = monotonicNow();
-  const hit = pullRequestCache.get(key);
-  if (hit && now - hit.at < hit.ttl) {
-    // Touched: a Map keeps insertion order, so re-inserting makes it the
-    // newest and the first key the least recently used.
-    pullRequestCache.delete(key);
-    pullRequestCache.set(key, hit);
-    return hit.value;
-  }
-  const entry: PullRequestCacheEntry = { at: now, ttl: PR_CACHE_MS, value: Promise.resolve(null) };
-  entry.value = ghPullRequest(repository, branch, signal).then((result) => {
-    if (result.failed) entry.ttl = PR_FAILURE_CACHE_MS;
-    return result.value;
-  });
-  pullRequestCache.delete(key);
-  if (pullRequestCache.size >= PR_CACHE_MAX_ENTRIES) {
-    const oldest = pullRequestCache.keys().next().value;
-    if (oldest !== undefined) pullRequestCache.delete(oldest);
-  }
-  pullRequestCache.set(key, entry);
-  return entry.value;
-}
-
-// The host's own writes (#79 create/link) make the cached answer stale
-// at once; the next card poll asks gh again.
-export function forgetPullRequest(repository: string, branch: string): void {
-  pullRequestCache.delete(`${repository}\0${branch}`);
-}
-
-function monotonicNow(): number {
-  return Number(process.hrtime.bigint() / 1_000_000n);
-}
-
-async function ghPullRequest(
-  repository: string,
-  branch: string,
-  signal?: AbortSignal,
-): Promise<{ value: PullRequestRef | null; failed: boolean }> {
-  try {
-    const { stdout } = await runGh(
-      repository,
-      ["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isCrossRepository", "--limit", "5"],
-      { timeoutMs: GH_TIMEOUT_MS, ...(signal ? { signal } : {}) },
-    );
-    const parsed: unknown = JSON.parse(stdout);
-    if (!Array.isArray(parsed)) return { value: null, failed: true };
-    for (const item of parsed as { number?: unknown; url?: unknown; isCrossRepository?: unknown }[]) {
-      if (item.isCrossRepository === false && typeof item.number === "number" && typeof item.url === "string") {
-        return { value: { number: item.number, url: item.url }, failed: false };
-      }
-    }
-    return { value: null, failed: false };
-  } catch {
-    return { value: null, failed: true };
   }
 }
 
@@ -465,80 +354,6 @@ async function dirtyCount(worktreePath: string): Promise<number> {
     // A worktree git listed but that is missing on disk (moved, deleted
     // outside git): nothing to report, not a failure of the whole repo.
     return 0;
-  }
-}
-
-// What "off main" means for this repository: the remote's default branch
-// when one is configured, else a local `main` or `master`, else nothing to
-// compare against. Checked as refs, not against which branches happen to be
-// checked out in a worktree right now — a repo can have a `main` nobody is
-// standing on, and that is the ordinary case this feature is for.
-export async function findDefaultBranch(mainWorktreePath: string): Promise<string | null> {
-  try {
-    const { stdout } = await git(mainWorktreePath, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
-    const ref = stdout.trim().replace(/^origin\//, "");
-    if (ref) return ref;
-  } catch {
-    // No remote, or no origin/HEAD set locally — fall through.
-  }
-  if (await refExists(mainWorktreePath, "refs/heads/main")) return "main";
-  if (await refExists(mainWorktreePath, "refs/heads/master")) return "master";
-  return null;
-}
-
-// Local branches, default branch first, alphabetical after; capped so a
-// repository with thousands of stale branches does not turn one poll into
-// a megabyte, and said so when cut. Empty when git cannot list (a repo
-// with no commits yet).
-async function listBranches(
-  repository: string,
-  defaultBranch: string | null,
-): Promise<{ names: string[]; truncated: boolean }> {
-  try {
-    const { stdout } = await git(repository, [
-      "for-each-ref",
-      "--format=%(refname:short)",
-      "--sort=refname",
-      "refs/heads/",
-    ]);
-    const names = stdout.split("\n").filter((name) => name.length > 0);
-    const others = names.filter((name) => name !== defaultBranch);
-    const rest = others.slice(0, MAX_BRANCHES);
-    const withDefault = defaultBranch && names.includes(defaultBranch) ? [defaultBranch, ...rest] : rest;
-    return { names: withDefault, truncated: others.length > rest.length };
-  } catch {
-    return { names: [], truncated: false };
-  }
-}
-
-export async function refExists(repository: string, ref: string): Promise<boolean> {
-  try {
-    await git(repository, ["rev-parse", "--verify", "--quiet", ref]);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// Commits `left` has that `right` does not, and the reverse — the one
-// ahead/behind helper (#83; source-control.ts and pull-requests.ts share
-// it). 0/0 when either side is missing or they are the same ref, and when
-// a side does not resolve (a remote-only default with no local copy).
-export async function aheadBehind(
-  repository: string,
-  left: string | null,
-  right: string | null,
-): Promise<[number, number]> {
-  if (!left || !right || left === right) return [0, 0];
-  try {
-    const { stdout } = await git(repository, ["rev-list", "--left-right", "--count", `${left}...${right}`]);
-    const [ahead, behind] = stdout
-      .trim()
-      .split(/\s+/)
-      .map((value) => Number.parseInt(value, 10) || 0);
-    return [ahead ?? 0, behind ?? 0];
-  } catch {
-    return [0, 0];
   }
 }
 

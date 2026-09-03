@@ -4,14 +4,8 @@ import type { HostConfig } from "../config.js";
 import { resolveWithinRoots } from "../files.js";
 import { bodyRecord, type Route, readJsonBody, sendJson, sendPathFailure } from "../http.js";
 import type { DeviceRegistry } from "../pairing.js";
-import {
-  defaultDiscoveryDeps,
-  type DiscoveryDeps,
-  listProjectServers,
-  stopProjectServer,
-  TICKET_COOKIE,
-  validPort,
-} from "../preview.js";
+import { TICKET_COOKIE, validPort } from "../preview.js";
+import { defaultDiscoveryDeps, type DiscoveryDeps, listProjectServers, stopProjectServer } from "../preview-servers.js";
 
 export const previewRoutes: Route = async (url, request, response, context) => {
   const { config, devices, previews, doorReady, discovery } = context;

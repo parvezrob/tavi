@@ -1,5 +1,5 @@
 import { parseClaudeHookEvent } from "../attention.js";
-import type { DialogDecision } from "../herdr.js";
+import type { DialogDecision } from "../herdr-types.js";
 import { bodyRecord, readJsonBody, type Route, sendHerdrUnconfigured, sendJson } from "../http.js";
 import { mergeRecentProjects } from "../projects.js";
 import { clamp, safeSessionId } from "../validation.js";

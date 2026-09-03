@@ -1,20 +1,17 @@
 import path from "node:path";
 import { resolveWithinRoots } from "../files.js";
-import { forgetPullRequest, invalidateRepos, listReposCached } from "../git.js";
+import { invalidateRepos, listReposCached } from "../git.js";
+import { forgetPullRequest } from "../pull-request-cache.js";
 import { git } from "../git-exec.js";
 import { bodyRecord, readJsonBody, type Route, sendJson, sendPathFailure } from "../http.js";
 import { createPullRequest, linkPullRequest, listIssues, pullRequestStatus } from "../pull-requests.js";
-import {
-  commitStaged,
-  currentBranch,
-  pullBase,
-  pushBranch,
-  stageFiles,
-  worktreeLog,
-  worktreeStatus,
-  writeCommitMessage,
-} from "../source-control.js";
-import { createWorktree, previewRemoval, removeWorktree } from "../worktrees.js";
+import { writeCommitMessage } from "../commit-message.js";
+import { pullBase, pushBranch, worktreeLog } from "../commits.js";
+import { currentBranch } from "../git-refs.js";
+import { commitStaged, stageFiles, worktreeStatus } from "../source-control.js";
+import { previewRemoval } from "../removal-preview.js";
+import { removeWorktree } from "../removal.js";
+import { createWorktree } from "../worktrees.js";
 
 export const sourceControlRoutes: Route = async (url, request, response, context) => {
   const { config, herdr, projects, pullRequests, gh } = context;

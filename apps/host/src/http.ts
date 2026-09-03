@@ -3,10 +3,11 @@ import type { AgentKindDetector } from "./agent-kinds.js";
 import type { AttentionOverlay } from "./attention.js";
 import type { HostConfig } from "./config.js";
 import type { GhRunner } from "./gh.js";
-import type { PullRequestLookup } from "./git.js";
-import type { HerdrAgentSource } from "./herdr.js";
+import type { PullRequestLookup } from "./pull-request-cache.js";
+import type { HerdrAgentSource } from "./herdr-types.js";
 import type { DeviceRegistry, PairingSessions } from "./pairing.js";
-import type { DiscoveryDeps, PreviewRegistry } from "./preview.js";
+import type { PreviewRegistry } from "./preview.js";
+import type { DiscoveryDeps } from "./preview-servers.js";
 import type { ProjectHistory } from "./projects.js";
 import type { TailscaleRunner } from "./tailscale.js";
 import type { WorkspaceInfo } from "./types.js";
@@ -53,6 +54,8 @@ export async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   try {
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
+    // Not swallowed: an unparseable body is a 400 with a sentence, and the
+    // parser's own message would say nothing a client can act on.
     throw new InputError("Request body must be valid JSON.");
   }
 }

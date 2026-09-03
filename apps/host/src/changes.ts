@@ -156,6 +156,8 @@ async function branchName(repository: string): Promise<string | undefined> {
     const name = stdout.trim();
     return name && name !== "HEAD" ? name : undefined;
   } catch {
+    // A repository with no commits yet has no branch to name; the caller
+    // shows the changes without one.
     return undefined;
   }
 }

@@ -197,6 +197,8 @@ function readTokenFile(file: string): TokenFileState {
       ? { status: "valid", token: stored.token }
       : { status: "invalid" };
   } catch {
+    // Unreadable or malformed: treated as invalid so a fresh token is
+    // minted rather than the host starting with none.
     return { status: "invalid" };
   }
 }
