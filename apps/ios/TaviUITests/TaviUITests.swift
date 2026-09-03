@@ -1,3 +1,6 @@
+// Over the 400-line line; split in #69.
+// swiftlint:disable file_length
+
 import XCTest
 
 final class TaviUITests: XCTestCase {

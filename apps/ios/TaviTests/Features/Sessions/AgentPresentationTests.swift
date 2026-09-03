@@ -3,71 +3,51 @@ import Foundation
 import Testing
 
 struct AgentPresentationTests {
-    private func summary(
-        agent: String = "claude",
-        status: String = "working",
-        cwd: String = "/Users/dev/projects/tavi",
-        title: String = "",
-        tabLabel: String? = nil
-    ) -> AgentSummary {
-        AgentSummary(
-            id: "pane-1",
-            agent: agent,
-            status: status,
-            cwd: cwd,
-            title: title,
-            workspaceId: "ws-1",
-            tabId: "tab-1",
-            tabLabel: tabLabel,
-            focused: false
-        )
-    }
-
     // #55: a tab label is identity only when a person plausibly chose it.
     @Test
     func keepsUserChosenTabNamesAndDropsHerdrDefaults() {
-        #expect(summary(tabLabel: "fix auth bug").userTabName == "fix auth bug")
-        #expect(summary(tabLabel: "  spaced  ").userTabName == "spaced")
-        #expect(summary(tabLabel: nil).userTabName == nil)
-        #expect(summary(tabLabel: "").userTabName == nil)
-        #expect(summary(tabLabel: "3").userTabName == nil)
-        #expect(summary(tabLabel: "claude").userTabName == nil)
-        #expect(summary(tabLabel: "Claude Code").userTabName == nil)
-        #expect(summary(tabLabel: "tavi claude").userTabName == nil)
-        #expect(summary(agent: "shell", tabLabel: "tavi terminal").userTabName == nil)
+        #expect(Fixtures.agentSummary(tabLabel: "fix auth bug").userTabName == "fix auth bug")
+        #expect(Fixtures.agentSummary(tabLabel: "  spaced  ").userTabName == "spaced")
+        #expect(Fixtures.agentSummary(tabLabel: nil).userTabName == nil)
+        #expect(Fixtures.agentSummary(tabLabel: "").userTabName == nil)
+        #expect(Fixtures.agentSummary(tabLabel: "3").userTabName == nil)
+        #expect(Fixtures.agentSummary(tabLabel: "claude").userTabName == nil)
+        #expect(Fixtures.agentSummary(tabLabel: "Claude Code").userTabName == nil)
+        #expect(Fixtures.agentSummary(tabLabel: "tavi claude").userTabName == nil)
+        #expect(Fixtures.agentSummary(agent: "shell", tabLabel: "tavi terminal").userTabName == nil)
         // Tabs created before the rename (#62) carry the old prefix.
-        #expect(summary(tabLabel: "mocha claude").userTabName == nil)
+        #expect(Fixtures.agentSummary(tabLabel: "mocha claude").userTabName == nil)
         // Phone-created defaults of any kind, and the pane's own command
         // line, are not names (#50 live pass).
-        #expect(summary(tabLabel: "mocha terminal").userTabName == nil)
-        #expect(summary(tabLabel: "tavi terminal").userTabName == nil)
-        #expect(summary(tabLabel: "claude --resume abc").userTabName == nil)
-        #expect(summary(tabLabel: "claude").userTabName == nil)
-        #expect(summary(tabLabel: "npm run dev -- --port 3000").userTabName == nil)
-        #expect(summary(tabLabel: "--dangerously-skip").userTabName == nil)
-        #expect(summary(tabLabel: "claude-review").userTabName == "claude-review")
-        #expect(summary(agent: "shell", tabLabel: "mocha terminal").userTabName == nil)
+        #expect(Fixtures.agentSummary(tabLabel: "mocha terminal").userTabName == nil)
+        #expect(Fixtures.agentSummary(tabLabel: "tavi terminal").userTabName == nil)
+        #expect(Fixtures.agentSummary(tabLabel: "claude --resume abc").userTabName == nil)
+        #expect(Fixtures.agentSummary(tabLabel: "claude").userTabName == nil)
+        #expect(Fixtures.agentSummary(tabLabel: "npm run dev -- --port 3000").userTabName == nil)
+        #expect(Fixtures.agentSummary(tabLabel: "--dangerously-skip").userTabName == nil)
+        #expect(Fixtures.agentSummary(tabLabel: "claude-review").userTabName == "claude-review")
+        #expect(Fixtures.agentSummary(agent: "shell", tabLabel: "mocha terminal").userTabName == nil)
         // "tavi" leading a real name is still the user's name.
-        #expect(summary(tabLabel: "tavi redesign").userTabName == "tavi redesign")
+        #expect(Fixtures.agentSummary(tabLabel: "tavi redesign").userTabName == "tavi redesign")
     }
 
     @Test
     func secondaryIdentityPrefersTheUsersNameOverTheAgentsTitle() {
-        #expect(summary(title: "Fixing the tests", tabLabel: "ship v2").secondaryIdentity == "ship v2")
-        #expect(summary(title: "Fixing the tests").secondaryIdentity == "Fixing the tests")
+        #expect(Fixtures.agentSummary(title: "Fixing the tests", tabLabel: "ship v2").secondaryIdentity == "ship v2")
+        #expect(Fixtures.agentSummary(title: "Fixing the tests").secondaryIdentity == "Fixing the tests")
         // A shell's title is its prompt — never identity; the user's tab
         // name still is.
-        #expect(summary(agent: "shell", title: "user@host:~").secondaryIdentity == nil)
-        #expect(summary(agent: "shell", title: "user@host:~", tabLabel: "deploy box").secondaryIdentity == "deploy box")
+        #expect(Fixtures.agentSummary(agent: "shell", title: "user@host:~").secondaryIdentity == nil)
+        #expect(Fixtures.agentSummary(agent: "shell", title: "user@host:~", tabLabel: "deploy box").secondaryIdentity == "deploy box")
     }
 
     @Test
     func partitionsStatusesIntoHomeSections() {
-        #expect(summary(status: "blocked").homeSection == .needsYou)
-        #expect(summary(status: "working").homeSection == .active)
-        #expect(summary(status: "done").homeSection == .recent)
-        #expect(summary(status: "idle").homeSection == .recent)
-        #expect(summary(status: "something-new").homeSection == .recent)
+        #expect(Fixtures.agentSummary(status: "blocked").homeSection == .needsYou)
+        #expect(Fixtures.agentSummary(status: "working").homeSection == .active)
+        #expect(Fixtures.agentSummary(status: "done").homeSection == .recent)
+        #expect(Fixtures.agentSummary(status: "idle").homeSection == .recent)
+        #expect(Fixtures.agentSummary(status: "something-new").homeSection == .recent)
     }
 
     @Test
@@ -79,54 +59,45 @@ struct AgentPresentationTests {
 
     @Test
     func displayNamesAreRecognizableProducts() {
-        #expect(summary(agent: "claude").displayName == "Claude Code")
-        #expect(summary(agent: "codex").displayName == "Codex")
-        #expect(summary(agent: "gemini").displayName == "Gemini CLI")
-        #expect(summary(agent: "opencode").displayName == "OpenCode")
-        #expect(summary(agent: "shell").displayName == "Terminal")
-        #expect(summary(agent: "shell").isShell)
-        #expect(!summary(agent: "claude").isShell)
+        #expect(Fixtures.agentSummary(agent: "claude").displayName == "Claude Code")
+        #expect(Fixtures.agentSummary(agent: "codex").displayName == "Codex")
+        #expect(Fixtures.agentSummary(agent: "gemini").displayName == "Gemini CLI")
+        #expect(Fixtures.agentSummary(agent: "opencode").displayName == "OpenCode")
+        #expect(Fixtures.agentSummary(agent: "shell").displayName == "Terminal")
+        #expect(Fixtures.agentSummary(agent: "shell").isShell)
+        #expect(!Fixtures.agentSummary(agent: "claude").isShell)
         // A kind herdr adds before this map learns it still reads sensibly.
-        #expect(summary(agent: "newthing").displayName == "Newthing")
+        #expect(Fixtures.agentSummary(agent: "newthing").displayName == "Newthing")
     }
 
     @Test
     func projectNamePrefersTitleThenDirectoryName() {
-        #expect(summary(title: "fix the build").projectName == "fix the build")
-        #expect(summary(title: "").projectName == "tavi")
-        #expect(summary(agent: "claude", title: "Claude").projectName == "tavi")
+        #expect(Fixtures.agentSummary(title: "fix the build").projectName == "fix the build")
+        #expect(Fixtures.agentSummary(title: "").projectName == "tavi")
+        #expect(Fixtures.agentSummary(agent: "claude", title: "Claude").projectName == "tavi")
         // Herdr's default tab title is the product name; a shell's is its prompt.
-        #expect(summary(agent: "claude", title: "Claude Code").projectName == "tavi")
-        #expect(summary(agent: "claude", title: "Claude Code").meaningfulTitle == nil)
-        #expect(summary(agent: "claude", title: "Claude Code ").meaningfulTitle == nil)
-        #expect(summary(agent: "claude", title: "fix the build").meaningfulTitle == "fix the build")
+        #expect(Fixtures.agentSummary(agent: "claude", title: "Claude Code").projectName == "tavi")
+        #expect(Fixtures.agentSummary(agent: "claude", title: "Claude Code").meaningfulTitle == nil)
+        #expect(Fixtures.agentSummary(agent: "claude", title: "Claude Code ").meaningfulTitle == nil)
+        #expect(Fixtures.agentSummary(agent: "claude", title: "fix the build").meaningfulTitle == "fix the build")
         // A shell's prompt title still names it outside the home, never inside a group.
-        #expect(summary(agent: "shell", title: "dev@mac:~/tavi").projectName == "dev@mac:~/tavi")
-        #expect(summary(agent: "shell", title: "dev@mac:~/tavi").meaningfulTitle == nil)
-        #expect(summary(cwd: "/Users/dev").projectName == "Home")
+        #expect(Fixtures.agentSummary(agent: "shell", title: "dev@mac:~/tavi").projectName == "dev@mac:~/tavi")
+        #expect(Fixtures.agentSummary(agent: "shell", title: "dev@mac:~/tavi").meaningfulTitle == nil)
+        #expect(Fixtures.agentSummary(cwd: "/Users/dev").projectName == "Home")
     }
 
     @Test
     func abbreviatesTheHomePrefix() {
-        #expect(summary(cwd: "/Users/dev/projects/tavi").abbreviatedPath == "~/projects/tavi")
-        #expect(summary(cwd: "/home/dev/work").abbreviatedPath == "~/work")
-        #expect(summary(cwd: "/opt/tools").abbreviatedPath == "/opt/tools")
+        #expect(Fixtures.agentSummary(cwd: "/Users/dev/projects/tavi").abbreviatedPath == "~/projects/tavi")
+        #expect(Fixtures.agentSummary(cwd: "/home/dev/work").abbreviatedPath == "~/work")
+        #expect(Fixtures.agentSummary(cwd: "/opt/tools").abbreviatedPath == "/opt/tools")
     }
 }
 
 @MainActor
 struct AgentStatusSmootherTests {
     private func agent(_ id: String, _ status: String) -> AgentSummary {
-        AgentSummary(
-            id: id,
-            agent: "claude",
-            status: status,
-            cwd: "/",
-            title: "",
-            workspaceId: "w",
-            tabId: "t",
-            focused: false
-        )
+        Fixtures.agentSummary(id: id, status: status, cwd: "/")
     }
 
     @Test

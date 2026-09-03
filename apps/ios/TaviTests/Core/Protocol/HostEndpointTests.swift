@@ -5,7 +5,7 @@ import Testing
 struct HostEndpointTests {
     @Test
     func buildsSecureAgentTerminalURL() throws {
-        let endpoint = try HostEndpoint(baseURL: #require(URL(string: "https://studio.tailnet.ts.net")))
+        let endpoint = try Fixtures.hostEndpoint()
 
         let terminalURL = try endpoint.agentTerminalURL(forPane: "wB:p1")
 
@@ -14,7 +14,7 @@ struct HostEndpointTests {
 
     @Test
     func buildsSecureEventsURL() throws {
-        let endpoint = try HostEndpoint(baseURL: #require(URL(string: "https://studio.tailnet.ts.net")))
+        let endpoint = try Fixtures.hostEndpoint()
 
         #expect(try endpoint.eventsURL().absoluteString == "wss://studio.tailnet.ts.net/api/events")
     }

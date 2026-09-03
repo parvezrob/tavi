@@ -1,3 +1,6 @@
+// Over the 400-line line; split in #69.
+// swiftlint:disable file_length
+
 import SwiftUI
 
 // Source Control for one worktree (#77; PRD §7.12, approved canvas "3 ·

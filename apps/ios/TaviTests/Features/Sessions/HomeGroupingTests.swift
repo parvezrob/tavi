@@ -3,24 +3,6 @@ import Foundation
 import Testing
 
 struct HomeGroupingTests {
-    private func agent(
-        _ id: String,
-        status: String,
-        cwd: String,
-        agent: String = "claude"
-    ) -> AgentSummary {
-        AgentSummary(
-            id: id,
-            agent: agent,
-            status: status,
-            cwd: cwd,
-            title: "",
-            workspaceId: "ws",
-            tabId: "tab-\(id)",
-            focused: false
-        )
-    }
-
     private func host(_ id: String, name: String, agents: [AgentSummary], health: HostHealth = .live, repos: [RepoInfo] = []) -> HomeHostInput {
         HomeHostInput(id: id, name: name, agents: agents.map { var a = $0; a.hostId = id; return a }, health: health, repos: repos)
     }
@@ -50,10 +32,10 @@ struct HomeGroupingTests {
     func groupsAgentsByFolderAndKeepsNeedsYouAboveEverything() {
         let layout = HomeGrouping.layout(hosts: [
             host("mac", name: "MacBook", agents: [
-                agent("a", status: "working", cwd: "/Users/dev/Projects/api"),
-                agent("b", status: "blocked", cwd: "/Users/dev/Projects/web"),
-                agent("c", status: "done", cwd: "/Users/dev/Projects/api"),
-                agent("d", status: "idle", cwd: "/Users/dev/Projects/web"),
+                Fixtures.agentSummary(id: "a", status: "working", cwd: "/Users/dev/Projects/api"),
+                Fixtures.agentSummary(id: "b", status: "blocked", cwd: "/Users/dev/Projects/web"),
+                Fixtures.agentSummary(id: "c", status: "done", cwd: "/Users/dev/Projects/api"),
+                Fixtures.agentSummary(id: "d", status: "idle", cwd: "/Users/dev/Projects/web"),
             ]),
         ])
 
@@ -74,8 +56,8 @@ struct HomeGroupingTests {
     @Test
     func aFolderWhoseOnlyAgentIsBlockedKeepsItsHeader() {
         let projects = HomeGrouping.group([
-            agent("b", status: "blocked", cwd: "/p/web"),
-            agent("c", status: "blocked", cwd: "/p/web"),
+            Fixtures.agentSummary(id: "b", status: "blocked", cwd: "/p/web"),
+            Fixtures.agentSummary(id: "c", status: "blocked", cwd: "/p/web"),
         ])
 
         #expect(projects.map(\.id) == ["/p/web"])
@@ -86,10 +68,10 @@ struct HomeGroupingTests {
     @Test
     func projectsAreOrderedByNameRegardlessOfStatus() {
         let projects = HomeGrouping.group([
-            agent("1", status: "done", cwd: "/p/zeta"),
-            agent("2", status: "idle", cwd: "/p/Alpha"),
-            agent("3", status: "working", cwd: "/p/mid"),
-            agent("4", status: "done", cwd: "/p/beta"),
+            Fixtures.agentSummary(id: "1", status: "done", cwd: "/p/zeta"),
+            Fixtures.agentSummary(id: "2", status: "idle", cwd: "/p/Alpha"),
+            Fixtures.agentSummary(id: "3", status: "working", cwd: "/p/mid"),
+            Fixtures.agentSummary(id: "4", status: "done", cwd: "/p/beta"),
         ])
 
         #expect(projects.map(\.name) == ["Alpha", "beta", "mid", "zeta"])
@@ -98,8 +80,8 @@ struct HomeGroupingTests {
     @Test
     func trailingSlashesDoNotSplitAFolderInTwo() {
         let projects = HomeGrouping.group([
-            agent("1", status: "working", cwd: "/p/api//"),
-            agent("2", status: "done", cwd: "/p/api"),
+            Fixtures.agentSummary(id: "1", status: "working", cwd: "/p/api//"),
+            Fixtures.agentSummary(id: "2", status: "done", cwd: "/p/api"),
         ])
 
         #expect(projects.count == 1)
@@ -111,8 +93,8 @@ struct HomeGroupingTests {
     @Test
     func agentsInsideAProjectKeepTheHostOrder() {
         let projects = HomeGrouping.group([
-            agent("late", status: "done", cwd: "/p/api"),
-            agent("early", status: "done", cwd: "/p/api"),
+            Fixtures.agentSummary(id: "late", status: "done", cwd: "/p/api"),
+            Fixtures.agentSummary(id: "early", status: "done", cwd: "/p/api"),
         ])
 
         #expect(projects[0].recent.map(\.id) == ["late", "early"])
@@ -131,7 +113,7 @@ struct HomeGroupingTests {
     @Test
     func onlyNeedsYouIsNotAnEmptyHome() {
         let layout = HomeGrouping.layout(hosts: [
-            host("mac", name: "MacBook", agents: [agent("b", status: "blocked", cwd: "/p/web")]),
+            host("mac", name: "MacBook", agents: [Fixtures.agentSummary(id: "b", status: "blocked", cwd: "/p/web")]),
         ])
 
         // The folder keeps its header (it counts the waiting agent); the
@@ -153,12 +135,12 @@ struct HomeGroupingTests {
     func severalComputersKeepPairingOrderAndPoolNeedsYou() {
         let layout = HomeGrouping.layout(hosts: [
             host("mac", name: "MacBook", agents: [
-                agent("1", status: "working", cwd: "/Users/dev/api"),
-                agent("2", status: "done", cwd: "/Users/dev/api"),
+                Fixtures.agentSummary(id: "1", status: "working", cwd: "/Users/dev/api"),
+                Fixtures.agentSummary(id: "2", status: "done", cwd: "/Users/dev/api"),
             ]),
             host("ubuntu", name: "ubuntu", agents: [
-                agent("1", status: "blocked", cwd: "/home/dev/api"),
-                agent("9", status: "idle", cwd: "/home/dev/web"),
+                Fixtures.agentSummary(id: "1", status: "blocked", cwd: "/home/dev/api"),
+                Fixtures.agentSummary(id: "9", status: "idle", cwd: "/home/dev/web"),
             ], health: .stale),
             host("asleep", name: "Studio", agents: [], health: .offline),
         ])
@@ -189,9 +171,9 @@ struct HomeGroupingTests {
             worktree("/Users/dev/Projects/tavi-idle", branch: "idle/branch", isMain: false),
         ])
         let projects = HomeGrouping.group([
-            agent("1", status: "working", cwd: "/Users/dev/Projects/tavi/apps/ios"),
-            agent("2", status: "done", cwd: "/Users/dev/Projects/tavi-59-demo"),
-            agent("3", status: "idle", cwd: "/Users/dev/Projects/plain"),
+            Fixtures.agentSummary(id: "1", status: "working", cwd: "/Users/dev/Projects/tavi/apps/ios"),
+            Fixtures.agentSummary(id: "2", status: "done", cwd: "/Users/dev/Projects/tavi-59-demo"),
+            Fixtures.agentSummary(id: "3", status: "idle", cwd: "/Users/dev/Projects/plain"),
         ], repos: [tavi])
 
         #expect(projects.map(\.name) == ["plain", "tavi"])
@@ -218,7 +200,7 @@ struct HomeGroupingTests {
     func twoRepositoriesWithOneRootAreOneCard() {
         let first = repo("/p/tavi", [worktree("/p/tavi")])
         let second = repo("/p/tavi", [worktree("/p/tavi"), worktree("/p/tavi-x", branch: "x", isMain: false)])
-        let projects = HomeGrouping.group([agent("1", status: "working", cwd: "/p/tavi-x/apps")], repos: [first, second])
+        let projects = HomeGrouping.group([Fixtures.agentSummary(id: "1", status: "working", cwd: "/p/tavi-x/apps")], repos: [first, second])
         #expect(projects.count == 1)
         #expect(projects[0].path == "/p/tavi")
         #expect(projects[0].worktrees.map(\.info.branch) == ["main", "x"])
@@ -234,8 +216,8 @@ struct HomeGroupingTests {
     func anAgentAtARootThatIsNotAWorktreeRidesOnTheCard() {
         let odd = repo("/p/tavi", [worktree("/p/tavi-only", branch: "only", isMain: false)])
         let projects = HomeGrouping.group([
-            agent("1", status: "working", cwd: "/p/tavi"),
-            agent("2", status: "done", cwd: "/p/tavi-only"),
+            Fixtures.agentSummary(id: "1", status: "working", cwd: "/p/tavi"),
+            Fixtures.agentSummary(id: "2", status: "done", cwd: "/p/tavi-only"),
         ], repos: [odd])
         #expect(projects.count == 1)
         #expect(Set(projects.map(\.id)).count == projects.count)
@@ -260,7 +242,7 @@ struct HomeGroupingTests {
     @Test
     func aFolderThatOnlySharesAPathPrefixIsNotInTheRepository() {
         let projects = HomeGrouping.group(
-            [agent("1", status: "working", cwd: "/Users/dev/tavi-docs")],
+            [Fixtures.agentSummary(id: "1", status: "working", cwd: "/Users/dev/tavi-docs")],
             repos: [repo("/Users/dev/tavi", [worktree("/Users/dev/tavi")])]
         )
         #expect(!projects[0].isRepository)
@@ -272,7 +254,7 @@ struct HomeGroupingTests {
     @Test
     func theMostSpecificContainingWorktreeWins() {
         let projects = HomeGrouping.group(
-            [agent("1", status: "working", cwd: "/Users/dev/tavi/nested/deep")],
+            [Fixtures.agentSummary(id: "1", status: "working", cwd: "/Users/dev/tavi/nested/deep")],
             repos: [repo("/Users/dev/tavi", [
                 worktree("/Users/dev/tavi", branch: "main"),
                 worktree("/Users/dev/tavi/nested", branch: "fix/foo", isMain: false),
@@ -287,7 +269,7 @@ struct HomeGroupingTests {
     @Test
     func aWaitingAgentInAWorktreeIsCountedNotRepeated() {
         let layout = HomeGrouping.layout(hosts: [
-            host("mac", name: "MacBook", agents: [agent("b", status: "blocked", cwd: "/p/tavi/apps/host")],
+            host("mac", name: "MacBook", agents: [Fixtures.agentSummary(id: "b", status: "blocked", cwd: "/p/tavi/apps/host")],
                  repos: [repo("/p/tavi", [worktree("/p/tavi")])]),
         ])
         #expect(layout.needsYou.map(\.id) == ["b"])
@@ -302,7 +284,7 @@ struct HomeGroupingTests {
     @Test
     func aRepositoryCardStaysWhileItsOnlyAgentWaits() {
         let projects = HomeGrouping.group(
-            [agent("b", status: "blocked", cwd: "/p/tavi"), agent("c", status: "blocked", cwd: "/p/plain")],
+            [Fixtures.agentSummary(id: "b", status: "blocked", cwd: "/p/tavi"), Fixtures.agentSummary(id: "c", status: "blocked", cwd: "/p/plain")],
             repos: [repo("/p/tavi", [worktree("/p/tavi"), worktree("/p/tavi-x", branch: "x", isMain: false)])]
         )
         #expect(projects.first { $0.name == "tavi" }?.hasRows == true)
@@ -316,7 +298,7 @@ struct HomeGroupingTests {
     func containmentIgnoresCaseAndUnicodeForm() {
         let decomposed = "/Users/dev/Caf\u{0065}\u{0301}/apps"
         let projects = HomeGrouping.group(
-            [agent("1", status: "working", cwd: "/users/DEV/tavi/apps/ios"), agent("2", status: "idle", cwd: decomposed)],
+            [Fixtures.agentSummary(id: "1", status: "working", cwd: "/users/DEV/tavi/apps/ios"), Fixtures.agentSummary(id: "2", status: "idle", cwd: decomposed)],
             repos: [
                 repo("/Users/dev/tavi", [worktree("/Users/dev/tavi")]),
                 repo("/Users/dev/Caf\u{00E9}", [worktree("/Users/dev/Caf\u{00E9}")]),
@@ -343,11 +325,11 @@ struct HomeGroupingTests {
     func computerSummaryIsOneLine() {
         let layout = HomeGrouping.layout(hosts: [
             host("mac", name: "MacBook Air", agents: [
-                agent("1", status: "blocked", cwd: "/p/a"),
-                agent("2", status: "working", cwd: "/p/a"),
-                agent("3", status: "done", cwd: "/p/b"),
+                Fixtures.agentSummary(id: "1", status: "blocked", cwd: "/p/a"),
+                Fixtures.agentSummary(id: "2", status: "working", cwd: "/p/a"),
+                Fixtures.agentSummary(id: "3", status: "done", cwd: "/p/b"),
             ], health: .live),
-            host("pc", name: "robin-PC", agents: [agent("1", status: "idle", cwd: "/p/a")]),
+            host("pc", name: "robin-PC", agents: [Fixtures.agentSummary(id: "1", status: "idle", cwd: "/p/a")]),
             host("off", name: "Studio", agents: [], health: .offline),
         ])
         let summaries = layout.computers.map(\.summary)
@@ -383,13 +365,13 @@ struct HomeGroupingTests {
     // computer keeps its own row.
     @Test
     func stacksIndistinguishableWaitingAgentsAndKeepsDistinctOnesApart() {
-        var blank1 = agent("a", status: "blocked", cwd: "/Users/dev"); blank1.hostId = "mac"
-        var blank2 = agent("b", status: "blocked", cwd: "/Users/dev"); blank2.hostId = "mac"
-        var asking = agent("c", status: "blocked", cwd: "/Users/dev"); asking.hostId = "mac"
-        var otherFolder = agent("d", status: "blocked", cwd: "/Users/dev/Projects/api"); otherFolder.hostId = "mac"
-        var otherHost = agent("e", status: "blocked", cwd: "/Users/dev"); otherHost.hostId = "pc"
-        var named = agent("f", status: "blocked", cwd: "/Users/dev"); named.hostId = "mac"; named.tabLabel = "Redesign"
-        var blank3 = agent("g", status: "blocked", cwd: "/Users/dev"); blank3.hostId = "mac"
+        var blank1 = Fixtures.agentSummary(id: "a", status: "blocked", cwd: "/Users/dev"); blank1.hostId = "mac"
+        var blank2 = Fixtures.agentSummary(id: "b", status: "blocked", cwd: "/Users/dev"); blank2.hostId = "mac"
+        var asking = Fixtures.agentSummary(id: "c", status: "blocked", cwd: "/Users/dev"); asking.hostId = "mac"
+        var otherFolder = Fixtures.agentSummary(id: "d", status: "blocked", cwd: "/Users/dev/Projects/api"); otherFolder.hostId = "mac"
+        var otherHost = Fixtures.agentSummary(id: "e", status: "blocked", cwd: "/Users/dev"); otherHost.hostId = "pc"
+        var named = Fixtures.agentSummary(id: "f", status: "blocked", cwd: "/Users/dev"); named.hostId = "mac"; named.tabLabel = "Redesign"
+        var blank3 = Fixtures.agentSummary(id: "g", status: "blocked", cwd: "/Users/dev"); blank3.hostId = "mac"
 
         let groups = HomeGrouping.waitingGroups([blank1, blank2, asking, otherFolder, otherHost, named, blank3]) { agent in
             agent.id == "c" ? "Allow Bash(npm test)?" : nil
@@ -404,8 +386,8 @@ struct HomeGroupingTests {
 
     @Test
     func sameQuestionOnTwoPanesStacksToo() {
-        var one = agent("a", status: "blocked", cwd: "/Users/dev/p"); one.hostId = "mac"
-        var two = agent("b", status: "blocked", cwd: "/Users/dev/p"); two.hostId = "mac"
+        var one = Fixtures.agentSummary(id: "a", status: "blocked", cwd: "/Users/dev/p"); one.hostId = "mac"
+        var two = Fixtures.agentSummary(id: "b", status: "blocked", cwd: "/Users/dev/p"); two.hostId = "mac"
         let groups = HomeGrouping.waitingGroups([one, two]) { _ in "Continue? [y/N]" }
         #expect(groups.count == 1)
         #expect(groups[0].askingLine == "Continue? [y/N]")

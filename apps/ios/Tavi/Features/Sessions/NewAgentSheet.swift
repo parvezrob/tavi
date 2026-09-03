@@ -1,3 +1,6 @@
+// Over the 400-line line; split in #69.
+// swiftlint:disable file_length
+
 import SwiftUI
 
 // Start an agent in a folder you picked, never in the host's home directory
@@ -265,6 +268,8 @@ struct NewAgentSheet: View {
         .accessibilityIdentifier("newAgent.computers")
     }
 
+    // Split in #69.
+    // swiftlint:disable:next function_body_length
     private func folderList(_ catalog: ProjectCatalog) -> some View {
         let sections = ProjectPicker.sections(for: catalog, query: query)
         return List {

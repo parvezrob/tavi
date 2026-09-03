@@ -1,0 +1,32 @@
+included: [Tavi, TaviTests, TaviUITests]
+
+opt_in_rules: [force_unwrapping, unowned_variable_capture, weak_delegate]
+
+disabled_rules:
+  - todo # Follow-ups are GitHub issues; AGENTS.md forbids a shadow backlog.
+  - line_length # Prose reasons and host error sentences wrap for reading, not to a column.
+  - implicit_optional_initialization # An explicit `= nil` keeps a memberwise initializer's default.
+
+file_length: { warning: 400, error: 600 }
+function_body_length: { warning: 60, error: 120 }
+type_body_length: 400 # Warning only: file_length is the line that blocks.
+
+# AgentDirectory.swift:1086 is 21: a `switch` over host events is a table, not a tangle.
+cyclomatic_complexity: { warning: 10, error: 25, ignores_case_statements: true }
+
+force_unwrapping: warning # A crash the tree already accepts; flagged, never blocking.
+force_try: warning # Only for a literal regex that must not survive being wrong.
+
+trailing_comma: { mandatory_comma: true } # swiftformat writes them; the two must agree.
+
+# `id`, `x`, `y` are the clearest names for what they hold.
+identifier_name:
+  min_length: { warning: 1, error: 1 }
+
+custom_rules:
+  no_print:
+    name: "no print — use os.Logger"
+    regex: '\bprint\s*\('
+    match_kinds: [identifier]
+    excluded: ".*(TaviTests|TaviUITests)/.*" # A test prints to explain a failure; the app has a Logger.
+    severity: warning

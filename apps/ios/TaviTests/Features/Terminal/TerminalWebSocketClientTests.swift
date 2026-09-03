@@ -123,7 +123,7 @@ struct TerminalWebSocketClientTests {
 
     private func connectionConfiguration() throws -> TerminalConnectionConfiguration {
         try TerminalConnectionConfiguration(
-            host: HostEndpoint(baseURL: #require(URL(string: "https://mac.tailnet.ts.net"))),
+            host: Fixtures.hostEndpoint("https://mac.tailnet.ts.net"),
             paneID: "fixture",
             credential: "secret"
         )
