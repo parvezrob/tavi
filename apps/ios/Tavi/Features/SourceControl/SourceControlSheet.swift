@@ -236,22 +236,14 @@ struct SourceControlSheet: View {
                                     .listRowBackground(TaviTheme.card)
                             }
                         } header: {
-                            // The home's section register (SectionHeader):
-                            // small caps, wide tracking — not the List's
-                            // large default.
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(status.files.count == 1 ? "1 changed" : "\(status.files.count) changed")
-                                    .font(.caption.weight(.semibold))
-                                    .kerning(1.1)
-                                    .textCase(.uppercase)
-                                    .foregroundStyle(TaviTheme.textSecondary)
-                                Spacer()
-                                Button(status.staged == status.files.count ? "Unstage all" : "Stage all") {
+                            // The home's section register, not the List's
+                            // large default. "Stage all" stays on offer until
+                            // every file is fully staged — a partly staged
+                            // file still has something to stage.
+                            SectionHeader(title: status.files.count == 1 ? "1 changed" : "\(status.files.count) changed") {
+                                Button(Self.isFullyStaged(status) ? "Unstage all" : "Stage all") {
                                     beginBusy("*") { await stageAll(status) }
                                 }
-                                .font(.footnote)
-                                .textCase(nil)
-                                .foregroundStyle(TaviTheme.textSecondary)
                                 .accessibilityIdentifier("sourceControl.stageAll")
                             }
                         } footer: {
@@ -266,8 +258,17 @@ struct SourceControlSheet: View {
         }
     }
 
+    // Every file fully staged — only then does the section offer to undo it.
+    private static func isFullyStaged(_ status: WorktreeStatus) -> Bool {
+        status.files.allSatisfy { $0.staged && !$0.unstaged }
+    }
+
+    // The checkbox tells the truth in three states (PRD §7.15): empty, a
+    // check, and a dash for a file with some hunks staged and some not —
+    // the full check it used to draw promised a commit of the whole file.
     private func changedRow(_ file: ChangedFile) -> some View {
-        HStack(spacing: 12) {
+        let partlyStaged = file.staged && file.unstaged
+        return HStack(spacing: 12) {
             Button {
                 beginBusy(file.path) { await toggle(file) }
             } label: {
@@ -277,7 +278,7 @@ struct SourceControlSheet: View {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .strokeBorder(file.staged ? Color.clear : TaviTheme.textSecondary.opacity(0.5), lineWidth: 1.5)
                     if file.staged {
-                        Image(systemName: "checkmark")
+                        Image(systemName: partlyStaged ? "minus" : "checkmark")
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(TaviTheme.accentInk)
                     }
@@ -287,7 +288,8 @@ struct SourceControlSheet: View {
             }
             .buttonStyle(.plain)
             .disabled(busy.contains(file.path))
-            .accessibilityLabel(file.staged ? "Staged" : "Not staged")
+            .accessibilityLabel(partlyStaged ? "Partly staged" : file.staged ? "Staged" : "Not staged")
+            .accessibilityHint(partlyStaged ? "Stages the rest of the file" : file.staged ? "Unstages" : "Stages")
             .accessibilityIdentifier("sourceControl.stage.\(file.path)")
 
             Button {
@@ -607,7 +609,7 @@ struct SourceControlSheet: View {
                                         .listRowBackground(TaviTheme.card)
                                 }
                             } header: {
-                                commitsHeader(log.ahead.count == 1 ? "1 ahead of \(base)" : "\(log.ahead.count) ahead of \(base)") {
+                                SectionHeader(title: log.ahead.count == 1 ? "1 ahead of \(base)" : "\(log.ahead.count) ahead of \(base)") {
                                     Button(pushLabel(log)) { begin($pushing) { await push() } }
                                         .disabled(pushing || pulling || !canPush(log))
                                         .accessibilityIdentifier("sourceControl.push")
@@ -623,7 +625,7 @@ struct SourceControlSheet: View {
                                         .listRowBackground(TaviTheme.card)
                                 }
                             } header: {
-                                commitsHeader(log.behind.count == 1 ? "1 behind \(base)" : "\(log.behind.count) behind \(base)") {
+                                SectionHeader(title: log.behind.count == 1 ? "1 behind \(base)" : "\(log.behind.count) behind \(base)") {
                                     Button(pulling ? "Pulling…" : "Pull \(base) in") { begin($pulling) { await pullBase() } }
                                         .disabled(pushing || pulling)
                                         .accessibilityIdentifier("sourceControl.pullBase")
@@ -644,21 +646,6 @@ struct SourceControlSheet: View {
                         .accessibilityIdentifier("sourceControl.commitsNotice")
                 }
             }
-        }
-    }
-
-    private func commitsHeader<Action: View>(_ title: String, @ViewBuilder action: () -> Action) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .kerning(1.1)
-                .textCase(.uppercase)
-                .foregroundStyle(TaviTheme.textSecondary)
-            Spacer()
-            action()
-                .font(.footnote)
-                .textCase(nil)
-                .foregroundStyle(TaviTheme.textSecondary)
         }
     }
 
@@ -754,9 +741,11 @@ struct SourceControlSheet: View {
         }
     }
 
+    // A tap on a partly staged file stages the rest, as an indeterminate
+    // checkbox does everywhere else; only a fully staged file unstages.
     private func toggle(_ file: ChangedFile) async {
         guard let client else { return }
-        let outcome = file.staged
+        let outcome = file.staged && !file.unstaged
             ? await client.unstage(path: worktree.info.path, files: [file.path])
             : await client.stage(path: worktree.info.path, files: [file.path])
         report(outcome)
@@ -765,7 +754,7 @@ struct SourceControlSheet: View {
 
     private func stageAll(_ status: WorktreeStatus) async {
         guard let client else { return }
-        let outcome = status.staged == status.files.count
+        let outcome = Self.isFullyStaged(status)
             ? await client.unstage(path: worktree.info.path, files: status.files.map(\.path))
             : await client.stageAll(path: worktree.info.path)
         report(outcome)

@@ -8,13 +8,17 @@ import SwiftUI
 // Colour is spent once: amber on what needs you. Every colour comes from
 // TaviTheme so the surface stays a single instrument panel.
 
-// A section label in the Orca register: small caps, wide tracking, and
-// an optional trailing count. The count is the only place a section
-// shouts, and only "Needs you" is allowed to shout in amber.
-struct SectionHeader: View {
+// A section label in the Orca register: 12 pt small caps, wide tracking,
+// an optional trailing count, and room at the end for the section's one
+// quiet action (Stage all, Push, Pull main in — PRD §7.15). The count is
+// the only place a section shouts, and only "Needs you" is allowed to
+// shout in amber. One register for the home and every sheet: nothing
+// re-draws it by hand.
+struct SectionHeader<Trailing: View>: View {
     let title: String
     var count: Int? = nil
     var countTint: Color = TaviTheme.textSecondary
+    @ViewBuilder var trailing: () -> Trailing
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -30,10 +34,24 @@ struct SectionHeader: View {
                     .foregroundStyle(countTint)
             }
             Spacer(minLength: 0)
+            // A List's header uppercases its children; the action is a
+            // sentence, not a label.
+            trailing()
+                .font(.footnote)
+                .textCase(nil)
+                .foregroundStyle(TaviTheme.textSecondary)
         }
         .padding(.leading, 2)
-        .accessibilityElement(children: .combine)
+        // Label and count read as one heading; an action stays its own
+        // element so VoiceOver can press it.
+        .accessibilityElement(children: Trailing.self == EmptyView.self ? .combine : .contain)
         .accessibilityAddTraits(.isHeader)
+    }
+}
+
+extension SectionHeader where Trailing == EmptyView {
+    init(title: String, count: Int? = nil, countTint: Color = TaviTheme.textSecondary) {
+        self.init(title: title, count: count, countTint: countTint) { EmptyView() }
     }
 }
 
@@ -400,11 +418,19 @@ struct WorktreeGroup: View {
             }
         }
         .background(TaviTheme.groupFill, in: RoundedRectangle(cornerRadius: TaviTheme.wellRadius, style: .continuous))
-        .overlay(alignment: .top) {
-            // The top-edge highlight that makes the group read as raised.
+        .overlay {
+            // The top-edge highlight that makes the group read as raised: a
+            // 1 pt stroke that fades out down the first 16 pt of the sides,
+            // so the corners stay 1 pt (a flat 1.5 pt slice through the
+            // curve thickened them), and drawn only — a tap at the group's
+            // edge must reach the row beneath, not a ring (PRD §7.15).
             RoundedRectangle(cornerRadius: TaviTheme.wellRadius, style: .continuous)
                 .strokeBorder(TaviTheme.groupHighlight, lineWidth: 1)
-                .mask(alignment: .top) { Rectangle().frame(height: 1.5) }
+                .mask(alignment: .top) {
+                    LinearGradient(colors: [.white, .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: TaviTheme.wellRadius * 2)
+                }
+                .allowsHitTesting(false)
         }
     }
 }

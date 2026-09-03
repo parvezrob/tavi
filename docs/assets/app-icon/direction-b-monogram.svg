@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- B: the monogram. A T drawn as two terminal strokes, the lamp lit at the end of its crossbar. -->
+  <rect width="1024" height="1024" fill="#141414"/>
+  <path d="M262 318 H690" fill="none" stroke="#EBEBEB" stroke-width="112" stroke-linecap="round"/>
+  <path d="M476 318 V720" fill="none" stroke="#EBEBEB" stroke-width="112" stroke-linecap="round"/>
+  <circle cx="762" cy="318" r="56" fill="#E8A33D"/>
+</svg>

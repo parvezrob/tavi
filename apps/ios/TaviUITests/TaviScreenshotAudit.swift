@@ -468,6 +468,54 @@ final class TaviScreenshotAudit: XCTestCase {
         app.buttons["preview.done"].tap()
     }
 
+    // A look, nothing more (#54 close-out): the worktree's group on the
+    // home, then Source Control's Changes and Commits tabs as they are —
+    // no staging, no commit, no push. Stage part of a file in
+    // TAVI_AUDIT_WORKTREE beforehand (`git apply --cached` one hunk) to see
+    // the checkbox's third state. The worktree needs an agent for its card
+    // to appear, so the capture opens a disposable shell there.
+    @MainActor
+    func testCaptureChangesTab() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["TAVI_AUDIT"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_AUDIT=1 to capture the design-audit screens.")
+        }
+        guard let host = environment["TAVI_DEV_HOST"],
+              let token = environment["TAVI_DEV_TOKEN"],
+              let worktree = environment["TAVI_AUDIT_WORKTREE"] else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_DEV_HOST/TOKEN and TEST_RUNNER_TAVI_AUDIT_WORKTREE.")
+        }
+        _ = try await createAgentTab(host: host, token: token, cwd: worktree, agent: "shell")
+
+        let app = XCUIApplication()
+        app.launchEnvironment["TAVI_DEV_RESET"] = "1"
+        app.launchEnvironment["TAVI_DEV_HOST"] = host
+        app.launchEnvironment["TAVI_DEV_TOKEN"] = token
+        app.launch()
+
+        let header = app.buttons["sessions.worktree.\(worktree)"]
+        var tries = 0
+        while !header.exists, tries < 8 {
+            if tries == 0 { _ = header.waitForExistence(timeout: 20) } else { app.swipeUp() }
+            tries += 1
+        }
+        XCTAssertTrue(header.exists, "The home never showed the worktree \(worktree).")
+        keep("look-00-home-worktree")
+        header.tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["sourceControl.tabs"].waitForExistence(timeout: 20), "Source Control did not open.")
+        let changes = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'sourceControl.stage.' OR identifier == 'sourceControl.empty' OR identifier == 'sourceControl.failed'")).firstMatch
+        XCTAssertTrue(changes.waitForExistence(timeout: 20), "Changes never loaded.")
+        sleep(1)
+        keep("look-01-changes")
+
+        app.buttons["Commits"].firstMatch.tap()
+        let commits = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'sourceControl.commit.' OR identifier == 'sourceControl.commitsEmpty' OR identifier == 'sourceControl.commitsFailed'")).firstMatch
+        XCTAssertTrue(commits.waitForExistence(timeout: 20), "Commits never loaded.")
+        sleep(1)
+        keep("look-02-commits")
+    }
+
     // MARK: - Helpers (self-contained; the main suite's are private)
 
     @MainActor

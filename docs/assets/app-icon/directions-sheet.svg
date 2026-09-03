@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" font-family="-apple-system, Helvetica, Arial" >
+<defs><clipPath id="ios"><rect width="1024" height="1024" rx="230"/></clipPath></defs>
+<rect width="1200" height="380" fill="#0D0D0D"/><rect y="380" width="1200" height="380" fill="#E9E6DF"/>
+<g transform="translate(120,70) scale(0.18)" clip-path="url(#ios)">
+  
+  <rect width="1024" height="1024" fill="#141414"/>
+  <path d="M292 318 L516 512 L292 706" fill="none" stroke="#EBEBEB" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="588" y="600" width="176" height="108" rx="28" fill="#E8A33D"/>
+</g>
+<text x="212" y="298" text-anchor="middle" font-size="22" fill="#EBEBEB" opacity="0.85">A · Prompt</text>
+<g transform="translate(370,130) scale(0.0586)" clip-path="url(#ios)">
+  
+  <rect width="1024" height="1024" fill="#141414"/>
+  <path d="M292 318 L516 512 L292 706" fill="none" stroke="#EBEBEB" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="588" y="600" width="176" height="108" rx="28" fill="#E8A33D"/>
+</g>
+<g transform="translate(120,450) scale(0.18)" clip-path="url(#ios)">
+  
+  <rect width="1024" height="1024" fill="#141414"/>
+  <path d="M292 318 L516 512 L292 706" fill="none" stroke="#EBEBEB" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="588" y="600" width="176" height="108" rx="28" fill="#E8A33D"/>
+</g>
+<text x="212" y="678" text-anchor="middle" font-size="22" fill="#1B1B1B" opacity="0.85">A · Prompt</text>
+<g transform="translate(370,510) scale(0.0586)" clip-path="url(#ios)">
+  
+  <rect width="1024" height="1024" fill="#141414"/>
+  <path d="M292 318 L516 512 L292 706" fill="none" stroke="#EBEBEB" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="588" y="600" width="176" height="108" rx="28" fill="#E8A33D"/>
+</g>
+<g transform="translate(480,70) scale(0.18)" clip-path="url(#ios)">
+  
+  <rect width="1024" height="1024" fill="#141414"/>
+  <path d="M262 318 H690" fill="none" stroke="#EBEBEB" stroke-width="112" stroke-linecap="round"/>
+  <path d="M476 318 V720" fill="none" stroke="#EBEBEB" stroke-width="112" stroke-linecap="round"/>
+  <circle cx="762" cy="318" r="56" fill="#E8A33D"/>
+</g>
+<text x="572" y="298" text-anchor="middle" font-size="22" fill="#EBEBEB" opacity="0.85">B · Monogram</text>
+<g transform="translate(730,130) scale(0.0586)" clip-path="url(#ios)">
+  
+  <rect width="1024" height="1024" fill="#141414"/>
+  <path d="M262 318 H690" fill="none" stroke="#EBEBEB" stroke-width="112" stroke-linecap="round"/>
+  <path d="M476 318 V720" fill="none" stroke="#EBEBEB" stroke-width="112" stroke-linecap="round"/>
+  <circle cx="762" cy="318" r="56" fill="#E8A33D"/>
+</g>
+<g transform="translate(480,450) scale(0.18)" clip-path="url(#ios)">
+  
+  <rect width="1024" height="1024" fill="#141414"/>
+  <path d="M262 318 H690" fill="none" stroke="#EBEBEB" stroke-width="112" stroke-linecap="round"/>
+  <path d="M476 318 V720" fill="none" stroke="#EBEBEB" stroke-width="112" stroke-linecap="round"/>
+  <circle cx="762" cy="318" r="56" fill="#E8A33D"/>
+</g>
+<text x="572" y="678" text-anchor="middle" font-size="22" fill="#1B1B1B" opacity="0.85">B · Monogram</text>
+<g transform="translate(730,510) scale(0.0586)" clip-path="url(#ios)">
+  
+  <rect width="1024" height="1024" fill="#141414"/>
+  <path d="M262 318 H690" fill="none" stroke="#EBEBEB" stroke-width="112" stroke-linecap="round"/>
+  <path d="M476 318 V720" fill="none" stroke="#EBEBEB" stroke-width="112" stroke-linecap="round"/>
+  <circle cx="762" cy="318" r="56" fill="#E8A33D"/>
+</g>
+<g transform="translate(840,70) scale(0.18)" clip-path="url(#ios)">
+  
+  <rect width="1024" height="1024" fill="#141414"/>
+  <path d="M276 402 H748" fill="none" stroke="#EBEBEB" stroke-width="96" stroke-linecap="round"/>
+  <path d="M276 622 H492" fill="none" stroke="#EBEBEB" stroke-width="96" stroke-linecap="round"/>
+  <rect x="572" y="574" width="120" height="96" rx="24" fill="#E8A33D"/>
+</g>
+<text x="932" y="298" text-anchor="middle" font-size="22" fill="#EBEBEB" opacity="0.85">C · Cursor</text>
+<g transform="translate(1090,130) scale(0.0586)" clip-path="url(#ios)">
+  
+  <rect width="1024" height="1024" fill="#141414"/>
+  <path d="M276 402 H748" fill="none" stroke="#EBEBEB" stroke-width="96" stroke-linecap="round"/>
+  <path d="M276 622 H492" fill="none" stroke="#EBEBEB" stroke-width="96" stroke-linecap="round"/>
+  <rect x="572" y="574" width="120" height="96" rx="24" fill="#E8A33D"/>
+</g>
+<g transform="translate(840,450) scale(0.18)" clip-path="url(#ios)">
+  
+  <rect width="1024" height="1024" fill="#141414"/>
+  <path d="M276 402 H748" fill="none" stroke="#EBEBEB" stroke-width="96" stroke-linecap="round"/>
+  <path d="M276 622 H492" fill="none" stroke="#EBEBEB" stroke-width="96" stroke-linecap="round"/>
+  <rect x="572" y="574" width="120" height="96" rx="24" fill="#E8A33D"/>
+</g>
+<text x="932" y="678" text-anchor="middle" font-size="22" fill="#1B1B1B" opacity="0.85">C · Cursor</text>
+<g transform="translate(1090,510) scale(0.0586)" clip-path="url(#ios)">
+  
+  <rect width="1024" height="1024" fill="#141414"/>
+  <path d="M276 402 H748" fill="none" stroke="#EBEBEB" stroke-width="96" stroke-linecap="round"/>
+  <path d="M276 622 H492" fill="none" stroke="#EBEBEB" stroke-width="96" stroke-linecap="round"/>
+  <rect x="572" y="574" width="120" height="96" rx="24" fill="#E8A33D"/>
+</g>
+</svg>

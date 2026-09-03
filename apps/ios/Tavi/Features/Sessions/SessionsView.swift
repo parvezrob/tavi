@@ -705,18 +705,29 @@ struct SessionsView: View {
         .accessibilityIdentifier("sessions.revoked")
     }
 
+    // Nothing is running: say so, and offer the one next step on the card
+    // itself (#52) — amber, because it is the screen's only action.
     private func idleCard(_ computers: [HomeComputer]) -> some View {
-        Text(
-            computers.count == 1
-                ? "No agents are running on \(computers[0].name) right now."
-                : "No agents are running on your computers right now."
-        )
+        VStack(alignment: .leading, spacing: 14) {
+            Text(
+                computers.count == 1
+                    ? "No agents are running on \(computers[0].name) right now."
+                    : "No agents are running on your computers right now."
+            )
             .font(.callout)
             .foregroundStyle(TaviTheme.textSecondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .taviCard()
-            .accessibilityIdentifier("sessions.idle")
+            Button {
+                showingNewAgent = true
+            } label: {
+                Label("New agent", systemImage: "plus")
+            }
+            .buttonStyle(.taviProminent)
+            .accessibilityIdentifier("sessions.idle.newAgent")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .taviCard()
+        .accessibilityIdentifier("sessions.idle")
     }
 
     // MARK: - Actions

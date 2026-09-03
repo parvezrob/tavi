@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- C: the waiting cursor. Two lines of a screen in off-white, the cursor at the end of the second in amber: work happened, now it is your turn. -->
+  <rect width="1024" height="1024" fill="#141414"/>
+  <path d="M276 402 H748" fill="none" stroke="#EBEBEB" stroke-width="96" stroke-linecap="round"/>
+  <path d="M276 622 H492" fill="none" stroke="#EBEBEB" stroke-width="96" stroke-linecap="round"/>
+  <rect x="572" y="574" width="120" height="96" rx="24" fill="#E8A33D"/>
+</svg>
