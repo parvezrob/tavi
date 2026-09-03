@@ -8,7 +8,7 @@ import { describeGitError, git } from "./git-exec.js";
 // git operation exists on this path, by construction.
 
 // One file's diff over this is cut and marked; the phone says so.
-export const MAX_DIFF_BYTES = 256 * 1024;
+const MAX_DIFF_BYTES = 256 * 1024;
 const MAX_CHANGED_FILES = 500;
 
 export interface ChangedFile {

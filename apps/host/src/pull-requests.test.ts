@@ -142,6 +142,24 @@ test("create pushes the branch first, then opens the pull request against the ba
   }
 });
 
+test("create says the read-back failed instead of inventing a pull request (#103)", async () => {
+  const dir = branched();
+  const { gh } = fakeGh((args) => {
+    if (args[1] === "create") return "https://github.com/o/r/pull/12\n";
+    if (args[1] === "view") return ghError("GraphQL: Something went wrong while executing your query.");
+    return [];
+  });
+  const result = await createPullRequest(dir, { title: "feat: x" }, { gh });
+  // Number 0 with an empty base is not a pull request; the person is told it
+  // exists, where, and why this host cannot show it yet.
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.status, 503);
+    assert.match(result.error, /was created \(https:\/\/github\.com\/o\/r\/pull\/12\)/);
+    assert.match(result.error, /reading it back failed/);
+  }
+});
+
 test("create with no title lets gh fill it, and says when gh is not signed in", async () => {
   const dir = branched();
   const { gh, calls } = fakeGh((args) =>

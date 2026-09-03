@@ -43,7 +43,7 @@ export function configureTailscale(loginShell: string): void {
   statusCache = null;
 }
 
-export function tailscaleBinary(): Promise<string | null> {
+function tailscaleBinary(): Promise<string | null> {
   const now = Date.now();
   if (resolved && (now - resolvedAt < RESOLVE_RETRY_MS || resolvedAt === -1)) return resolved;
   resolvedAt = now;

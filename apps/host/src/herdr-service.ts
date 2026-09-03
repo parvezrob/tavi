@@ -1,15 +1,15 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { installSystemdUnit, LINUX_UNIT_DIR, uninstallSystemdUnit } from "./service-linux.js";
+import { defaultExecute, installSystemdUnit, uninstallSystemdUnit } from "./service-linux.js";
 
 // herdr's server is what the agent cards, launching, and "needs you" come
 // from. Since 0.8 it runs headless with no PTY, so it can live under the
 // same supervisors as the Tavi host: a LaunchAgent on macOS, a systemd
 // user unit on Linux. Where Homebrew already runs it (`brew services start
 // herdr`) the ping check is green and nothing here runs.
-export const HERDR_LABEL = "com.farfield.tavi.herdr";
-export const HERDR_UNIT = "tavi-herdr.service";
+const HERDR_LABEL = "com.farfield.tavi.herdr";
+const HERDR_UNIT = "tavi-herdr.service";
 
 export interface HerdrServiceOptions {
   execute?: (command: string, args: string[]) => Promise<void>;
@@ -104,8 +104,6 @@ export async function uninstallHerdrService(options: HerdrServiceOptions = {}): 
   return [plist];
 }
 
-export { LINUX_UNIT_DIR };
-
 function utf8Locale(): string {
   const current = process.env.LC_ALL || process.env.LANG;
   return current && /utf-?8/i.test(current) ? current : "C.UTF-8";
@@ -113,19 +111,4 @@ function utf8Locale(): string {
 
 function xml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-}
-
-async function defaultExecute(command: string, args: string[]): Promise<void> {
-  const { execFile } = await import("node:child_process");
-  await new Promise<void>((resolve, reject) => {
-    execFile(command, args, (error, _stdout, stderr) => {
-      if (error)
-        reject(
-          new Error(`\`${[command, ...args].join(" ")}\` failed${stderr ? `: ${stderr.trim()}` : ""}`, {
-            cause: error,
-          }),
-        );
-      else resolve();
-    });
-  });
 }

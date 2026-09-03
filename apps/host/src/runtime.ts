@@ -41,7 +41,7 @@ export interface PendingUpdate {
   startedAt: string;
 }
 
-export const MAX_START_ATTEMPTS = 3;
+const MAX_START_ATTEMPTS = 3;
 
 export function runtimeLayout(stateDir: string): RuntimeLayout {
   const root = path.join(stateDir, "runtime");
@@ -146,7 +146,7 @@ export function writeLauncher(layout: RuntimeLayout): string {
 }
 
 // Plain ESM with no dependencies, so it loads even when a bad version cannot.
-export const LAUNCHER_SOURCE = `// Tavi launcher — written by tavi-host, do not edit. Starts the current
+const LAUNCHER_SOURCE = `// Tavi launcher — written by tavi-host, do not edit. Starts the current
 // version and rolls back to the previous one if a fresh update keeps failing.
 import { readFileSync, writeFileSync, symlinkSync, renameSync, unlinkSync } from "node:fs";
 import path from "node:path";
@@ -183,8 +183,9 @@ if (pending && typeof pending.version === "string") {
       // The rollback itself is done; this file is only the attempt counter,
       // and one that stays costs a single extra counted start.
     }
-    // The one console.* left in the host: this file runs standalone, before
-    // any version is loaded, so it cannot import log.ts.
+    // The launcher's only voice: it runs standalone, before any version is
+    // loaded, so it cannot import log.ts. Not the host's only console.* —
+    // the CLI's own output in index.ts and pair-command.ts is the rest (#103).
     console.error("[tavi] " + pending.version + " failed to start " + MAX_ATTEMPTS + " times; rolled back to " + pending.previous);
   } else {
     writeFileSync(pendingFile, JSON.stringify(pending));

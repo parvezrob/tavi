@@ -7,7 +7,9 @@
 //
 // The CLI's own voice — `doctor`, `pair`, the update result, the install
 // checklist — is output a person asked for, not logging; it stays on plain
-// `console.log` in `index.ts`, `pair-command.ts`, and `bootstrap.ts`.
+// `console.log` in `index.ts`, `pair-command.ts`, `bootstrap-deps.ts` and
+// `package-root.ts` (`bootstrap.ts` prints through the injected `report`,
+// and `runtime.ts`'s launcher template runs before this module exists).
 
 export type LogFields = Record<string, unknown>;
 

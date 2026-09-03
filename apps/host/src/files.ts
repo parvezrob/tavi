@@ -13,7 +13,7 @@ import { isWithinRoots } from "./projects.js";
 
 // Text preview cap. A file over this is served up to the cap and marked
 // truncated; the phone says so instead of pretending it has the whole file.
-export const MAX_TEXT_BYTES = 1024 * 1024;
+const MAX_TEXT_BYTES = 1024 * 1024;
 // Images and PDFs are streamed whole up to this; beyond it the phone gets a
 // refusal with the size, not a partial image.
 export const MAX_RAW_BYTES = 16 * 1024 * 1024;

@@ -14,7 +14,7 @@ import { git } from "./git-exec.js";
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-export const UPLOADS_FOLDER = path.join(".tavi", "uploads");
+const UPLOADS_FOLDER = path.join(".tavi", "uploads");
 const EXCLUDE_LINE = ".tavi/uploads/";
 
 const IMAGE_TYPES: Record<string, string> = {

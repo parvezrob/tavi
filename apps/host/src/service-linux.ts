@@ -15,7 +15,7 @@ import type { ServiceOptions } from "./service.js";
 type Execute = (command: string, args: string[]) => Promise<void>;
 
 export const LINUX_UNIT = "tavi-host.service";
-export const LINUX_UNIT_DIR = path.join(".config", "systemd", "user");
+const LINUX_UNIT_DIR = path.join(".config", "systemd", "user");
 
 /** Writes a user unit, reloads, enables it, and (re)starts it. Linger is best-effort. */
 export async function installSystemdUnit(
@@ -121,7 +121,10 @@ function utf8Locale(): string {
   return current && /utf-?8/i.test(current) ? current : "C.UTF-8";
 }
 
-async function defaultExecute(command: string, args: string[]): Promise<void> {
+// The linux/herdr supervisor call — systemctl, launchctl, loginctl — as a
+// promise that rejects with the command line and what it printed.
+// herdr-service.ts imports this one rather than keeping its twin (#103).
+export async function defaultExecute(command: string, args: string[]): Promise<void> {
   const { execFile } = await import("node:child_process");
   await new Promise<void>((resolve, reject) => {
     execFile(command, args, (error, _stdout, stderr) => {

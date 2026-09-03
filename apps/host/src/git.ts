@@ -32,6 +32,9 @@ export interface WorktreeInfo {
   isMain: boolean;
   // Files git status reports as changed or untracked; not a diff, a count.
   dirty: number;
+  // Why that count is unknown, as a sentence (#103). Absent when git
+  // answered: a failed `status` must not render as "nothing uncommitted".
+  dirtyFailed?: string;
   // Commits this branch has that the default branch does not, and vice
   // versa. 0/0 when there is no default branch to compare against, or the
   // worktree already is the default branch. A detached worktree is
@@ -202,7 +205,11 @@ async function listWorktrees(repository: string): Promise<{ worktrees: WorktreeI
   const worktrees = all.slice(0, MAX_WORKTREES_PER_REPO);
   const counts = await mapPool(worktrees, STATUS_CONCURRENCY, (worktree) => dirtyCount(worktree.path));
   worktrees.forEach((worktree, index) => {
-    worktree.dirty = counts[index] ?? 0;
+    const counted = counts[index];
+    // The zero stays beside the reason so a phone built against 0.1.17,
+    // which decodes `dirty` as a required number, keeps working (#103).
+    if (counted?.ok) worktree.dirty = counted.count;
+    else worktree.dirtyFailed = counted?.error ?? "git did not report this worktree's uncommitted files.";
   });
   return { worktrees, truncated: all.length > worktrees.length };
 }
@@ -334,13 +341,18 @@ async function attachAheadBehind(
   }
 }
 
+// A count, or why git could not make one — as `aheadBehind` does: a
+// worktree git could not read (moved on disk, an index lock, a timeout)
+// must not render as a clean one (#103).
+type DirtyCount = { ok: true; count: number } | { ok: false; status: 503; error: string };
+
 // Changed or untracked entries per `status --porcelain=v2`, one worktree at
 // a time — the count a row needs ("2 dirty"), not the files themselves. A
 // renamed-or-copied entry (`2 ...`) carries its origin path as a second
 // NUL-terminated field; that field must be consumed, not counted as a
 // second changed file (the same shape `changes.ts`'s v1 parser handles by
 // advancing past a rename's `from` field).
-async function dirtyCount(worktreePath: string): Promise<number> {
+async function dirtyCount(worktreePath: string): Promise<DirtyCount> {
   try {
     const { stdout } = await git(worktreePath, ["status", "--porcelain=v2", "-z", "--untracked-files=all"]);
     const parts = stdout.split("\0").filter((entry) => entry.length > 0);
@@ -349,11 +361,9 @@ async function dirtyCount(worktreePath: string): Promise<number> {
       count += 1;
       if (parts[index]?.startsWith("2 ")) index += 1;
     }
-    return count;
-  } catch {
-    // A worktree git listed but that is missing on disk (moved, deleted
-    // outside git): nothing to report, not a failure of the whole repo.
-    return 0;
+    return { ok: true, count };
+  } catch (error) {
+    return { ok: false, status: 503, error: describeGitError(error) };
   }
 }
 

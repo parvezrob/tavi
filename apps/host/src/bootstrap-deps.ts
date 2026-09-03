@@ -14,6 +14,7 @@ import {
 import type { HostConfig } from "./config.js";
 import { HerdrService } from "./herdr.js";
 import { installHerdrService } from "./herdr-service.js";
+import { resolveOnLoginPath } from "./login-shell.js";
 import { currentPackageRoot, durablePackageRoot, isEphemeral, serviceEntrypoint } from "./package-root.js";
 import { isManagedRuntime, runtimeLayout } from "./runtime.js";
 import { installService } from "./service.js";
@@ -87,13 +88,11 @@ export function defaultDeps(config: HostConfig, options: { assumeYes?: boolean }
       await import("node-pty");
     },
     which: async (command) => {
-      try {
-        const { stdout } = await execFileAsync("which", [command]);
-        const found = stdout.trim();
-        if (found) return found;
-      } catch {
-        // Not on PATH; fall through to the known app bundle location.
-      }
+      // The login shell's PATH, not the service's bare one (#103): `which`
+      // here missed anything a version manager or ~/.local/bin provides,
+      // which is exactly what resolveOnLoginPath exists to find.
+      const found = await resolveOnLoginPath(config.shell, command);
+      if (found) return found;
       return command === "tailscale" && existsSync(TAILSCALE_APP_CLI) ? TAILSCALE_APP_CLI : undefined;
     },
     healthy: async (port) => {
@@ -124,14 +123,8 @@ export function defaultDeps(config: HostConfig, options: { assumeYes?: boolean }
     commandStatus: async () => {
       const packageRoot = currentPackageRoot();
       const needed = isEphemeral(packageRoot, process.env) || isManagedRuntime(packageRoot, config.stateDir);
-      let resolved: string | undefined;
-      try {
-        resolved = (await execFileAsync("which", [COMMAND_NAME])).stdout.trim() || undefined;
-      } catch {
-        // `which` exits non-zero when the command is simply not on PATH,
-        // which is the answer the check wants, not a failure to report.
-        resolved = undefined;
-      }
+      // Same login-shell PATH the person types `tavi` into (#103).
+      const resolved = (await resolveOnLoginPath(config.shell, COMMAND_NAME)) ?? undefined;
       return commandLinkStatus({ needed, env: process.env, homeDir: homedir(), resolved });
     },
     linkCommand: async () => {

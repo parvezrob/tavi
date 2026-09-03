@@ -93,7 +93,10 @@ export interface CreatePullRequestOptions {
 
 export type CreatePullRequestResult =
   | { ok: true; pullRequest: PullRequestInfo; pushed: number }
-  | { ok: false; status: 409 | 503; error: string };
+  // `created` marks the one failure that still changed GitHub: gh opened the
+  // pull request and only the read-back failed, so the caller must forget its
+  // "no pull request" badge (#103).
+  | { ok: false; status: 409 | 503; error: string; created?: true };
 
 const MAX_TITLE = 256;
 const MAX_BODY = 60_000;
@@ -164,23 +167,15 @@ export async function createPullRequest(
   const number = numberFromUrl(url);
   const created = number ? await viewPullRequest(worktreePath, number, gh) : null;
   if (!created?.ok || !created.pullRequest) {
-    // gh made it but the read-back failed: still a success, with what gh said.
+    // gh made it but the read-back failed. A pull request numbered 0 with no
+    // base is not a pull request; the person is told it exists, where, and
+    // why this host cannot show it yet (#103).
+    const reason = created && !created.ok ? created.reason : "gh did not describe it.";
     return {
-      ok: true,
-      pushed,
-      pullRequest: {
-        number: number ?? 0,
-        url,
-        title: title || branch,
-        state: "open",
-        isDraft: options.draft === true,
-        base: base ?? "",
-        checks: "none",
-        review: null,
-        additions: 0,
-        deletions: 0,
-        changedFiles: 0,
-      },
+      ok: false,
+      status: 503,
+      error: `The pull request was created${url ? ` (${url})` : ""}, but reading it back failed: ${reason}`,
+      created: true,
     };
   }
   return { ok: true, pushed, pullRequest: created.pullRequest };

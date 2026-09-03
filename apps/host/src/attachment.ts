@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
 
-export const RESUME_BUFFER_BYTES = 1024 * 1024;
-export const DETACHED_RETENTION_MS = 120_000;
+const RESUME_BUFFER_BYTES = 1024 * 1024;
+const DETACHED_RETENTION_MS = 120_000;
 // How long a released pty keeps the phone's size before it is handed back
 // to the desktop (#63). A reconnect flap — network blip, path change, a busy
 // host — re-claims within a few seconds; resizing wide and back in between
 // made the agent's TUI redraw at 174 columns and reflow at 41, garbling the
 // transcript the person was reading. Longer than the phone's reconnect
 // backoff, far shorter than retention.
-export const DETACH_GRACE_MS = 8_000;
+const DETACH_GRACE_MS = 8_000;
 const MAX_BUFFER_CHUNK_BYTES = 64 * 1024;
 
 export interface TerminalSize {

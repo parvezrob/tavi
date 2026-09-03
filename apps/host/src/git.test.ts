@@ -413,3 +413,21 @@ test("a default branch with no ref that resolves marks every row unknown, not in
   assert.equal(worktree?.behind, 0);
   assert.match(worktree?.aheadBehindFailed ?? "", /could not find a ref for main/);
 });
+
+test("uncommitted says why it is unknown rather than 0 (#103)", async () => {
+  const { dir, parent } = repo();
+  const gonePath = path.join(parent, "fix-gone");
+  git(dir, "worktree", "add", "-b", "fix/gone", gonePath, "main");
+  // A worktree git still lists but whose folder is gone: `status` cannot run
+  // there, and the row must not read as a clean checkout.
+  rmSync(gonePath, { recursive: true, force: true });
+
+  const found = (await repos([parent])).find((r) => r.root === dir);
+  const gone = found?.worktrees.find((w) => w.path === gonePath);
+  assert.equal(gone?.dirty, 0);
+  assert.match(gone?.dirtyFailed ?? "", /fix-gone/);
+  // The neighbours still answer, and a counted row carries no reason.
+  const main = found?.worktrees.find((w) => w.path === dir);
+  assert.equal(main?.dirty, 0);
+  assert.equal(main?.dirtyFailed, undefined);
+});

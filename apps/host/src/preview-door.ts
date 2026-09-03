@@ -6,7 +6,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { Duplex } from "node:stream";
-import { PROBE_TIMEOUT_MS, type Preview, type PreviewRegistry, TICKET_COOKIE } from "./preview.js";
+import { type Preview, type PreviewRegistry, TICKET_COOKIE } from "./preview.js";
 
 // The door: the loopback HTTP server Tailscale Serve fronts (#58). Split
 // out of preview.ts in #98 — the registry decides who may reach which
@@ -21,13 +21,14 @@ export interface PreviewDoorOptions {
 }
 
 // How long an upstream gets to start answering before the door answers for
-// it (#98). Thirty times the 1.5 s the registry gives a dev server to accept
-// a connection at all: a Next.js route compiling cold on first request can
-// take well past 15 s, and cutting that off would be the bug, not the fix —
-// while a hung server must not hold the phone's tab spinning forever with no
-// message. Cleared the moment the answer starts, so a long response body, an
-// SSE stream, or an idle HMR socket is never cut off.
-const UPSTREAM_ANSWER_TIMEOUT_MS = PROBE_TIMEOUT_MS * 30;
+// it (#98). Its own number, not a multiple of the registry's connect probe
+// (#103): they answer different questions and would drift apart silently. A
+// Next.js route compiling cold on first request can take well past 15 s, and
+// cutting that off would be the bug, not the fix — while a hung server must
+// not hold the phone's tab spinning forever with no message. Cleared the
+// moment the answer starts, so a long response body, an SSE stream, or an
+// idle HMR socket is never cut off.
+const UPSTREAM_ANSWER_TIMEOUT_MS = 45_000;
 
 const HOP_BY_HOP = new Set([
   "connection",

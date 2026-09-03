@@ -11,7 +11,7 @@ import type { RuntimeLayout } from "./runtime.js";
 // keeps working across self-updates, and `uninstall` removes it.
 
 export const COMMAND_NAME = "tavi";
-export const COMMAND_LINK_MARKER = "# tavi command — written by tavi-host; runs the copy the background service runs.";
+const COMMAND_LINK_MARKER = "# tavi command — written by tavi-host; runs the copy the background service runs.";
 
 export interface CommandLinkPlan {
   binDir: string;

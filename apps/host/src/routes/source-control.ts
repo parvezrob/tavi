@@ -175,7 +175,9 @@ export const sourceControlRoutes: Route = async (url, request, response, context
       },
       ghDeps,
     );
-    if (result.ok) await forgetPullRequestBadge(target.path);
+    // Also after a read-back failure: the pull request is on GitHub, so a
+    // cached "no pull request" would hide the badge for a minute (#103).
+    if (result.ok || result.created) await forgetPullRequestBadge(target.path);
     sendJson(
       response,
       result.ok ? 201 : result.status,

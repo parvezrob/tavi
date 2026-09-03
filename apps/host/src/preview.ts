@@ -22,11 +22,11 @@ import { connect } from "node:net";
 export const TICKET_COOKIE = "tavi_preview";
 // A preview lives while the phone keeps it alive — a heartbeat or any
 // traffic through the door. This is only the net under a killed app.
-export const PREVIEW_GRACE_MS = 120_000;
+const PREVIEW_GRACE_MS = 120_000;
 const SWEEP_MS = 15_000;
 // How long a dev server gets to accept a connection at all before the
 // registry calls the port dead.
-export const PROBE_TIMEOUT_MS = 1_500;
+const PROBE_TIMEOUT_MS = 1_500;
 const MAX_PREVIEWS = 32;
 
 export type LoopbackAddress = "127.0.0.1" | "::1";
