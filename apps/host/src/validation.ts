@@ -6,3 +6,7 @@ export function safeSessionId(value: string): string {
   if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(decoded)) throw new InputError("Invalid session id.");
   return decoded;
 }
+
+export function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
