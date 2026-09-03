@@ -2,13 +2,13 @@
 
 > Every agent starts here. This file holds the live state of the project *right now* and the next piece of work. Update it before ending a session (or at any significant milestone); move the previous state into [`handoffs.md`](./handoffs.md). Keep it short — details belong in the linked docs.
 
-**Last updated:** 2026-09-03 ~03:00 (session closed; **#86 #84 #88 #83 all closed**, phone runs 5d59dd4 over USB, the Mac's service runs the checkout at 14c75a4; **next work is #54**)
+**Last updated:** 2026-09-03 ~19:40 (session closed; **#54 and #52 closed** — design pass done, app icon picked; phone still runs the #83 build 5d59dd4, the Mac's service still the checkout at 14c75a4, which the host code still equals; **next work is #37**)
 
 ## Next work
 
-**1. #54 design pass — START HERE** (absorb #52). Take the three visual notes left by #83: the half-staged checkbox draws a full check; section headers are 12 pt where §7.12 says 13 (one owner call for the home's `SectionHeader` and the sheets); the worktree group's 1.5 pt top-highlight mask thickens the corners and its stroke ring stays hit-testable. Design in the repo first (§7.12 precedent), then code, then look at every screen.
+**1. #37 App Store readiness — START HERE.** The paid developer account (ends the 7-day profile), the privacy strings (camera, Face ID, microphone, speech are already in the target's Info keys — check them against what the app does), the App Store screenshots (the #54 close-out left the audit captures as the raw material), then the TestFlight build itself. The app icon and dark launch screen are in (PRD §7.15).
 
-**2. #37 App Store readiness** (the paid developer account ends the 7-day profile; privacy strings; the TestFlight build itself). Then TestFlight.
+**Install the #54 build on the phone first** (cable only, rules below): it carries the icon, the launch screen, the partly-staged dash, the shared 12 pt headers, and New agent on the idle card — the only screen not looked at live is the idle card (the owner's Mac always has agents; look at it once on the phone with every tab closed, or trust the diff).
 
 **Owner to do:** `npx tavi-host@latest pair` on the Mac to put the managed runtime (0.1.17) back in place of the checkout; robin-PC `tavi update` + one `npx tavi-host pair` for the preview door; look at the PR title field and Pull main in once on the #83 build; Settings → robin-PC (offline) should offer "Forget on this iPhone only" at once; on the Archer C6, check AP isolation is off and both devices share a band.
 
@@ -29,5 +29,5 @@
 - **Host ↔ herdr:** protocol ≥ 17 + `agent.list` shape gate; `herdr agent attach <pane> --takeover`; herdr refuses `agent.send_keys` to a shell pane seconds old; pane size last-writer-wins, hand-back waits `DETACH_GRACE_MS` 8 s (#63); the events feed hands a Terminal back to herdr's detection when an agent starts in it (#66).
 - **Phone ↔ host health:** `AgentDirectory.health` connecting/live/stale/offline/revoked; "Connecting…" bounded to 5 s then a probe (5 s, two misses 1.5 s apart) → Offline, which a live snapshot clears; on a stream drop the redial starts at once (backoff 2 → 30 s) and the probe runs beside it, never in front (2ac15a8); `/api/repos` polled every ~30 s (±20 % jitter) only while the computer is not offline and the stream is not stale (Equatable-gated; kept across restarts). The events socket has no keepalive of its own (#86).
 - **Home (#74):** folder → worktrees → agents; a repository the host knows is one card, worktrees as glass groups (`TaviTheme.groupFill/groupHighlight`), agents beneath; a worktree with no agent still shows; "New worktree" last row → the New Agent sheet in worktree mode; a worktree header → `SourceControlSheet` (Changes / Pull request / Commits; `···` → Start an agent here, Remove worktree).
-- **Files (#25 #57 #61, PRD §7.10)**, **Preview (#58, §7.11)** unchanged; **Source Control (§7.12)** complete.
-- Open issues, in closing order: **#54** (+#52) → **#37** → TestFlight. Closed 2026-09-03: #86 #84 #88 #83 (which held #72 #76 #82 #85). Parked: #68 #69 #39 #49 #27–#29.
+- **Files (#25 #57 #61, PRD §7.10)**, **Preview (#58, §7.11)** unchanged; **Source Control (§7.12)** complete; **design system (§7.15)** closed: `TaviTheme` is the one source of colour and radius, `SectionHeader` the one section register (12 pt small caps, trailing action slot), icon = terminal caret + amber cursor (`docs/assets/app-icon/`, rendered by `scripts/render-app-icon.swift`), launch screen = canvas colour via the merged `Tavi/Info.plist`.
+- Open issues, in closing order: **#37** → TestFlight. Closed 2026-09-03: #54 #52 (evening, design pass close-out — PRD §7.15), #86 #84 #88 #83 (small hours; #83 held #72 #76 #82 #85). Parked: #68 #69 #39 #49 #27–#29.
