@@ -8,8 +8,12 @@ import Foundation
 struct HostSourceControlClient: Sendable {
     private let client: HostClient
 
-    init(endpoint: HostEndpoint, credential: String) {
-        client = HostClient(endpoint: endpoint, credential: credential)
+    init(
+        endpoint: HostEndpoint,
+        credential: String,
+        transport: @escaping HostClient.Transport = { try await HostSession.shared.data(for: $0) }
+    ) {
+        client = HostClient(endpoint: endpoint, credential: credential, transport: transport)
     }
 
     private static let sentences = HostClient.Sentences(

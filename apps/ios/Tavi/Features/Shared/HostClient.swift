@@ -6,22 +6,34 @@ import Foundation
 // own sentence, or a reason the answer could not be used. The per-computer
 // clients — files, preview, source control — are route lists over this.
 struct HostClient: Sendable {
+    // The one call that reaches the network: the shared pool in the app, a
+    // stub in a unit test, so no test opens a socket (#99).
+    typealias Transport = @Sendable (URLRequest) async throws -> (Data, URLResponse)
+
     let endpoint: HostEndpoint
     private let credential: String
+    private let transport: Transport
 
-    init(endpoint: HostEndpoint, credential: String) {
+    init(
+        endpoint: HostEndpoint,
+        credential: String,
+        transport: @escaping Transport = { try await HostSession.shared.data(for: $0) }
+    ) {
         self.endpoint = endpoint
         self.credential = credential
+        self.transport = transport
     }
 
-    // The two sentences only the feature itself can write: what it calls
-    // its own answers, and what to say when this computer's host predates
-    // the route.
+    // The sentences only the feature itself can write: what it calls its
+    // own answers, what to say when this computer's host predates the
+    // route, and what it calls a refusal the host gave no words for.
     struct Sentences: Sendable {
         // Reads as "This host sent <answer> Tavi does not understand."
         let answer: String
         let tooOld: String
         var genericNotFound: GenericNotFound = .meansOldHost
+        // Reads as "<cannotAnswer> (HTTP 500)."; nil keeps the general wording.
+        var cannotAnswer: String? = nil
     }
 
     // What the host's own `Not found.` means on this feature's routes.
@@ -54,10 +66,7 @@ struct HostClient: Sendable {
         timeout: TimeInterval? = nil,
         saying sentences: Sentences
     ) async -> Reply<Value> {
-        guard let request = request(method, path, query: query, body: body, timeout: timeout) else {
-            return .failure("The host address is invalid.")
-        }
-        switch await send(request) {
+        switch await send(method, path, query: query, body: body, timeout: timeout) {
         case let .failure(reason):
             return .failure(reason)
         case let .answered(status, body, _):
@@ -70,6 +79,8 @@ struct HostClient: Sendable {
         do {
             return .value(try JSONDecoder().decode(Value.self, from: body))
         } catch {
+            // A shape this client cannot read is a version mismatch, not a
+            // network problem — say which, since retrying never helps.
             return .failure("This host sent \(sentences.answer) Tavi does not understand. Update the Tavi host and the app to matching versions.")
         }
     }
@@ -85,10 +96,8 @@ struct HostClient: Sendable {
         components.path = path
         components.queryItems = query.isEmpty ? nil : query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
         guard let url = components.url else { return nil }
-        var request = URLRequest(url: url)
+        var request = request(url, timeout: timeout)
         request.httpMethod = method
-        if let timeout { request.timeoutInterval = timeout }
-        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try? JSONSerialization.data(withJSONObject: body)
@@ -96,9 +105,37 @@ struct HostClient: Sendable {
         return request
     }
 
+    // A request to an address this client did not build — the events
+    // socket's own wss URL, which HostEndpoint makes — so the bearer is
+    // still written in exactly one place (#96).
+    func request(_ url: URL, timeout: TimeInterval? = nil) -> URLRequest {
+        var request = URLRequest(url: url)
+        if let timeout { request.timeoutInterval = timeout }
+        // Pairing has no credential yet (#45); every other call carries one.
+        if !credential.isEmpty {
+            request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
+    // The bytes as the host sent them, for a route that reads the status
+    // itself. An address that cannot be built fails the way `fetch` fails.
+    func send(
+        _ method: String,
+        _ path: String,
+        query: [String: String] = [:],
+        body: [String: Any]? = nil,
+        timeout: TimeInterval? = nil
+    ) async -> Answer {
+        guard let request = request(method, path, query: query, body: body, timeout: timeout) else {
+            return .failure("The host address is invalid.")
+        }
+        return await send(request)
+    }
+
     func send(_ request: URLRequest) async -> Answer {
         do {
-            let (body, response) = try await HostSession.shared.data(for: request)
+            let (body, response) = try await transport(request)
             guard let http = response as? HTTPURLResponse else { return .failure("The host did not answer.") }
             return .answered(
                 status: http.statusCode,
@@ -115,12 +152,28 @@ struct HostClient: Sendable {
     // refusal, and the sentence says what to do about it (#81 review: the
     // refusal decode used to run first, so this sentence never showed).
     static func refusal<Value: Sendable>(status: Int, body: Data, saying sentences: Sentences) -> Reply<Value> {
-        let sentence = (try? JSONDecoder().decode(HostSentence.self, from: body))?.error
-        if status == 404, sentence == nil || (sentence == "Not found." && sentences.genericNotFound == .meansOldHost) {
-            return .failure(sentences.tooOld)
+        guard let sentence = hostSentence(in: body),
+              !(status == 404 && sentence == "Not found." && sentences.genericNotFound == .meansOldHost) else {
+            return .failure(refusalMessage(status: status, body: body, saying: sentences))
         }
-        if let sentence { return .refused(status: status, sentence: sentence, body: body) }
-        return .failure("The host could not answer (HTTP \(status)).")
+        return .refused(status: status, sentence: sentence, body: body)
+    }
+
+    // The same reading for a route whose answer is a message rather than a
+    // value (#96): the host's own sentence, the too-old sentence, or this
+    // feature's wording for a status that carried no sentence at all.
+    static func refusalMessage(status: Int, body: Data, saying sentences: Sentences) -> String {
+        let sentence = hostSentence(in: body)
+        if status == 404, sentence == nil || (sentence == "Not found." && sentences.genericNotFound == .meansOldHost) {
+            return sentences.tooOld
+        }
+        if let sentence { return sentence }
+        if let cannotAnswer = sentences.cannotAnswer { return "\(cannotAnswer) (HTTP \(status))." }
+        return "The host could not answer (HTTP \(status))."
+    }
+
+    private static func hostSentence(in body: Data) -> String? {
+        (try? JSONDecoder().decode(HostSentence.self, from: body))?.error
     }
 
     private struct HostSentence: Decodable {

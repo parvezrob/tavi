@@ -50,14 +50,25 @@ struct TerminalFontPreviewView: UIViewRepresentable {
         container.addSubview(terminal)
         container.terminal = terminal
         terminal.setActive(isActive)
+        container.isActive = isActive
+        container.fontSize = fontSize
         terminal.receive(Self.sample)
         return container
     }
 
     func updateUIView(_ container: PreviewContainer, context: Context) {
         container.terminal?.onGridSizeChange = gridConsumer
-        container.terminal?.setActive(isActive)
-        container.terminal?.setFontSize(fontSize)
+        // setActive re-focuses, re-checks occlusion and draws synchronously
+        // on the main thread, so only a real change is worth it (as
+        // AgentTerminalView already does).
+        if container.isActive != isActive {
+            container.isActive = isActive
+            container.terminal?.setActive(isActive)
+        }
+        if container.fontSize != fontSize {
+            container.fontSize = fontSize
+            container.terminal?.setFontSize(fontSize)
+        }
     }
 
     // updateUIView runs inside SwiftUI's update pass; publishing a grid
@@ -82,5 +93,9 @@ struct TerminalFontPreviewView: UIViewRepresentable {
     @MainActor
     final class PreviewContainer: UIView {
         fileprivate var terminal: GhosttyTerminalSurfaceView?
+        // What was last applied, so an update pass that changed neither
+        // touches the surface.
+        fileprivate var isActive: Bool?
+        fileprivate var fontSize: Double?
     }
 }

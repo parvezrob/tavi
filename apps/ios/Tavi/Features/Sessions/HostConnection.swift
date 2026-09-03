@@ -70,8 +70,8 @@ final class HostConnection {
     private static let logger = Logger(subsystem: "com.farfield.tavi", category: "agents.directory")
     private static let eventsProtocol = "tavi.events.v1"
     // Retry cadence for the events stream. A computer that is asleep or off
-    // the tailnet is dialled again at 2, 4, 8, 16, then every 30 s — not
-    // every 2 s for hours (owner-felt, 2026-09-02: robin-PC unplugged). The
+    // the tailnet is dialled again at 2, 4, 8, then every 10 s — not every
+    // 2 s for hours (owner-felt, 2026-09-02: robin-PC unplugged). The
     // connect deadline bounds "Connecting…": a peer that has said nothing
     // after 5 s is probed, and no answer means Offline — the phone never
     // waits out a silent handshake to admit it.
@@ -112,6 +112,8 @@ final class HostConnection {
 
     private var host: HostEndpoint?
     private var credential = ""
+    private let transport: HostClient.Transport
+    private let makeSocket: @Sendable (URLRequest) -> any HostEventsSocketing
     private var onEvent: ((HostConnectionEvent) -> Void)?
     private var reconnectAttempt = 0
     private var streamTask: Task<Void, Never>?
@@ -121,7 +123,7 @@ final class HostConnection {
     // buffers then live on (measured 2026-09-02: 242 directories after 200
     // home → terminal → home trips, ~140 KB and one host stream each).
     // Network.framework, not URLSession: see NetworkWebSocketTask (#70).
-    private var socket: NetworkWebSocketTask?
+    private var socket: (any HostEventsSocketing)?
     private var latencyTask: Task<Void, Never>?
     // Reconnect coordination (#86, PRD §7.13): one probe in flight however
     // many askers; Offline only after two dials in a row produced no frame;
@@ -129,6 +131,28 @@ final class HostConnection {
     private var probeInFlight: Task<HostProbe, Never>?
     private var consecutiveFailedDials = 0
     private var streamConnectedAt: Date?
+
+    // Tests hand in their own transport and socket so no unit test opens a
+    // real one — the seam the terminal transport already has (#99).
+    init(
+        transport: @escaping HostClient.Transport = { try await HostSession.shared.data(for: $0) },
+        makeSocket: @escaping @Sendable (URLRequest) -> any HostEventsSocketing = { NetworkWebSocketTask(request: $0) }
+    ) {
+        self.transport = transport
+        self.makeSocket = makeSocket
+    }
+
+    // Everything this link asks the host over HTTP goes through one client,
+    // so the bearer and the query live in HostClient alone (#96).
+    private var client: HostClient? {
+        guard let host, !credential.isEmpty else { return nil }
+        return HostClient(endpoint: host, credential: credential, transport: transport)
+    }
+
+    // The repos poll runs beside this stream only while the stream is
+    // usable: a revoked, offline or reconnecting link would add a half-open
+    // socket to the redial's own (#72).
+    var isPollable: Bool { !isRevoked && !isOffline && !isStale }
 
     var health: HostHealth {
         if isRevoked { return .revoked }
@@ -162,8 +186,15 @@ final class HostConnection {
     func start() {
         // A dead credential stays dead: re-dialing it on every foreground
         // would only produce 401s (#46).
-        guard streamTask == nil, !isRevoked, let host, !credential.isEmpty else { return }
+        guard streamTask == nil, !isRevoked, let host, let client else { return }
         guard let eventsURL = try? host.eventsURL() else { return }
+        // A handshake that gets no answer must fail on its own clock, not
+        // the system's minute-long default: the connect deadline decides
+        // what the home says, this decides when the attempt is abandoned.
+        // Eight seconds: a handshake through a relay takes about one; a
+        // radio that is still waking up must fail fast so the redial runs.
+        var handshake = client.request(eventsURL, timeout: 8)
+        handshake.setValue(Self.eventsProtocol, forHTTPHeaderField: "Sec-WebSocket-Protocol")
         isRunning = true
         // A foreground is a fresh start (#86, owner 2026-09-03 01:10: "the
         // reconnection took a while" after the phone had been idle): the
@@ -176,11 +207,10 @@ final class HostConnection {
         // it here showed "Connecting…" on every foreground for as long as
         // the handshake took to time out — for an unplugged computer, every
         // time the owner looked (2026-09-02).
-        let credential = credential
         streamTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                await self.streamOnce(eventsURL: eventsURL, credential: credential)
+                await self.streamOnce(handshake: handshake)
                 guard !Task.isCancelled else { return }
                 self.reconnectAttempt += 1
                 try? await Task.sleep(for: Self.reconnectPolicy.delay(forAttempt: self.reconnectAttempt))
@@ -211,17 +241,8 @@ final class HostConnection {
         if hasLoaded { isStale = true }
     }
 
-    private func streamOnce(eventsURL: URL, credential: String) async {
-        var request = URLRequest(url: eventsURL)
-        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
-        request.setValue(Self.eventsProtocol, forHTTPHeaderField: "Sec-WebSocket-Protocol")
-        // A handshake that gets no answer must fail on its own clock, not
-        // the system's minute-long default: the deadline below decides what
-        // the home says, this decides when the attempt is abandoned.
-        // Eight seconds: a handshake through a relay takes about one; a
-        // radio that is still waking up must fail fast so the redial runs.
-        request.timeoutInterval = 8
-        let socket = NetworkWebSocketTask(request: request)
+    private func streamOnce(handshake: URLRequest) async {
+        let socket = makeSocket(handshake)
         self.socket = socket
         socket.resume()
         defer {
@@ -369,16 +390,9 @@ final class HostConnection {
     // stream retrying; only a connection-level failure marks the host
     // offline.
     private func probeHost() async -> HostProbe {
-        guard let host, !credential.isEmpty,
-              var components = URLComponents(url: host.baseURL, resolvingAgainstBaseURL: false) else { return .unreachable }
-        components.path = "/api/host"
-        guard let url = components.url else { return .unreachable }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 5
-        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        guard let client, let request = client.request("GET", "/api/host", timeout: 5) else { return .unreachable }
         let started = Date()
-        guard let (data, response) = try? await HostSession.shared.data(for: request),
-              let status = (response as? HTTPURLResponse)?.statusCode else { return .unreachable }
+        guard case let .answered(status, data, _) = await client.send(request) else { return .unreachable }
         if status == 401 { return .rejected }
         if status == 200, let answer = try? JSONDecoder().decode(HostAnswer.self, from: data) {
             let answered = ConnectionPath(path: answer.connection?.path, relay: answer.connection?.relay)
@@ -416,3 +430,17 @@ private struct AgentsSnapshotMessage: Decodable {
     let reason: String?
     let agents: [AgentSummary]
 }
+
+// The events socket as this link uses it: the same seam the terminal
+// transport has for NetworkWebSocketTask (#70, #99).
+protocol HostEventsSocketing: AnyObject, Sendable {
+    // When the last frame of any kind arrived — the watchdog's idle clock.
+    var lastActivity: Date { get }
+
+    func resume()
+    func receive() async throws -> URLSessionWebSocketTask.Message
+    func ping() async throws
+    func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?)
+}
+
+extension NetworkWebSocketTask: HostEventsSocketing {}

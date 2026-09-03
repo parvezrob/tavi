@@ -434,8 +434,11 @@ struct PreviewSheet: View {
 
 // Consent is asked once per computer and port for as long as the app runs;
 // nothing about it is persisted, so a fresh launch asks again.
+// Asked and recorded from the sheet only, so the main actor owns it — no
+// unchecked escape hatch to justify (#96).
+@MainActor
 enum PreviewConsent {
-    nonisolated(unsafe) private static var given = Set<String>()
+    private static var given = Set<String>()
 
     static func given(hostId: String, port: Int) -> Bool {
         given.contains("\(hostId)|\(port)")

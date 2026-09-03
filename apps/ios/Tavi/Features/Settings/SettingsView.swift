@@ -26,8 +26,10 @@ struct SettingsView: View {
     @State private var hasRealViewport = TerminalViewportRecord.load() != nil
     // The lock cannot be turned on where device-owner authentication can
     // never succeed (no passcode set): an uncheckable lock is a bricked
-    // app, not security.
-    @State private var lockAvailable = LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
+    // app, not security. Asked in `.task`, never in the initialiser, which
+    // SwiftUI re-runs on every redraw of the parent (#68, #69); nil until
+    // asked, so an unchecked lock is never drawn as an unavailable one.
+    @State private var lockAvailable: Bool?
     // The computer whose "This iPhone" sheet is open.
     @State private var managing: HostFleet.Entry?
 
@@ -56,6 +58,9 @@ struct SettingsView: View {
                     onRename: { fleet.rename(hostId: entry.id, alias: $0) }
                 )
             }
+        }
+        .task {
+            lockAvailable = LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
         }
         .onChange(of: fontSize) { _, size in
             TerminalFontPreference.save(size)
@@ -172,7 +177,7 @@ struct SettingsView: View {
         Section {
             Toggle("Require Face ID to open", isOn: $faceIDLock)
                 .foregroundStyle(TaviTheme.textPrimary)
-                .disabled(!lockAvailable)
+                .disabled(lockAvailable != true)
                 .accessibilityIdentifier("settings.faceIDLock")
                 .listRowBackground(TaviTheme.card)
 
@@ -227,7 +232,7 @@ struct SettingsView: View {
     // Two sentences at most (#54); the paired-computer rows explain themselves.
     private var securityFooter: String {
         var sentences = ["Face ID protects the app, not your computers: anyone who unlocks Tavi can type into your agents."]
-        if !lockAvailable {
+        if lockAvailable == false {
             sentences.append("Face ID or a passcode must be set up on this iPhone before the lock can be turned on.")
         }
         return sentences.joined(separator: " ")

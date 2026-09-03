@@ -28,10 +28,13 @@ enum HostPairing {
         }
     }
 
-    // Same no-disk-trace posture as every other request that carries a
-    // credential (#36).
-    // One pool for the whole app (#86); this client's budget rides on each request.
-    private static var session: URLSession { HostSession.shared }
+    // Both calls are HostClient routes (#96), so the pool, the bearer and
+    // the "too old" reading are the ones every other request gets.
+    private static let sentences = HostClient.Sentences(
+        answer: "a pairing reply",
+        tooOld: "This computer's Tavi host is too old to pair with this version of Tavi. Update it with `npx tavi-host update`.",
+        cannotAnswer: "The host refused the pairing code"
+    )
 
     private struct GrantResponse: Decodable {
         struct Device: Decodable { let id: String; let name: String }
@@ -45,49 +48,35 @@ enum HostPairing {
     // a mismatch with the one on the code means the phone reached a
     // different machine than the one it was shown, and the grant is dropped.
     static func redeem(_ payload: PairingPayload) async throws -> Grant {
-        guard var components = URLComponents(url: payload.endpoint.baseURL, resolvingAgainstBaseURL: false) else {
-            throw Failure.unreachable("The host address is invalid.")
-        }
-        components.path = "/api/pair"
-        guard let url = components.url else { throw Failure.unreachable("The host address is invalid.") }
-
-        var request = URLRequest(url: url)
-
-        request.timeoutInterval = 15
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: [
-            "secret": payload.secret,
-            "deviceName": await MainActor.run { UIDevice.current.name },
-        ])
-
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch {
-            throw Failure.unreachable(error.localizedDescription)
-        }
-        guard let status = (response as? HTTPURLResponse)?.statusCode else {
-            throw Failure.unreachable("The host did not answer.")
-        }
-        guard status == 201 else {
-            let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
-            throw Failure.codeRejected(message ?? "The host refused the pairing code (HTTP \(status)).")
-        }
-        guard let grant = try? JSONDecoder().decode(GrantResponse.self, from: data) else {
-            throw Failure.unreachable("This host sent a pairing reply Tavi does not understand. Update the Tavi host and the app to matching versions.")
-        }
-        guard grant.host.fingerprint == payload.fingerprint else {
-            throw Failure.fingerprintMismatch(shown: payload.fingerprint, actual: grant.host.fingerprint)
-        }
-        return Grant(
-            credential: grant.credential,
-            deviceId: grant.device.id,
-            deviceName: grant.device.name,
-            hostName: grant.host.name,
-            fingerprint: grant.host.fingerprint
+        // The exchange that mints the credential is the one call that has none.
+        let client = HostClient(endpoint: payload.endpoint, credential: "")
+        let reply: HostClient.Reply<GrantResponse> = await client.fetch(
+            "POST",
+            "/api/pair",
+            body: [
+                "secret": payload.secret,
+                "deviceName": await MainActor.run { UIDevice.current.name },
+            ],
+            timeout: 15,
+            saying: sentences
         )
+        switch reply {
+        case let .value(grant):
+            guard grant.host.fingerprint == payload.fingerprint else {
+                throw Failure.fingerprintMismatch(shown: payload.fingerprint, actual: grant.host.fingerprint)
+            }
+            return Grant(
+                credential: grant.credential,
+                deviceId: grant.device.id,
+                deviceName: grant.device.name,
+                hostName: grant.host.name,
+                fingerprint: grant.host.fingerprint
+            )
+        case let .refused(_, sentence, _):
+            throw Failure.codeRejected(sentence)
+        case let .failure(reason):
+            throw Failure.unreachable(reason)
+        }
     }
 
     struct Checks: Equatable {
@@ -100,29 +89,22 @@ enum HostPairing {
     // Progressive proof that the credential works and the path is direct,
     // shown step by step on the done screen.
     static func verify(endpoint: HostEndpoint, credential: String) async throws -> Checks {
-        guard var components = URLComponents(url: endpoint.baseURL, resolvingAgainstBaseURL: false) else {
+        let client = HostClient(endpoint: endpoint, credential: credential)
+        guard let request = client.request("GET", "/api/agents", timeout: 15) else {
             throw Failure.unreachable("The host address is invalid.")
         }
-        components.path = "/api/agents"
-        guard let url = components.url else { throw Failure.unreachable("The host address is invalid.") }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 15
-        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
-
         let started = Date()
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch {
-            throw Failure.unreachable(error.localizedDescription)
+        switch await client.send(request) {
+        case let .failure(reason):
+            throw Failure.unreachable(reason)
+        case let .answered(status, data, _):
+            let latency = Int(Date().timeIntervalSince(started) * 1000)
+            guard status == 200 else {
+                throw Failure.unreachable("The new credential was not accepted by the host.")
+            }
+            struct Agents: Decodable { let available: Bool; let agents: [AgentSummary] }
+            let agents = (try? JSONDecoder().decode(Agents.self, from: data)) ?? Agents(available: false, agents: [])
+            return Checks(latencyMilliseconds: latency, sessionsFound: agents.agents.count, herdrAvailable: agents.available)
         }
-        let latency = Int(Date().timeIntervalSince(started) * 1000)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw Failure.unreachable("The new credential was not accepted by the host.")
-        }
-        struct Agents: Decodable { let available: Bool; let agents: [AgentSummary] }
-        let agents = (try? JSONDecoder().decode(Agents.self, from: data)) ?? Agents(available: false, agents: [])
-        return Checks(latencyMilliseconds: latency, sessionsFound: agents.agents.count, herdrAvailable: agents.available)
     }
 }

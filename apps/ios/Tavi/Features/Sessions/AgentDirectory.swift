@@ -205,7 +205,7 @@ final class AgentDirectory {
                 // skipping, a dead credential that redialing cannot fix.
                 // `isStale` too: while the stream is down this poll would
                 // only add a 20 s half-open socket to the redial's own.
-                if !self.link.isRevoked, !self.link.isOffline, !self.link.isStale {
+                if self.link.isPollable {
                     switch await self.routes.fetchRepos() {
                     case let .repos(repos):
                         self.reposFailures = 0
