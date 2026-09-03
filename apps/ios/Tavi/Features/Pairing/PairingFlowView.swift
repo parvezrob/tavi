@@ -90,7 +90,7 @@ struct PairingFlowView: View {
                 .font(.footnote)
                 .foregroundStyle(TaviTheme.textSecondary)
             }
-            .padding(.horizontal, 6)
+            .padding(.horizontal, TaviTheme.Spacing.tight)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             // The screen's anchor, not a footnote (#54): the promise is the
@@ -125,7 +125,7 @@ struct PairingFlowView: View {
                 .font(.footnote.monospaced())
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
-                .padding(12)
+                .padding(TaviTheme.Spacing.snug)
                 .background(TaviTheme.well, in: RoundedRectangle(cornerRadius: TaviTheme.wellRadius, style: .continuous))
                 .accessibilityIdentifier("pairing.manualCode")
             Button("Continue") { handleCode(manualCode) }
@@ -133,7 +133,7 @@ struct PairingFlowView: View {
                 .disabled(manualCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityIdentifier("pairing.manualContinue")
         }
-        .padding(14)
+        .padding(TaviTheme.Spacing.card)
         .frame(maxWidth: .infinity, alignment: .leading)
         .taviCard()
     }
@@ -173,7 +173,7 @@ struct PairingFlowView: View {
                     .foregroundStyle(TaviTheme.textSecondary)
                     .multilineTextAlignment(.center)
             }
-            .padding(14)
+            .padding(TaviTheme.Spacing.card)
             .frame(maxWidth: .infinity)
             .taviCard()
 
@@ -184,7 +184,7 @@ struct PairingFlowView: View {
                     .font(.footnote)
                     .foregroundStyle(TaviTheme.textPrimary)
             }
-            .padding(14)
+            .padding(TaviTheme.Spacing.card)
             .frame(maxWidth: .infinity, alignment: .leading)
             .taviCard(stripe: TaviTheme.statusBlocked)
 
@@ -196,7 +196,7 @@ struct PairingFlowView: View {
             } label: {
                 Label("Pair securely", systemImage: "lock.fill")
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
+                    .padding(.vertical, TaviTheme.Spacing.tight)
             }
             .buttonStyle(.taviProminent)
             .accessibilityIdentifier("pairing.confirm")
@@ -274,7 +274,7 @@ struct PairingFlowView: View {
             } label: {
                 Text("View sessions")
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
+                    .padding(.vertical, TaviTheme.Spacing.tight)
             }
             .buttonStyle(.taviProminent)
             .accessibilityIdentifier("pairing.viewSessions")
@@ -297,7 +297,7 @@ struct PairingFlowView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(12)
+        .padding(TaviTheme.Spacing.snug)
         .accessibilityElement(children: .combine)
     }
 

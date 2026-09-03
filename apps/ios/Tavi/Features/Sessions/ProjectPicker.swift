@@ -33,6 +33,11 @@ enum ProjectPicker {
         return installed.first?.kind
     }
 
+    // What the host calls this kind, else the kind itself.
+    static func label(for kind: String, in catalog: ProjectCatalog) -> String {
+        catalog.agents.first { $0.kind == kind }?.label ?? kind
+    }
+
     private static func matches(_ name: String, _ path: String, _ needle: String) -> Bool {
         guard !needle.isEmpty else { return true }
         return name.lowercased().contains(needle) || path.lowercased().contains(needle)

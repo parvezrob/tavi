@@ -16,7 +16,7 @@ extension TerminalSessionView {
                     .transition(.opacity)
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, TaviTheme.Spacing.snug)
         .padding(.top, 10)
         .padding(.bottom, 8)
         // Opaque on purpose: a material here live-blurs the Metal surface
@@ -79,7 +79,7 @@ extension TerminalSessionView {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused($composerFocused)
-                .padding(.horizontal, 12)
+                .padding(.horizontal, TaviTheme.Spacing.snug)
                 .padding(.vertical, 8)
                 .background(
                     TaviTheme.well,

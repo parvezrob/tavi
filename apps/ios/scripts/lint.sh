@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # House checks for the phone app: swiftformat decides layout, swiftlint
-# decides size and safety. Warnings are printed; only errors fail the run.
+# decides size and safety. The gate can go red (#100): swiftlint runs
+# --strict against a committed baseline of the warnings that were already
+# there. Baselined violations are suppressed entirely — a clean run prints
+# nothing but "lint: clean" — while any NEW warning, and every force unwrap
+# or force try in Tavi/ (errors there), fails the run. A baselined entry
+# also re-fires when the file's length changes, because file_length and
+# type_body_length carry the exact count; re-record then, and the only diff
+# in the baseline must be that count:
+#   swiftlint lint --quiet --write-baseline .swiftlint-baseline.json
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
@@ -18,12 +26,11 @@ echo "== swiftformat --lint =="
 swiftformat --lint . || status=1
 
 echo "== swiftlint =="
-# --strict would promote warnings to errors; the recorded ones are for #69.
-swiftlint lint --quiet || status=1
+swiftlint lint --quiet --strict --baseline .swiftlint-baseline.json || status=1
 
 if [ "$status" -ne 0 ]; then
     echo "lint: failed" >&2
 else
-    echo "lint: clean (warnings above are recorded, not blocking)"
+    echo "lint: clean"
 fi
 exit "$status"

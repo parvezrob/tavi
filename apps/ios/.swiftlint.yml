@@ -14,8 +14,8 @@ type_body_length: 400 # Warning only: file_length is the line that blocks.
 # HostConnection.swift's events stream is 21: a `switch` over host events is a table, not a tangle.
 cyclomatic_complexity: { warning: 10, error: 25, ignores_case_statements: true }
 
-force_unwrapping: warning # A crash the tree already accepts; flagged, never blocking.
-force_try: warning # Only for a literal regex that must not survive being wrong.
+force_unwrapping: warning # Tests only: Tavi/.swiftlint.yml raises both to error for app sources.
+force_try: warning
 
 trailing_comma: { mandatory_comma: true } # swiftformat writes them; the two must agree.
 

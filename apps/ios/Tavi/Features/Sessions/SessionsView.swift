@@ -1,6 +1,3 @@
-// Over the 400-line line; split in #69.
-// swiftlint:disable file_length
-
 import SwiftUI
 
 // Sessions home (ROADMAP Phase C): what needs the user leads, running work
@@ -61,7 +58,7 @@ struct SessionsView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     homeContent
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, TaviTheme.Spacing.screen)
                 .padding(.top, 2)
                 .padding(.bottom, 28)
             }
@@ -162,8 +159,13 @@ struct SessionsView: View {
                 )
             }
             .sheet(isPresented: $showingHostForm) {
-                hostForm
-                    .presentationDetents([.medium])
+                HostTokenForm(
+                    address: $draftHost,
+                    token: $draftToken,
+                    onDismiss: { showingHostForm = false },
+                    onSave: { address, token in fleet.add(.typed(address: address), credential: token) }
+                )
+                .presentationDetents([.medium])
             }
             .sheet(item: $chipSheet) { entry in
                 ManageAccessView(
@@ -325,7 +327,7 @@ struct SessionsView: View {
             // top edge of an otherwise empty page (#54).
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
-                noHostCard
+                NoHostCard { showingPairing = true }
                 Spacer(minLength: 0)
             }
             .containerRelativeFrame(.vertical) { length, _ in length * 0.7 }
@@ -343,59 +345,28 @@ struct SessionsView: View {
                     .map { HomeProjectItem(computer: computer, project: $0) }
             }
 
-            computerStrip(layout.computers)
+            ComputerStrip(computers: layout.computers, selectedHostId: $selectedHostId) { computer in
+                chipSheet = fleet.entries.first { $0.id == computer.id }
+            }
 
             // A computer in trouble says so once, right under the strip,
             // whatever else is on screen; its last known cards stay below.
             ForEach(shown.filter { $0.hasLoaded && ($0.health == .stale || $0.health == .offline) }) { computer in
-                lastKnownBanner(computer)
+                LastKnownBanner(computer: computer)
             }
 
-            // Needs-you is flat and first, across every computer and
-            // project: a waiting agent never hides under a group. Said
-            // once — the header carries the count, the rows carry the
-            // agents; there is no banner repeating either (home v3). Row
-            // identity includes the status so a section move rebuilds the
-            // row instead of reusing a cached one. A row opens the decision
-            // sheet (approve/deny without the terminal).
             if !needsYou.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    SectionHeader(title: "Needs you", count: needsYou.count > 1 ? needsYou.count : nil, countTint: TaviTheme.accent)
-                        .accessibilityIdentifier("sessions.needsYou")
-                    let groups = HomeGrouping.waitingGroups(needsYou) { agent in
-                        NeedsYouRow.askingLine(in: fleet.directory(for: agent.hostId)?.previews[agent.id])
+                NeedsYouSection(
+                    agents: needsYou,
+                    computerName: { severalShown ? computerName(for: $0.hostId) : nil },
+                    preview: { fleet.directory(for: $0.hostId)?.previews[$0.id] },
+                    observedAt: { fleet.directory(for: $0.hostId)?.statusObservedAt[$0.id] },
+                    expandedStacks: $expandedWaitingStacks,
+                    onSelect: { agent in
+                        guard fleet.directory(for: agent.hostId) != nil else { return }
+                        decisionAgent = DecisionTarget(agent: agent)
                     }
-                    VStack(spacing: 0) {
-                        ForEach(groups) { group in
-                            if group.isStacked {
-                                WaitingStackRow(
-                                    group: group,
-                                    computerName: severalShown ? computerName(for: group.primary.hostId) : nil,
-                                    isExpanded: expandedWaitingStacks.contains(group.key)
-                                ) {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        if expandedWaitingStacks.remove(group.key) == nil {
-                                            expandedWaitingStacks.insert(group.key)
-                                        }
-                                    }
-                                }
-                                if expandedWaitingStacks.contains(group.key) {
-                                    ForEach(group.agents, id: \.cardIdentity) { agent in
-                                        Divider().overlay(TaviTheme.hairline).padding(.leading, 60)
-                                        needsYouRow(agent, computerName: nil, primaryOverride: agent.tabLabel ?? agent.id)
-                                            .padding(.leading, 16)
-                                    }
-                                }
-                            } else {
-                                needsYouRow(group.primary, computerName: severalShown ? computerName(for: group.primary.hostId) : nil, primaryOverride: nil)
-                            }
-                            if group.id != groups.last?.id {
-                                Divider().overlay(TaviTheme.hairline).padding(.leading, 60)
-                            }
-                        }
-                    }
-                    .taviCard()
-                }
+                )
             }
 
             // Project → agents (#26), one list across every computer shown
@@ -430,59 +401,15 @@ struct SessionsView: View {
             // cannot be reached, has no usable feed, or was unpaired — one
             // card each. When every shown computer is simply idle, one line.
             ForEach(shown.filter { $0.projects.isEmpty && !$0.isQuietlyIdle }) { computer in
-                computerStateCard(computer)
+                ComputerStateCard(
+                    computer: computer,
+                    onPairAgain: { showingPairing = true },
+                    onRemove: { removingHostId = computer.id }
+                )
             }
             if !shown.isEmpty, needsYou.isEmpty, shown.allSatisfy({ $0.projects.isEmpty && $0.isQuietlyIdle }) {
-                idleCard(shown)
+                IdleCard(computers: shown) { showingNewAgent = true }
             }
-        }
-    }
-
-    // The host tier: a row of chips — All, then every computer, in pairing
-    // order (#50). With one computer, one status pill. Tap filters; a long
-    // press opens the computer's sheet (address, round trip, rename, unpair).
-    private func computerStrip(_ computers: [HomeComputer]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                if computers.count > 1 {
-                    AllComputersChip(isSelected: selectedHostId == nil) { selectedHostId = nil }
-                }
-                ForEach(computers) { computer in
-                    ComputerChip(
-                        computer: computer,
-                        isSelected: computers.count > 1 && selectedHostId == computer.id,
-                        showsWaitingCount: computers.count > 1
-                    ) {
-                        if computers.count > 1 {
-                            selectedHostId = selectedHostId == computer.id ? nil : computer.id
-                        } else {
-                            chipSheet = fleet.entries.first { $0.id == computer.id }
-                        }
-                    }
-                    .contextMenu {
-                        Button("About \(computer.name)", systemImage: "info.circle") {
-                            chipSheet = fleet.entries.first { $0.id == computer.id }
-                        }
-                    }
-                }
-            }
-            .padding(.vertical, 2)
-        }
-        .accessibilityIdentifier("sessions.computers")
-    }
-
-    @ViewBuilder
-    private func computerStateCard(_ computer: HomeComputer) -> some View {
-        if computer.health == .revoked {
-            revokedCard(computer)
-        } else if !computer.hasLoaded {
-            if computer.health == .offline {
-                offlineCard(computer)
-            } else {
-                loadingCard(computer)
-            }
-        } else if !computer.available {
-            unavailableCard(computer)
         }
     }
 
@@ -495,7 +422,7 @@ struct SessionsView: View {
     // part 2 lands, that starts an agent in the folder rather than
     // creating a worktree.
     @State private var newWorktreeIn: (hostId: String, path: String)?
-    @State private var newAgentStartMode: NewAgentSheet.WhereMode = .worktree
+    @State private var newAgentStartMode: NewAgentDraft.WhereMode = .worktree
     @State private var pendingAgentFolder: (hostId: String, path: String)?
     // A worktree's Source Control sheet (#77), keyed by computer + path
     // since two computers can hold the same path.
@@ -533,20 +460,6 @@ struct SessionsView: View {
         fleet.entries.map { JumpSource(hostId: $0.host.id, name: $0.host.displayName, directory: $0.directory) }
     }
 
-    private func needsYouRow(_ agent: AgentSummary, computerName: String?, primaryOverride: String?) -> some View {
-        let directory = fleet.directory(for: agent.hostId)
-        return NeedsYouRow(
-            agent: agent,
-            preview: directory?.previews[agent.id],
-            observedAt: directory?.statusObservedAt[agent.id],
-            computerName: computerName,
-            primaryOverride: primaryOverride
-        ) {
-            guard directory != nil else { return }
-            decisionAgent = DecisionTarget(agent: agent)
-        }
-    }
-
     // The computer's name, only when there is more than one to tell apart
     // (#50); with a single computer the name is noise on every screen.
     private func computerLabel(for hostId: String) -> String? {
@@ -569,217 +482,7 @@ struct SessionsView: View {
         var id: String { agent.cardIdentity }
     }
 
-    // MARK: - Empty and degraded states
-
-    // First run leads with the promise, not the absence (#54): what Tavi
-    // is for, then the one step, then the trust line that used to hide in
-    // the pairing sheet's footer.
-    private var noHostCard: some View {
-        VStack(spacing: 10) {
-            Text("Your agents, in your pocket")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(TaviTheme.textPrimary)
-                .multilineTextAlignment(.center)
-            Text("Your agents and logins stay on your own computer. Pair it once by scanning the code it shows.")
-                .font(.footnote)
-                .foregroundStyle(TaviTheme.textSecondary)
-                .multilineTextAlignment(.center)
-            Button {
-                showingPairing = true
-            } label: {
-                Label("Scan pairing code", systemImage: "qrcode.viewfinder")
-            }
-            .buttonStyle(.taviProminent)
-            .padding(.top, 6)
-            .accessibilityIdentifier("sessions.scanPairingCode")
-            Label("No provider login. No public relay.", systemImage: "lock")
-                .font(.caption2)
-                .foregroundStyle(TaviTheme.textSecondary)
-                .padding(.top, 8)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 30)
-        .padding(.horizontal, 16)
-        .taviCard()
-    }
-
-    private func lastKnownBanner(_ computer: HomeComputer) -> some View {
-        HStack(spacing: 8) {
-            if computer.health == .stale {
-                ProgressView()
-                    .controlSize(.mini)
-            } else {
-                Image(systemName: "moon.zzz")
-                    .font(.caption)
-            }
-            Text(
-                computer.health == .stale
-                    ? "Reconnecting — showing the last known state"
-                    : "\(computer.name) isn't answering — showing the last known state"
-            )
-            .font(.caption)
-            .foregroundStyle(TaviTheme.textSecondary)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .taviCard()
-        .accessibilityIdentifier("sessions.stale")
-    }
-
-    private func loadingCard(_ computer: HomeComputer) -> some View {
-        HStack(spacing: 10) {
-            ProgressView()
-            Text("Connecting to \(computer.name)…")
-                .font(.callout)
-                .foregroundStyle(TaviTheme.textSecondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .taviCard()
-        .accessibilityIdentifier("sessions.loading")
-    }
-
-    // The computer does not answer at all and nothing was ever shown for
-    // it. Once something has loaded, the last known state stays on screen
-    // under the "Offline" header instead (PRD §7.8).
-    private func offlineCard(_ computer: HomeComputer) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "moon.zzz")
-                .foregroundStyle(TaviTheme.textSecondary)
-            VStack(alignment: .leading, spacing: 6) {
-                Text("\(computer.name) isn't answering. It may be asleep or not on your Tailscale network.")
-                    .font(.callout)
-                    .foregroundStyle(TaviTheme.textPrimary)
-                Text("Tavi keeps trying on its own.")
-                    .font(.caption)
-                    .foregroundStyle(TaviTheme.textSecondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .taviCard()
-        .accessibilityIdentifier("sessions.offline")
-    }
-
-    private func unavailableCard(_ computer: HomeComputer) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle")
-                .foregroundStyle(TaviTheme.statusBlocked)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(computer.reason ?? "Waiting for \(computer.name).")
-                    .font(.callout)
-                    .foregroundStyle(TaviTheme.textPrimary)
-                Text("Tavi keeps retrying on its own.")
-                    .font(.caption)
-                    .foregroundStyle(TaviTheme.textSecondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .taviCard(stripe: TaviTheme.statusBlocked)
-        .accessibilityIdentifier("sessions.agentsUnavailable")
-    }
-
-    // The credential is dead on the host side (#46); nothing on this phone
-    // can revive it, so the offers are pairing again or letting it go. The
-    // other computers are untouched either way (#50). Pair again keeps the
-    // record until the new pairing lands — cancelling the scan must not
-    // silently lose the computer — and the same fingerprint replaces it.
-    private func revokedCard(_ computer: HomeComputer) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "person.crop.circle.badge.xmark")
-                .foregroundStyle(TaviTheme.statusBlocked)
-            VStack(alignment: .leading, spacing: 8) {
-                Text(computer.reason ?? "This iPhone is no longer paired with \(computer.name).")
-                    .font(.callout)
-                    .foregroundStyle(TaviTheme.textPrimary)
-                HStack(spacing: 10) {
-                    Button("Pair again") {
-                        showingPairing = true
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("sessions.pairAgain")
-                    Button("Remove") {
-                        removingHostId = computer.id
-                    }
-                    .buttonStyle(.plain)
-                    .font(.subheadline)
-                    .foregroundStyle(TaviTheme.textSecondary)
-                    .accessibilityIdentifier("sessions.removeHost")
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .taviCard(stripe: TaviTheme.statusBlocked)
-        .accessibilityIdentifier("sessions.revoked")
-    }
-
-    // Nothing is running: say so, and offer the one next step on the card
-    // itself (#52) — amber, because it is the screen's only action.
-    private func idleCard(_ computers: [HomeComputer]) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(
-                computers.count == 1
-                    ? "No agents are running on \(computers[0].name) right now."
-                    : "No agents are running on your computers right now."
-            )
-            .font(.callout)
-            .foregroundStyle(TaviTheme.textSecondary)
-            Button {
-                showingNewAgent = true
-            } label: {
-                Label("New agent", systemImage: "plus")
-            }
-            .buttonStyle(.taviProminent)
-            .accessibilityIdentifier("sessions.idle.newAgent")
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .taviCard()
-        .accessibilityIdentifier("sessions.idle")
-    }
-
     // MARK: - Actions
-
-    private var hostForm: some View {
-        NavigationStack {
-            Form {
-                Section("Host") {
-                    TextField("https://your-mac.tailnet.ts.net", text: $draftHost)
-                        .textContentType(.URL)
-                        .keyboardType(.URL)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                }
-                Section {
-                    SecureField("Access token", text: $draftToken)
-                } header: {
-                    Text("Access token")
-                } footer: {
-                    Text("Stored in this iPhone's Keychain, on this device only. Tavi never uploads it. Anyone with this token can run commands on that computer.")
-                }
-            }
-            .navigationTitle("Connect Host")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showingHostForm = false }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        let address = draftHost.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let token = draftToken.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !address.isEmpty, !token.isEmpty {
-                            fleet.add(.typed(address: address), credential: token)
-                        }
-                        showingHostForm = false
-                    }
-                }
-            }
-        }
-    }
 
     private func openAgent(_ agent: AgentSummary) {
         openAgent(hostId: agent.hostId, paneID: agent.id)

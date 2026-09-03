@@ -1,4 +1,4 @@
-// Over the 400-line line; split in #69.
+// Over the 600-line line; split by screen in #101, which removes this line.
 // swiftlint:disable file_length
 
 import XCTest

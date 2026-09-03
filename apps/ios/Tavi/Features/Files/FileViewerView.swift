@@ -56,7 +56,7 @@ struct FileViewerView: View {
                         .accessibilityIdentifier("files.viewer.message")
                     Spacer()
                 }
-                .padding(16)
+                .padding(TaviTheme.Spacing.screen)
             }
         }
         .background(TaviTheme.canvas)
@@ -140,7 +140,7 @@ private struct TextFileView: View {
         if content.isMarkdown {
             ScrollView {
                 MarkdownBlocksView(markdown: content.content)
-                    .padding(16)
+                    .padding(TaviTheme.Spacing.screen)
                 truncationNote
             }
         } else {
@@ -159,7 +159,7 @@ private struct TextFileView: View {
                                 }
                                 .font(.system(size: 12, design: .monospaced))
                                 .padding(.vertical, 1)
-                                .padding(.horizontal, 12)
+                                .padding(.horizontal, TaviTheme.Spacing.snug)
                                 .background(index + 1 == scrollToLine ? TaviTheme.accent.opacity(0.18) : Color.clear)
                                 .id(index + 1)
                             }
@@ -186,7 +186,7 @@ private struct TextFileView: View {
             Text("Showing the first \(FilesSheet.sizeLabel(content.content.utf8.count)) of \(FilesSheet.sizeLabel(content.size)).")
                 .font(.caption)
                 .foregroundStyle(TaviTheme.textSecondary)
-                .padding(16)
+                .padding(TaviTheme.Spacing.screen)
         }
     }
 }
@@ -253,7 +253,7 @@ struct MarkdownBlocksView: View {
                 Text(text)
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(TaviTheme.textPrimary)
-                    .padding(12)
+                    .padding(TaviTheme.Spacing.snug)
             }
             .background(TaviTheme.well, in: RoundedRectangle(cornerRadius: TaviTheme.wellRadius, style: .continuous))
         case let .quote(text):
@@ -356,7 +356,7 @@ private struct DiffView: View {
                             Text(text.isEmpty ? " " : text)
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundStyle(Self.color(for: text))
-                                .padding(.horizontal, 12)
+                                .padding(.horizontal, TaviTheme.Spacing.snug)
                                 .padding(.vertical, 1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(Self.background(for: text))
@@ -365,7 +365,7 @@ private struct DiffView: View {
                             Text("Showing the first 256 KB of this diff.")
                                 .font(.caption)
                                 .foregroundStyle(TaviTheme.textSecondary)
-                                .padding(16)
+                                .padding(TaviTheme.Spacing.screen)
                         }
                     }
                     .padding(.vertical, 8)

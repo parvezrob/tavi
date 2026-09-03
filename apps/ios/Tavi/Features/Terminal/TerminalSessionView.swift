@@ -156,7 +156,7 @@ struct TerminalSessionView: View {
                         if canJump { showingJump = true }
                     } label: {
                         identityHeader(agent)
-                            .padding(.horizontal, 14)
+                            .padding(.horizontal, TaviTheme.Spacing.card)
                             .padding(.vertical, 5)
                     }
                     .buttonStyle(.plain)
@@ -310,8 +310,8 @@ struct TerminalSessionView: View {
             .lineLimit(2)
             Spacer(minLength: 8)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, TaviTheme.Spacing.card)
+        .padding(.vertical, TaviTheme.Spacing.snug)
         .background(TaviTheme.card)
         .overlay(alignment: .top) {
             Rectangle().fill(TaviTheme.hairline).frame(height: 1)
@@ -338,8 +338,8 @@ struct TerminalSessionView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, TaviTheme.Spacing.snug)
+        .padding(.vertical, TaviTheme.Spacing.tight)
         .background(TaviTheme.card)
         .overlay(alignment: .bottom) {
             Rectangle().fill(TaviTheme.hairline).frame(height: 1)

@@ -44,13 +44,13 @@ struct RemoveWorktreeSheet: View {
                         Text(reason)
                             .font(.subheadline)
                             .foregroundStyle(TaviTheme.textSecondary)
-                            .padding(.top, 6)
+                            .padding(.top, TaviTheme.Spacing.tight)
                             .accessibilityIdentifier("removeWorktree.failed")
                         if let notice, notice != reason {
                             Text(notice)
                                 .font(.footnote)
                                 .foregroundStyle(TaviTheme.textSecondary)
-                                .padding(.top, 12)
+                                .padding(.top, TaviTheme.Spacing.snug)
                                 .accessibilityIdentifier("removeWorktree.notice")
                         }
                         keepButton.padding(.top, 24)
@@ -80,7 +80,7 @@ struct RemoveWorktreeSheet: View {
         Text(RemovalWords.lead(preview))
             .font(.subheadline)
             .foregroundStyle(TaviTheme.textSecondary)
-            .padding(.top, 6)
+            .padding(.top, TaviTheme.Spacing.tight)
 
         VStack(alignment: .leading, spacing: 12) {
             if preview.uncommitted.files > 0 {

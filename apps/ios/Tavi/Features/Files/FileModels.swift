@@ -123,9 +123,17 @@ enum MentionedPathScanner {
     // A token with at least one slash, or a bare filename with an
     // extension; an optional `:line`. Characters are the ones real paths
     // use; a trailing `.` `,` `)` etc. is prose punctuation, stripped below.
-    private static let pattern = try! NSRegularExpression(
-        pattern: #"(?<![\w@:/.-])((?:~|\.{1,2})?/?[\w.@+-]+(?:/[\w.@+-]+)+/?|[\w@+-]+\.[A-Za-z][\w]{0,7})(?::(\d{1,6}))?(?![\w/])"#
-    )
+    // A literal pattern that must not survive being wrong: a build that
+    // cannot compile it is the broken thing, not the scan.
+    private static let pattern: NSRegularExpression = {
+        guard let expression = try? NSRegularExpression(
+            pattern: #"(?<![\w@:/.-])((?:~|\.{1,2})?/?[\w.@+-]+(?:/[\w.@+-]+)+/?|[\w@+-]+\.[A-Za-z][\w]{0,7})(?::(\d{1,6}))?(?![\w/])"#
+        ) else {
+            preconditionFailure("the mentioned-path pattern must compile")
+        }
+        return expression
+    }()
+
     private static let maximumPaths = 40
 
     static func scan(_ text: String) -> [MentionedPath] {

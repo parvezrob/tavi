@@ -46,6 +46,20 @@ enum TaviTheme {
     static let cardRadius: CGFloat = 14
     static let wellRadius: CGFloat = 8
     static let stripeWidth: CGFloat = 3
+
+    // The four steps the screens actually stand on, counted from the
+    // paddings already written (#100); anything else is a one-off that
+    // has to say why in place.
+    enum Spacing {
+        // Air between raised groups, and inside a pill.
+        static let tight: CGFloat = 6
+        // Inside a row: the gap that separates lines of one thought.
+        static let snug: CGFloat = 12
+        // A card's own inset, which is also the radius it is cut with.
+        static let card: CGFloat = 14
+        // The margin of a screen or a sheet.
+        static let screen: CGFloat = 16
+    }
 }
 
 // The primary call to action: amber fill, espresso ink. Replaces
@@ -80,5 +94,33 @@ extension ButtonStyle where Self == TaviPrimaryButtonStyle {
 enum FreshnessRule {
     static func shows(status: String, observedAt: Date, now: Date = Date()) -> Bool {
         status != "idle" || now.timeIntervalSince(observedAt) > 5 * 60
+    }
+}
+
+private struct TaviCardModifier: ViewModifier {
+    let stripe: Color?
+
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(TaviTheme.card)
+            .overlay(alignment: .leading) {
+                if let stripe {
+                    Rectangle()
+                        .fill(stripe)
+                        .frame(width: TaviTheme.stripeWidth)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: TaviTheme.cardRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: TaviTheme.cardRadius, style: .continuous)
+                    .strokeBorder(TaviTheme.hairline, lineWidth: 1)
+            )
+    }
+}
+
+extension View {
+    func taviCard(stripe: Color? = nil) -> some View {
+        modifier(TaviCardModifier(stripe: stripe))
     }
 }

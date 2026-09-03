@@ -109,7 +109,7 @@ struct PermissionDecisionSheet: View {
                     .font(.callout.weight(.medium))
                     .foregroundStyle(TaviTheme.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
+                    .padding(TaviTheme.Spacing.snug)
                     .background(
                         TaviTheme.well,
                         in: RoundedRectangle(cornerRadius: TaviTheme.wellRadius, style: .continuous)
@@ -150,7 +150,7 @@ struct PermissionDecisionSheet: View {
                         .foregroundStyle(TaviTheme.textPrimary)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+                .padding(.vertical, TaviTheme.Spacing.snug)
                 .background(
                     TaviTheme.well,
                     in: RoundedRectangle(cornerRadius: TaviTheme.wellRadius, style: .continuous)
@@ -204,7 +204,7 @@ struct PermissionDecisionSheet: View {
                     }
                 }
             }
-            .padding(14)
+            .padding(TaviTheme.Spacing.card)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 TaviTheme.well,
@@ -246,7 +246,7 @@ struct PermissionDecisionSheet: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
+        .padding(TaviTheme.Spacing.card)
         .taviCard(stripe: tint)
     }
 

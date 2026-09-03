@@ -1,0 +1,12 @@
+# App sources only, merged over the root configuration beside it: a crash
+# the tree used to accept is now a lint error (#100). A test may still
+# force-unwrap or force-try a fixture to fail loudly, so TaviTests and
+# TaviUITests keep the root's warning severity.
+# The opt-in list is restated for one reason: the severities below apply
+# without it, but swiftlint then prints "Found a configuration for
+# 'force_unwrapping' rule, but it is not enabled in 'opt_in_rules'" on
+# every run.
+opt_in_rules: [force_unwrapping, unowned_variable_capture, weak_delegate]
+
+force_unwrapping: error
+force_try: error

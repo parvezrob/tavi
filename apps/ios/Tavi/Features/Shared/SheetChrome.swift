@@ -43,11 +43,11 @@ struct MessageCard: View {
                     .accessibilityIdentifier(identifier)
                 Spacer()
             }
-            .padding(16)
+            .padding(TaviTheme.Spacing.screen)
         } else {
             card
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
+                .padding(.horizontal, TaviTheme.Spacing.screen)
+                .padding(.top, TaviTheme.Spacing.screen)
                 .accessibilityIdentifier(identifier)
         }
     }

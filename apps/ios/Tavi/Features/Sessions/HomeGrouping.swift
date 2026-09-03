@@ -384,7 +384,12 @@ extension String {
         Self.homePrefix.stringByReplacingMatches(in: self, range: NSRange(startIndex..., in: self), withTemplate: "~")
     }
 
-    // Compiled once: a pattern that must not survive being wrong.
-    // swiftlint:disable:next force_try
-    private static let homePrefix = try! NSRegularExpression(pattern: "^/(?:Users|home)/[^/]+")
+    // Compiled once: a pattern that must not survive being wrong, and a
+    // literal one, so a build that cannot compile it is the broken thing.
+    private static let homePrefix: NSRegularExpression = {
+        guard let expression = try? NSRegularExpression(pattern: "^/(?:Users|home)/[^/]+") else {
+            preconditionFailure("the home-directory pattern must compile")
+        }
+        return expression
+    }()
 }
