@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 // Finds the dev servers an agent's terminal talks about — "Local:
 // http://localhost:5173/", "listening on 127.0.0.1:3000", "http://[::1]:8080"
@@ -19,5 +20,36 @@ enum LocalhostPortScanner {
             ports.append(port)
         }
         return ports
+    }
+}
+
+// What the Preview button reads while a terminal is open. The transcript
+// republishes 4x/s, so the scan is debounced, runs off the main thread, and
+// publishes only when the ports themselves change (#68 phone 1).
+@MainActor
+@Observable
+final class MentionedPorts {
+    private(set) var ports: [Int] = []
+
+    private static let debounce: Duration = .seconds(2)
+    private var task: Task<Void, Never>?
+
+    // One regex over one transcript, replaced by the next transcript and
+    // dropped with the terminal: nothing outlives the screen that asked.
+    func update(from transcript: String) {
+        task?.cancel()
+        task = Task { [weak self] in
+            try? await Task.sleep(for: Self.debounce)
+            guard !Task.isCancelled else { return }
+            let scanned = await Task.detached(priority: .utility) { LocalhostPortScanner.scan(transcript) }.value
+            guard !Task.isCancelled, let self, scanned != ports else { return }
+            ports = scanned
+        }
+    }
+
+    func clear() {
+        task?.cancel()
+        task = nil
+        ports = []
     }
 }

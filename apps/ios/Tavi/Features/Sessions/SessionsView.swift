@@ -47,6 +47,10 @@ struct SessionsView: View {
     // Files for one agent from the home (#25): a long-press on its row.
     @State private var filesAgent: AgentSummary?
     @State private var previewAgent: AgentSummary?
+    // Grouping re-sorts and re-scans every card, and the home reads it
+    // twice per redraw: it is regrouped only when the computers' own state
+    // changes (#68 phone 4).
+    @State private var layouts = HomeLayoutCache()
 
     var body: some View {
         NavigationStack {
@@ -505,7 +509,11 @@ struct SessionsView: View {
     }
 
     private var homeLayout: HomeLayout {
-        HomeGrouping.layout(hosts: fleet.entries.map { entry in
+        layouts.layout(for: homeInputs)
+    }
+
+    private var homeInputs: [HomeHostInput] {
+        fleet.entries.map { entry in
             HomeHostInput(
                 id: entry.host.id,
                 name: entry.host.displayName,
@@ -518,7 +526,7 @@ struct SessionsView: View {
                 repos: entry.directory.repos,
                 connection: entry.directory.connection
             )
-        })
+        }
     }
 
     private var jumpSources: [JumpSource] {
@@ -806,6 +814,23 @@ struct SessionsView: View {
                 }
             }
         #endif
+    }
+}
+
+// The last grouping and the input it was made from. Deliberately not
+// observable, and deliberately not @State + .onChange: measured 2026-09-03,
+// that state write cost the home a second body pass per snapshot (30 -> 62
+// per minute) to save one regrouping.
+@MainActor
+final class HomeLayoutCache {
+    private var inputs: [HomeHostInput]?
+    private var cached = HomeLayout(needsYou: [], computers: [])
+
+    func layout(for inputs: [HomeHostInput]) -> HomeLayout {
+        guard inputs != self.inputs else { return cached }
+        self.inputs = inputs
+        cached = HomeGrouping.layout(hosts: inputs)
+        return cached
     }
 }
 

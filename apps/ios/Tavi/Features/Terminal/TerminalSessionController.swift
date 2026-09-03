@@ -1,6 +1,3 @@
-// Over the 400-line line; split in #69.
-// swiftlint:disable file_length
-
 import Foundation
 import Observation
 import os
@@ -9,8 +6,6 @@ import os
 @Observable
 final class TerminalSessionController {
     private static let logger = Logger(subsystem: "com.farfield.tavi", category: "terminal.connection")
-    private static let maximumCoalescedInputBytes = 4 * 1_024
-    private static let maximumPendingInputBytes = 64 * 1_024
 
     private(set) var connectionState: TerminalConnectionState = .idle
     private(set) var errorMessage: String?
@@ -20,14 +15,18 @@ final class TerminalSessionController {
     // What is on and recently above the screen, as plain text — the
     // renderer's accessibility transcript. Read by "Files mentioned" (#61)
     // when the sheet opens; nothing is derived from it eagerly.
-    private(set) var latestTranscript = ""
+    // Unobserved on purpose: it republishes 4×/s and would invalidate the
+    // whole terminal screen every time (#68 phone 1).
+    @ObservationIgnored private(set) var latestTranscript = ""
+    // Localhost ports the transcript names, for the Preview button (#58).
+    var mentionedPorts: [Int] { mentioned.ports }
 
     let bridge = TerminalIOBridge()
 
     private let client: any TerminalTransporting
     private let clock = ContinuousClock()
     private let heartbeatPolicy: HeartbeatPolicy
-    private let inputDelivery: TerminalInputDelivery
+    private let outbound: TerminalOutbound
     private let reconnectPolicy: ReconnectPolicy
     private let timing: TerminalTiming
 
@@ -43,11 +42,8 @@ final class TerminalSessionController {
     private var heartbeatTask: Task<Void, Never>?
     private var inputSentAt: ContinuousClock.Instant?
     private var lastSentGrid: TerminalGridSize?
-    private var outboundTaskID: UUID?
-    private var outboundTask: Task<Void, Never>?
-    private var pendingInputChunks: [PendingTerminalInput] = []
-    private var pendingInputByteCount = 0
     private var outstandingHeartbeatID: String?
+    private let mentioned = MentionedPorts()
     private var reconnectTask: Task<Void, Never>?
     private var reconnectAttempt = 0
     private var resumeOffset: UInt64 = 0
@@ -65,10 +61,16 @@ final class TerminalSessionController {
     ) {
         self.client = client
         self.heartbeatPolicy = heartbeatPolicy
-        inputDelivery = TerminalInputDelivery(sender: client)
+        outbound = TerminalOutbound(client: client)
         self.pathObserver = pathObserver
         self.reconnectPolicy = reconnectPolicy
         self.timing = timing
+        outbound.installGenerationCheck { [weak self] generation in
+            self?.isCurrentConnection(generation) ?? false
+        }
+        outbound.installOutcomeConsumer { [weak self] outcome in
+            self?.handle(outcome)
+        }
         bridge.installInputConsumer { [weak self] data in
             self?.deliverTerminalInput(data)
         }
@@ -110,6 +112,7 @@ final class TerminalSessionController {
         resumeOffset = 0
         pathTask?.cancel()
         pathTask = nil
+        mentioned.clear()
         lastPathSnapshot = nil
         invalidateConnectionTasks()
         scheduleDisconnect()
@@ -158,10 +161,10 @@ final class TerminalSessionController {
     }
 
     // One-shot Ctrl modifier for the quick-key row.
-    private(set) var controlLatchActive = false
+    var controlLatchActive: Bool { outbound.controlLatchActive }
 
     func toggleControlLatch() {
-        controlLatchActive.toggle()
+        outbound.toggleControlLatch()
     }
 
     // Deliberate composer send for terminal targets: the text travels as a
@@ -179,6 +182,7 @@ final class TerminalSessionController {
 
     func transcriptDidChange(_ value: String) {
         latestTranscript = value
+        mentioned.update(from: value)
     }
 
     func terminalGridDidChange(_ grid: TerminalGridSize) {
@@ -189,12 +193,12 @@ final class TerminalSessionController {
             return
         }
         Self.logger.info("grid change \(grid.columns)x\(grid.rows) queued for send")
-        sendOnce(.resize(columns: grid.columns, rows: grid.rows))
+        outbound.send(.resize(columns: grid.columns, rows: grid.rows), generation: connectionGeneration)
     }
 
     func terminalRendererDidAttach() {
         guard connectionState.canSubmitInput, let latestGridSize else { return }
-        sendOnce(.resize(columns: latestGridSize.columns, rows: latestGridSize.rows))
+        outbound.send(.resize(columns: latestGridSize.columns, rows: latestGridSize.rows), generation: connectionGeneration)
     }
 
     func rendererDidFail(_ message: String) {
@@ -217,7 +221,7 @@ final class TerminalSessionController {
         eventTask?.cancel()
         heartbeatTask?.cancel()
         heartbeatDeadlineTask?.cancel()
-        outboundTask?.cancel()
+        outbound.cancel()
         reconnectTask?.cancel()
         connectionGeneration += 1
         let generation = connectionGeneration
@@ -292,7 +296,7 @@ final class TerminalSessionController {
             Self.logger.info("ready: resumed=\(resumed) offset=\(offset)")
             transition(.ready)
             if let grid = latestGridSize {
-                sendOnce(.resize(columns: grid.columns, rows: grid.rows))
+                outbound.send(.resize(columns: grid.columns, rows: grid.rows), generation: connectionGeneration)
             }
             startHeartbeat()
         case let .output(text):
@@ -317,105 +321,6 @@ final class TerminalSessionController {
         case let .error(message):
             errorMessage = message
         }
-    }
-
-    private func deliverTerminalInput(_ data: Data, canCoalesce: Bool = true) {
-        guard connectionState.canSubmitInput else { return }
-        guard !data.isEmpty else { return }
-        var data = data
-        if controlLatchActive {
-            // One-shot Ctrl modifier from the quick row: the next single
-            // keystroke becomes its control code; anything unmappable
-            // passes through and still releases the latch.
-            controlLatchActive = false
-            if let controlCode = TerminalControlKeyMapper.controlCode(for: data) {
-                data = controlCode
-            }
-        }
-        if data.first == 0x1B {
-            Self.logger.info("terminal-originated control sequence, \(data.count) bytes")
-        }
-        inputSentAt = clock.now
-
-        guard outboundTask == nil, pendingInputChunks.isEmpty else {
-            enqueuePendingInput(data, canCoalesce: canCoalesce)
-            return
-        }
-        sendInput(data)
-    }
-
-    private func enqueuePendingInput(_ data: Data, canCoalesce: Bool) {
-        guard pendingInputByteCount <= Self.maximumPendingInputBytes - data.count else {
-            errorMessage = "Terminal input is backed up. Wait for the connection to catch up."
-            return
-        }
-
-        if canCoalesce,
-           let lastIndex = pendingInputChunks.indices.last,
-           pendingInputChunks[lastIndex].canCoalesce,
-           pendingInputChunks[lastIndex].data.count <= Self.maximumCoalescedInputBytes - data.count {
-            pendingInputChunks[lastIndex].data.append(data)
-        } else {
-            pendingInputChunks.append(PendingTerminalInput(data: data, canCoalesce: canCoalesce))
-        }
-        pendingInputByteCount += data.count
-    }
-
-    private func sendInput(_ data: Data) {
-        let value = String(decoding: data, as: UTF8.self)
-        sendOnce(.input(value), inputWasSubmitted: true)
-    }
-
-    @discardableResult
-    private func sendOnce(
-        _ message: TerminalClientMessage,
-        inputWasSubmitted: Bool = false
-    ) -> Task<Void, Never> {
-        let previousTask = outboundTask
-        let generation = connectionGeneration
-        let taskID = UUID()
-        outboundTaskID = taskID
-        let task = Task { [weak self] in
-            if let previousTask {
-                await previousTask.value
-            }
-            guard let self, isCurrentConnection(generation) else { return }
-            defer { finishOutboundTask(taskID) }
-            do {
-                if case let .input(data) = message {
-                    try await inputDelivery.submitOnce(Data(data.utf8))
-                } else {
-                    try await client.send(message)
-                    if case let .resize(columns, rows) = message {
-                        lastSentGrid = TerminalGridSize(columns: columns, rows: rows)
-                        Self.logger.info("resize \(columns)x\(rows) sent to host")
-                    }
-                }
-            } catch let error as TerminalTransportError {
-                guard isCurrentConnection(generation) else { return }
-                if error == .oversizedFrame {
-                    errorMessage = error.localizedDescription
-                    inputSentAt = nil
-                    return
-                }
-                if inputWasSubmitted {
-                    errorMessage = error == .deliveryUncertain
-                        ? error.localizedDescription
-                        : "Input was not sent."
-                    inputSentAt = nil
-                }
-                connectionEndedUnexpectedly()
-            } catch {
-                guard isCurrentConnection(generation) else { return }
-                if inputWasSubmitted {
-                    errorMessage = TerminalTransportError.deliveryUncertain.localizedDescription
-                    inputSentAt = nil
-                }
-                connectionEndedUnexpectedly()
-            }
-        }
-        outboundTask = task
-        return task
     }
 
     private func connectionEndedUnexpectedly() {
@@ -458,10 +363,10 @@ final class TerminalSessionController {
 
     private func recordOutputTimings() {
         if firstPaintMilliseconds == nil, let connectionStartedAt {
-            firstPaintMilliseconds = milliseconds(from: connectionStartedAt, to: clock.now)
+            firstPaintMilliseconds = connectionStartedAt.milliseconds(to: clock.now)
         }
         if let inputSentAt {
-            inputToOutputMilliseconds = milliseconds(from: inputSentAt, to: clock.now)
+            inputToOutputMilliseconds = inputSentAt.milliseconds(to: clock.now)
             self.inputSentAt = nil
         }
     }
@@ -576,13 +481,47 @@ final class TerminalSessionController {
                     connectionEndedUnexpectedly()
                 }
                 heartbeatDeadlineTask = deadlineTask
-                let sendTask = sendOnce(.ping(identifier: identifier))
+                let sendTask = outbound.send(.ping(identifier: identifier), generation: connectionGeneration)
                 await sendTask.value
                 guard isCurrentConnection(generation) else { return }
                 reconcileGridIfNeeded()
                 await deadlineTask.value
                 guard isCurrentConnection(generation) else { return }
             }
+        }
+    }
+
+    private func deliverTerminalInput(_ data: Data, canCoalesce: Bool = true) {
+        guard connectionState.canSubmitInput, !data.isEmpty else { return }
+        inputSentAt = clock.now
+        outbound.submitInput(data, generation: connectionGeneration, canCoalesce: canCoalesce)
+    }
+
+    private func handle(_ outcome: TerminalOutbound.Outcome) {
+        switch outcome {
+        case let .sent(message):
+            guard case let .resize(columns, rows) = message else { return }
+            lastSentGrid = TerminalGridSize(columns: columns, rows: rows)
+            Self.logger.info("resize \(columns)x\(rows) sent to host")
+        case let .failed(error, inputWasSubmitted):
+            if error == .oversizedFrame {
+                errorMessage = error?.localizedDescription
+                inputSentAt = nil
+                return
+            }
+            if inputWasSubmitted {
+                // An unnamed transport failure is as uncertain as delivery
+                // gets: never say the input was not sent when it may have been.
+                errorMessage = error == nil || error == .deliveryUncertain
+                    ? TerminalTransportError.deliveryUncertain.localizedDescription
+                    : "Input was not sent."
+                inputSentAt = nil
+            }
+            connectionEndedUnexpectedly()
+        case .drained:
+            reconcileGridIfNeeded()
+        case .backedUp:
+            errorMessage = "Terminal input is backed up. Wait for the connection to catch up."
         }
     }
 
@@ -597,15 +536,11 @@ final class TerminalSessionController {
         eventTask?.cancel()
         heartbeatDeadlineTask?.cancel()
         heartbeatTask?.cancel()
-        outboundTask?.cancel()
+        outbound.cancel()
         reconnectTask?.cancel()
         eventTask = nil
         heartbeatDeadlineTask = nil
         heartbeatTask = nil
-        outboundTask = nil
-        outboundTaskID = nil
-        pendingInputChunks.removeAll(keepingCapacity: false)
-        pendingInputByteCount = 0
         reconnectTask = nil
         inputSentAt = nil
         lastSentGrid = nil
@@ -625,30 +560,17 @@ final class TerminalSessionController {
         }
     }
 
-    private func finishOutboundTask(_ taskID: UUID) {
-        guard outboundTaskID == taskID else { return }
-        outboundTask = nil
-        outboundTaskID = nil
-        guard pendingInputChunks.isEmpty else {
-            let pending = pendingInputChunks.removeFirst()
-            pendingInputByteCount -= pending.data.count
-            sendInput(pending.data)
-            return
-        }
-        reconcileGridIfNeeded()
-    }
-
     // The grid the host believes in must converge on the latest rendered
     // grid even when an individual resize send is lost, raced by a layout
     // transition, or deferred while reconnecting. Reconciliation runs after
     // the outbound queue drains and on every heartbeat.
     private func reconcileGridIfNeeded() {
         guard connectionState.canSubmitInput,
-              outboundTask == nil,
+              outbound.isIdle,
               let latestGridSize,
               latestGridSize != lastSentGrid else { return }
         Self.logger.info("reconciling grid to \(latestGridSize.columns)x\(latestGridSize.rows)")
-        sendOnce(.resize(columns: latestGridSize.columns, rows: latestGridSize.rows))
+        outbound.send(.resize(columns: latestGridSize.columns, rows: latestGridSize.rows), generation: connectionGeneration)
     }
 
     private func failPermanently(_ error: TerminalTransportError) {
@@ -660,84 +582,5 @@ final class TerminalSessionController {
         invalidateConnectionTasks()
         scheduleDisconnect()
         transition(.unrecoverableFailure)
-    }
-
-    private func milliseconds(
-        from start: ContinuousClock.Instant,
-        to end: ContinuousClock.Instant
-    ) -> Double {
-        let duration = start.duration(to: end)
-        let components = duration.components
-        let seconds = Double(components.seconds) * 1_000
-        let attoseconds = Double(components.attoseconds) / 1_000_000_000_000_000
-        return seconds + attoseconds
-    }
-}
-
-private struct PendingTerminalInput {
-    var data: Data
-    let canCoalesce: Bool
-}
-
-enum TerminalQuickKey: String, CaseIterable, Identifiable, Sendable {
-    case escape = "Esc"
-    case tab = "Tab"
-    case shiftTab = "⇧Tab"
-    case enter = "Enter"
-    case interrupt = "Ctrl-C"
-    case left = "←"
-    case up = "↑"
-    case down = "↓"
-    case right = "→"
-
-    var id: Self { self }
-
-    // The key row groups like a keyboard (#54): named keys and the
-    // interrupt in one cluster, arrows in another.
-    static let commandCluster: [TerminalQuickKey] = [.escape, .tab, .shiftTab, .enter, .interrupt]
-    static let arrowCluster: [TerminalQuickKey] = [.left, .up, .down, .right]
-
-    // One key language on the caps: lowercase words, matching the "ctrl"
-    // latch beside them ("⌃C" next to a spelled-out ctrl was the audit's
-    // exact complaint in new notation; "⏎" appears on no iOS keyboard).
-    // Arrows stay arrows — they are their own word.
-    var face: String {
-        switch self {
-        case .escape: "esc"
-        case .tab: "tab"
-        case .shiftTab: "⇧tab"
-        case .enter: "enter"
-        case .interrupt: "ctrl-c"
-        case .left: "←"
-        case .up: "↑"
-        case .down: "↓"
-        case .right: "→"
-        }
-    }
-
-    var sequence: String {
-        switch self {
-        case .escape: "\u{1B}"
-        case .tab: "\t"
-        case .shiftTab: "\u{1B}[Z"
-        case .enter: "\r"
-        case .interrupt: "\u{03}"
-        case .left: "\u{1B}[D"
-        case .up: "\u{1B}[A"
-        case .down: "\u{1B}[B"
-        case .right: "\u{1B}[C"
-        }
-    }
-}
-
-// Maps a single typed character to its control code (Ctrl-A ... Ctrl-_)
-// for the quick-row Ctrl latch. Anything that has no control counterpart
-// returns nil and the keystroke passes through unmodified.
-enum TerminalControlKeyMapper {
-    static func controlCode(for data: Data) -> Data? {
-        guard data.count == 1, var byte = data.first else { return nil }
-        if (0x61...0x7A).contains(byte) { byte -= 0x20 }
-        guard (0x40...0x5F).contains(byte) else { return nil }
-        return Data([byte & 0x1F])
     }
 }

@@ -11,7 +11,7 @@ file_length: { warning: 400, error: 600 }
 function_body_length: { warning: 60, error: 120 }
 type_body_length: 400 # Warning only: file_length is the line that blocks.
 
-# AgentDirectory.swift:1086 is 21: a `switch` over host events is a table, not a tangle.
+# HostConnection.swift's events stream is 21: a `switch` over host events is a table, not a tangle.
 cyclomatic_complexity: { warning: 10, error: 25, ignores_case_statements: true }
 
 force_unwrapping: warning # A crash the tree already accepts; flagged, never blocking.

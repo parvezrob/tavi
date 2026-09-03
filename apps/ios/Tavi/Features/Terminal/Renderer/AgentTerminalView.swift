@@ -40,6 +40,7 @@ struct AgentTerminalView: UIViewRepresentable {
                 bridge?.removeTerminal()
             }
             terminal.setActive(isActive)
+            container.isActive = isActive
             onRendererReady()
         } catch {
             onRendererFailure("The terminal renderer could not start.")
@@ -49,6 +50,10 @@ struct AgentTerminalView: UIViewRepresentable {
 
     func updateUIView(_ container: TerminalContainerView, context: Context) {
         container.terminal?.onGridSizeChange = onGridSizeChange
+        // setActive re-focuses, re-checks occlusion and draws synchronously
+        // on the main thread, so only a real change is worth it.
+        guard container.isActive != isActive else { return }
+        container.isActive = isActive
         container.terminal?.setActive(isActive)
     }
 
@@ -62,6 +67,7 @@ struct AgentTerminalView: UIViewRepresentable {
     @MainActor
     final class TerminalContainerView: UIView {
         fileprivate var bridgeCleanup: (() -> Void)?
+        fileprivate var isActive: Bool?
         fileprivate var terminal: GhosttyTerminalSurfaceView?
 
         func install(_ terminal: GhosttyTerminalSurfaceView) {

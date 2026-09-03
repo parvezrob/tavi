@@ -1,4 +1,6 @@
 import Foundation
+import PhotosUI
+import SwiftUI
 import UIKit
 
 // Where an attached image landed on the computer (#88; `POST /api/files/upload`).
@@ -38,5 +40,53 @@ enum ComposerImage {
     // computer: where it went, so nothing is saved somewhere unexpected.
     static func savedNote(computer: String) -> String {
         "Saved on \(computer) in the project's .tavi/uploads folder, kept out of git."
+    }
+}
+
+extension TerminalSessionView {
+    // The paperclip (#88): the photo library, then the image goes to the
+    // agent's own folder and its path lands in the message, since the
+    // agent reads an image when the prompt names one. Only for an agent
+    // pane in a folder the host knows; a plain shell has nowhere to put it.
+    var attachButton: some View {
+        let busy = attachingImage
+        return PhotosPicker(selection: $pickedImage, matching: .images, photoLibrary: .shared()) {
+            if busy {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: "paperclip")
+                    .font(.title3)
+            }
+        }
+        .disabled(attachingImage || identity == nil || agentDirectory?.filesClient == nil || !controller.connectionState.canSubmitInput)
+        .accessibilityLabel("Attach an image")
+        .accessibilityIdentifier("terminal.composerAttach")
+        .onChange(of: pickedImage) { _, item in
+            guard let item else { return }
+            pickedImage = nil
+            Task { await attach(item) }
+        }
+    }
+
+    private func attach(_ item: PhotosPickerItem) async {
+        guard let agent = identity, let client = agentDirectory?.filesClient else { return }
+        attachingImage = true
+        composerError = nil
+        defer { attachingImage = false }
+        guard let original = try? await item.loadTransferable(type: Data.self),
+              let jpeg = ComposerImage.jpegData(from: original) else {
+            composerError = "That image could not be read."
+            return
+        }
+        switch await client.upload(cwd: agent.cwd, data: jpeg, mime: ComposerImage.mime) {
+        case let .value(receipt):
+            let separator = composerText.isEmpty || composerText.hasSuffix(" ") || composerText.hasSuffix("\n") ? "" : " "
+            composerText += "\(separator)\(receipt.path) "
+            composerNote = ComposerImage.savedNote(computer: computerName ?? "the computer")
+        case let .refused(_, refusal):
+            composerError = refusal.error
+        case let .failure(reason):
+            composerError = reason
+        }
     }
 }

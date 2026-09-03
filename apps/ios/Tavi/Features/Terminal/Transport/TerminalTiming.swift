@@ -10,6 +10,17 @@ struct HeartbeatPolicy: Sendable, Equatable {
     )
 }
 
+extension ContinuousClock.Instant {
+    // Milliseconds from here to there, for the first-paint and
+    // input-to-output measurements.
+    func milliseconds(to end: ContinuousClock.Instant) -> Double {
+        let components = duration(to: end).components
+        let seconds = Double(components.seconds) * 1_000
+        let attoseconds = Double(components.attoseconds) / 1_000_000_000_000_000
+        return seconds + attoseconds
+    }
+}
+
 struct TerminalTiming: Sendable {
     let sleep: @Sendable (Duration) async throws -> Void
 
