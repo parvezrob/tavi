@@ -10,6 +10,8 @@
 
 **State:** phone still on the #54 build; host still 0.1.17 on the Mac; `main` is far ahead on both — install over USB and publish 0.1.18 before judging. Owner decision pending: required status checks on `main`.
 
+**Superseded next-start note (recorded 2026-09-04, moved here 2026-09-06):** the queue began with #106/#102/#93, then publish 0.1.18 and install the phone build, then #68 measurement work; #37 stayed owner-driven. #96 was closed with its children on main and CI green, `testflight-1` tagged. The owner's new foreground-freeze investigation is #107; it changed no deployed software and takes precedence for diagnosing usability. Detailed evidence stays on the issue.
+
 ## 2026-09-03 night → 09-04 — #69 code health closed in six Opus packages; the sub-agent loop born
 
 **How:** owner decision to run Fable as orchestrator with Opus 5 implementers in isolated worktrees, each package reviewed by two cold Opus verifiers (correctness/scope, quality/restraint), fix rounds sent back, then the orchestrator overlays the files onto `main`, runs the gates, commits. Recorded in AGENTS.md. What the verifiers caught that would have shipped: `weak_delegate` silently off; nine swiftformat rules rewriting code; a biome config of defaults; the P5 preview rule freezing a working agent's excerpt; an observation chain outliving the terminal view; `TerminalOutbound` not `@Observable` (the ctrl cap would not light); an extension-based class split that widened 12 `private(set)` members — redone as owned types.
