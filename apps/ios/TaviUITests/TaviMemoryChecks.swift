@@ -196,7 +196,7 @@ final class TaviMemoryChecks: XCTestCase {
     // The outside sampler (`scripts/memsample.sh`) watches the sync directory:
     // when `leaks-<label>` appears it runs `leaks` on the app and removes the
     // file. Without a sync directory this is a no-op.
-    private func leaksWindow(_ live: LiveEnvironment, label: String) async throws {
+    private func leaksWindow(_ live: MemoryEnvironment, label: String) async throws {
         guard let dir = live.syncDir else { return }
         let marker = URL(fileURLWithPath: dir).appendingPathComponent("leaks-\(label)")
         try Data().write(to: marker)
@@ -209,25 +209,27 @@ final class TaviMemoryChecks: XCTestCase {
 
     // MARK: - Live host plumbing
 
-    private struct LiveEnvironment {
-        let host: String
-        let token: String
+    // What these runs need on top of the shared live host: the opt-in, a
+    // folder with a dev server in it, and the sampler's drop box.
+    private struct MemoryEnvironment {
+        let live: LiveEnvironment
         let previewCwd: String
         let syncDir: String?
+
+        var host: String { live.host }
+        var token: String { live.token }
     }
 
-    private func liveEnvironment() throws -> LiveEnvironment {
+    private func liveEnvironment() throws -> MemoryEnvironment {
         let environment = ProcessInfo.processInfo.environment
         guard environment["TAVI_MEMORY"] == "1" else {
             throw XCTSkip("Set TEST_RUNNER_TAVI_MEMORY=1 to run the memory checks (minutes each, live host).")
         }
-        guard let host = environment["TAVI_DEV_HOST"], let token = environment["TAVI_DEV_TOKEN"] else {
-            throw XCTSkip("Set TEST_RUNNER_TAVI_DEV_HOST/TOKEN to run against a live host.")
-        }
+        let live = try LiveEnvironment.current()
         guard let cwd = environment["TAVI_AUDIT_PREVIEW_CWD"] else {
             throw XCTSkip("Set TEST_RUNNER_TAVI_AUDIT_PREVIEW_CWD to a folder with a dev server running (the Vite demo).")
         }
-        return LiveEnvironment(host: host, token: token, previewCwd: cwd, syncDir: environment["TAVI_MEMORY_SYNC_DIR"])
+        return MemoryEnvironment(live: live, previewCwd: cwd, syncDir: environment["TAVI_MEMORY_SYNC_DIR"])
     }
 
     private func soakMinutes() throws -> Int {
@@ -238,7 +240,7 @@ final class TaviMemoryChecks: XCTestCase {
     }
 
     @MainActor
-    private func launchIntoPreviewShell(_ live: LiveEnvironment) async throws -> XCUIApplication {
+    private func launchIntoPreviewShell(_ live: MemoryEnvironment) async throws -> XCUIApplication {
         let paneId = try await createShell(live, cwd: live.previewCwd)
         let app = XCUIApplication()
         app.launchEnvironment["TAVI_DEV_RESET"] = "1"
@@ -252,7 +254,7 @@ final class TaviMemoryChecks: XCTestCase {
     }
 
     @MainActor
-    private func launchHome(_ live: LiveEnvironment) -> XCUIApplication {
+    private func launchHome(_ live: MemoryEnvironment) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["TAVI_DEV_RESET"] = "1"
         app.launchEnvironment["TAVI_DEV_HOST"] = live.host
@@ -261,26 +263,11 @@ final class TaviMemoryChecks: XCTestCase {
         return app
     }
 
-    private func createShell(_ live: LiveEnvironment, cwd: String) async throws -> String {
-        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(live.host)/api/herdr/tabs")))
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(live.token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["agent": "shell", "cwd": cwd, "allowOutsideRoots": true])
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 201 else {
-            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            throw XCTSkip("The host could not create a shell pane (HTTP \(status): \(String(decoding: data.prefix(300), as: UTF8.self))).")
-        }
-        let payload = try JSONDecoder().decode([String: String].self, from: data)
-        let paneId = try XCTUnwrap(payload["paneId"])
-        let tabId = try XCTUnwrap(payload["tabId"])
-        addTeardownBlock {
-            var close = URLRequest(url: URL(string: "\(live.host)/api/herdr/tabs/\(tabId)")!)
-            close.httpMethod = "DELETE"
-            close.setValue("Bearer \(live.token)", forHTTPHeaderField: "Authorization")
-            _ = try? await URLSession.shared.data(for: close)
-        }
+    // One disposable shell pane in the folder these runs measure against,
+    // closed again in teardown.
+    private func createShell(_ live: MemoryEnvironment, cwd: String) async throws -> String {
+        let (paneId, tabId) = try await createAgentTab(host: live.host, token: live.token, cwd: cwd, agent: "shell")
+        addTeardownBlock { try? await Self.closeAgentTab(host: live.host, token: live.token, tabId: tabId) }
         return paneId
     }
 }

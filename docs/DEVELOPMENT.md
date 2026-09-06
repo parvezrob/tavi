@@ -27,7 +27,7 @@ Practical knowledge for building, deploying, and verifying Tavi end-to-end. Poli
 - `Features/SourceControl` — `HostSourceControlClient` (the route list), `SourceControlWireTypes` (what those routes send), `SourceControlDraft` (everything the sheet holds for one worktree, and every read and write it makes), `SourceControlSheet` (the chrome and the Changes tab), `SourceControlTabs` (the header and the Pull request and Commits tabs, drawing off the draft), `RemoveWorktreeSheet`.
 - `Features/Settings` — no client: `AppLockGate`, `SettingsView`, `TerminalFontPreference`, `TerminalFontPreviewView`.
 
-`TaviTests` mirrors that tree with `Fixtures.swift` as its one fixture source; `TaviUITests` holds the owner-run live suites (`TaviUITests`, `TaviScreenshotAudit`, `TaviMemoryChecks`).
+`TaviTests` mirrors that tree with `Fixtures.swift` as its one fixture source; `TaviUITests` holds the owner-run live suites (`TaviUITests`, `TaviScreenshotAudit`, `TaviMemoryChecks`) over `LiveHostHelpers` (the live host env and the shared pane and terminal helpers).
 
 **Ownership.** The credential: on the host `DeviceRegistry` (`pairing.ts`) is the only thing that mints, stores, or verifies a device credential, and it stores hashes only; on the phone `HostFleet` is the only writer of the paired-host list and of `HostCredentialStore` (Keychain, this device only). herdr: only `herdr-rpc.ts` (for `herdr.ts` and `herdr-tabs.ts`) and `herdr-events.ts` open its socket, the phone never speaks to it, and herdr — not Tavi — is the authority for what panes exist. The pty: `attachment.ts` owns every one, outliving the WebSocket that started it (120 s retention, 8 s detach grace), so `terminal-bridge.ts` only moves frames and closing a socket never ends a pane.
 

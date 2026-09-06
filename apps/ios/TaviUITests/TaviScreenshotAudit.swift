@@ -37,6 +37,7 @@ final class TaviScreenshotAudit: XCTestCase {
         // 2. Stage a real needs-you: claude in a fresh tmp folder trusts
         // nothing and blocks on the trust dialog.
         let blocked = try await createAgentTab(host: host, token: token, cwd: "/private/tmp", agent: "claude")
+        addTeardownBlock { try? await Self.closeAgentTab(host: host, token: token, tabId: blocked.tabId) }
         _ = await waitForStatus(host: host, token: token, paneId: blocked.paneId, status: "blocked", timeout: 90)
 
         // 3. The populated home, needs-you leading.
@@ -84,6 +85,7 @@ final class TaviScreenshotAudit: XCTestCase {
 
         // 7. The terminal: quiet, live typing, and the jump sheet.
         let shell = try await createAgentTab(host: host, token: token, cwd: "/private/tmp", agent: "shell")
+        addTeardownBlock { try? await Self.closeAgentTab(host: host, token: token, tabId: shell.tabId) }
         app.launchEnvironment["TAVI_DEV_AGENT"] = shell.paneId
         app.launch()
         // The banner only shows off-nominal now; the surface is the wait.
@@ -168,6 +170,7 @@ final class TaviScreenshotAudit: XCTestCase {
         }
         let cwd = environment["TAVI_AUDIT_CWD"] ?? "\(NSHomeDirectory())/Projects/tavi"
         let shell = try await createAgentTab(host: host, token: token, cwd: cwd, agent: "shell")
+        addTeardownBlock { try? await Self.closeAgentTab(host: host, token: token, tabId: shell.tabId) }
         let app = XCUIApplication()
         app.launchEnvironment["TAVI_DEV_RESET"] = "1"
         app.launchEnvironment["TAVI_DEV_HOST"] = host
@@ -425,6 +428,7 @@ final class TaviScreenshotAudit: XCTestCase {
         }
         let cwd = environment["TAVI_AUDIT_PREVIEW_CWD"] ?? "\(NSHomeDirectory())/Projects/preview-demo"
         let shell = try await createAgentTab(host: host, token: token, cwd: cwd, agent: "shell")
+        addTeardownBlock { try? await Self.closeAgentTab(host: host, token: token, tabId: shell.tabId) }
         let app = XCUIApplication()
         app.launchEnvironment["TAVI_DEV_RESET"] = "1"
         app.launchEnvironment["TAVI_DEV_HOST"] = host
@@ -486,7 +490,8 @@ final class TaviScreenshotAudit: XCTestCase {
               let worktree = environment["TAVI_AUDIT_WORKTREE"] else {
             throw XCTSkip("Set TEST_RUNNER_TAVI_DEV_HOST/TOKEN and TEST_RUNNER_TAVI_AUDIT_WORKTREE.")
         }
-        _ = try await createAgentTab(host: host, token: token, cwd: worktree, agent: "shell")
+        let staged = try await createAgentTab(host: host, token: token, cwd: worktree, agent: "shell")
+        addTeardownBlock { try? await Self.closeAgentTab(host: host, token: token, tabId: staged.tabId) }
 
         let app = XCUIApplication()
         app.launchEnvironment["TAVI_DEV_RESET"] = "1"
@@ -525,38 +530,6 @@ final class TaviScreenshotAudit: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
-    }
-
-    private func createAgentTab(
-        host: String,
-        token: String,
-        cwd: String,
-        agent: String
-    ) async throws -> (paneId: String, tabId: String) {
-        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(host)/api/herdr/tabs")))
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "agent": agent,
-            "cwd": cwd,
-            "allowOutsideRoots": true,
-        ])
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 201 else {
-            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            throw XCTSkip("The host could not create a disposable agent tab for the audit (HTTP \(status): \(String(decoding: data.prefix(300), as: UTF8.self))).")
-        }
-        let payload = try JSONDecoder().decode([String: String].self, from: data)
-        let paneId = try XCTUnwrap(payload["paneId"])
-        let tabId = try XCTUnwrap(payload["tabId"])
-        addTeardownBlock {
-            var close = URLRequest(url: URL(string: "\(host)/api/herdr/tabs/\(tabId)")!)
-            close.httpMethod = "DELETE"
-            close.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            _ = try? await URLSession.shared.data(for: close)
-        }
-        return (paneId, tabId)
     }
 
     private func waitForStatus(
