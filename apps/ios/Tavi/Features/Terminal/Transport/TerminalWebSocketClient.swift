@@ -100,11 +100,8 @@ actor TerminalWebSocketClient: TerminalTransporting {
         }
 
         var request = URLRequest(url: endpoint)
-        // The TCP connection budget, and only that: NetworkWebSocketTask
-        // maps it to NWProtocolTCP.Options.connectionTimeout. The
-        // controller's ready deadline sits above it and bounds everything
-        // after the socket is up — TLS, the upgrade, and the wait for
-        // ready (#107).
+        // The TCP connection budget only; the controller's ready deadline
+        // bounds everything after the socket is up (#107).
         request.timeoutInterval = ReconnectPolicy.terminalTCPConnectionTimeout
         request.setValue("Bearer \(configuration.credential)", forHTTPHeaderField: "Authorization")
         request.setValue(TerminalWireProtocol.name, forHTTPHeaderField: "Sec-WebSocket-Protocol")
@@ -172,9 +169,8 @@ actor TerminalWebSocketClient: TerminalTransporting {
         negotiatedProtocolValidated = false
     }
 
-    // The takeover signal that survives a lost error frame (#108): close
-    // 1000 with reason `superseded`. Any other close, including 1000 with no
-    // reason, stays an ordinary drop the caller retries.
+    // The takeover signal that survives a lost error frame (#108). Any other
+    // close, including 1000 with no reason, stays an ordinary drop.
     private static func isTakeover(_ failure: NetworkWebSocketTask.Failure) -> Bool {
         guard case let .closed(code, reason) = failure else { return false }
         return code == UInt16(URLSessionWebSocketTask.CloseCode.normalClosure.rawValue)

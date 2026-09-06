@@ -384,10 +384,8 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         resignFirstResponder()
     }
 
-    // True once the bytes are queued on the pump, in order, for a surface
-    // that is still alive. shutdown() clears `surface` and the pump together
-    // on this actor, so a false answer here is the whole of the rejection
-    // (#108): the caller may not treat these bytes as delivered.
+    // True once the bytes are queued on the pump of a surface that is still
+    // alive; false means the caller may not treat them as delivered (#108).
     @discardableResult
     func receive(_ data: Data) -> Bool {
         guard surface != nil, let outputPump else { return false }

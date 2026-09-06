@@ -27,8 +27,7 @@ struct AgentTerminalView: UIViewRepresentable {
             container.install(terminal)
             container.rendererToken = bridge.installTerminal(
                 outputConsumer: { [weak terminal] data in
-                    // A surface that has gone accepts nothing; saying so is
-                    // what keeps the host's resume offset honest (#108).
+                    // A surface that has gone accepts nothing (#108).
                     terminal?.receive(data) ?? false
                 },
                 focusConsumer: { [weak terminal] in
@@ -44,8 +43,6 @@ struct AgentTerminalView: UIViewRepresentable {
             }
             terminal.setActive(isActive)
             container.isActive = isActive
-            // Runs on the install's own turn, so it is current by
-            // construction and needs no token of its own.
             onRendererReady()
         } catch {
             onRendererFailure("The terminal renderer could not start.")
@@ -63,19 +60,17 @@ struct AgentTerminalView: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ container: TerminalContainerView, coordinator: Void) {
-        // Cleanup first: shutdown() drops whatever the pump still holds, so
-        // the bridge has to have ended this surface's epoch before then.
+        // Cleanup first: the bridge must end this surface's epoch before
+        // shutdown() drops what the pump still holds.
         container.bridgeCleanup?()
         container.terminal?.shutdown()
         container.terminal?.removeFromSuperview()
         container.terminal = nil
     }
 
-    // A surface outlives both its replacement's install and its session's
-    // end, and can still finish work it began: a grid publication, a
-    // transcript pass, an overflow report, a keystroke Ghostty batched
-    // before the pane changed. None of it belongs to whatever is installed
-    // now (#108).
+    // A surface outlives its replacement's install and its session's end,
+    // and can still finish work it began (a grid publication, a batched
+    // keystroke). None of it belongs to whatever is installed now (#108).
     private func owned<Value>(
         _ container: TerminalContainerView,
         _ body: @escaping @MainActor (Value) -> Void
@@ -87,7 +82,6 @@ struct AgentTerminalView: UIViewRepresentable {
     final class TerminalContainerView: UIView {
         fileprivate var bridgeCleanup: (() -> Void)?
         fileprivate var isActive: Bool?
-        // This surface's place in the bridge's succession of renderers.
         fileprivate var rendererToken: TerminalIOBridge.RendererToken?
         fileprivate var terminal: GhosttyTerminalSurfaceView?
 

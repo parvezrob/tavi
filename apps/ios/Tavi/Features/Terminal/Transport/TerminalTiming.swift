@@ -2,12 +2,10 @@ import Foundation
 
 struct HeartbeatPolicy: Sendable, Equatable {
     let interval: Duration
-    // How long the host has to answer a ping that is already on the wire.
+    // How long the host has to answer a ping that is on the wire.
     let timeout: Duration
-    // How long the outbound queue has to put that ping on the wire. Its own
-    // bound, because a queue that never drains is as dead as a silent host
-    // and the host's answer budget must not be spent waiting for our own
-    // send to complete (#107).
+    // How long the outbound queue has to put that ping on the wire: a queue
+    // that never drains is as dead as a silent host (#107).
     let sendTimeout: Duration
 
     static let terminalDefault = HeartbeatPolicy(
@@ -45,11 +43,47 @@ extension ContinuousClock.Instant {
     }
 }
 
+// The two round trips the terminal reports: dial to first output, and the
+// last keystroke to the output that answered it.
+struct TerminalLatencyMetrics {
+    private(set) var firstPaintMilliseconds: Double?
+    private(set) var inputToOutputMilliseconds: Double?
+    private(set) var connectionStartedAt: ContinuousClock.Instant?
+    private var inputSentAt: ContinuousClock.Instant?
+
+    mutating func reset() {
+        firstPaintMilliseconds = nil
+        inputToOutputMilliseconds = nil
+    }
+
+    mutating func connectionStarted(at now: ContinuousClock.Instant) {
+        connectionStartedAt = now
+    }
+
+    mutating func inputSent(at now: ContinuousClock.Instant) {
+        inputSentAt = now
+    }
+
+    // Input that did not reach the host answers nothing.
+    mutating func inputAbandoned() {
+        inputSentAt = nil
+    }
+
+    mutating func outputArrived(at now: ContinuousClock.Instant) {
+        if firstPaintMilliseconds == nil, let connectionStartedAt {
+            firstPaintMilliseconds = connectionStartedAt.milliseconds(to: now)
+        }
+        if let inputSentAt {
+            inputToOutputMilliseconds = inputSentAt.milliseconds(to: now)
+            self.inputSentAt = nil
+        }
+    }
+}
+
 struct TerminalTiming: Sendable {
     let sleep: @Sendable (Duration) async throws -> Void
-    // The controller's clock as well as its timer: how long a connection
-    // has held decides whether the backoff forgets it, and a test must be
-    // able to put that age where it needs it rather than wait it out.
+    // The controller's clock as well as its timer, so a test can age a
+    // connection rather than wait it out.
     let now: @Sendable () -> ContinuousClock.Instant
 
     init(

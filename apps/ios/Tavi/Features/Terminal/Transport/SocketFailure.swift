@@ -1,10 +1,8 @@
 import Foundation
 
-// Why a socket ended, reduced to a fixed token and a number so the
-// connection logs can name it (#107). Everything here is either a constant
-// this file chose or a protocol code: no error message survives, because
-// NWError's description carries the address the connection failed against,
-// and that is the tailnet name of the owner's computer.
+// Why a socket ended, as a fixed token and a code the logs can name (#107).
+// No error text survives: NWError's description carries the address the
+// connection failed against, which is the owner's tailnet name.
 struct SocketFailure: Sendable, Equatable {
     enum Tag: String, Sendable {
         case cancelled
@@ -31,8 +29,7 @@ struct SocketFailure: Sendable, Equatable {
         case let failure as NetworkWebSocketTask.Failure:
             switch failure {
             case .cancelled: self.init(.cancelled)
-            // The reason is peer-supplied text and stays out of the record;
-            // only the protocol number survives.
+            // The reason is peer-supplied text and stays out of the record.
             case let .closed(code, _): self.init(.closed, code: Int(code ?? 0))
             case .connectionFailed: self.init(.connectionFailed)
             case .handshakeRejected: self.init(.handshakeRejected)
@@ -45,7 +42,6 @@ struct SocketFailure: Sendable, Equatable {
         }
     }
 
-    // Private so a failure can only be named by classifying a real error.
     private init(_ tag: Tag, code: Int = 0) {
         self.tag = tag
         self.code = code

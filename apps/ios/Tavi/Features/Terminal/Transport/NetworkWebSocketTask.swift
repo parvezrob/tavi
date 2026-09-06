@@ -25,9 +25,8 @@ final class NetworkWebSocketTask: TerminalWebSocketTasking, @unchecked Sendable 
         case handshakeRejected
         // The path, TCP, TLS or the WebSocket layer failed.
         case connectionFailed(String)
-        // The peer sent a close frame (its code and reason, when it gave
-        // them). Network.framework delivers the reason as the frame's raw
-        // UTF-8 content, not as close metadata.
+        // The peer sent a close frame. Network.framework delivers the reason
+        // as the frame's UTF-8 content, not as close metadata.
         case closed(code: UInt16?, reason: String?)
         // cancel(with:) or deinit ended the connection first.
         case cancelled
@@ -65,8 +64,7 @@ final class NetworkWebSocketTask: TerminalWebSocketTasking, @unchecked Sendable 
         // Terminal keystrokes are tiny writes; never let Nagle hold one back.
         tcp.noDelay = true
         // URLRequest's timeout becomes the TCP connection budget and nothing
-        // more — TLS, the upgrade and the first frame are the caller's to
-        // bound. Network.framework's own default is a minute.
+        // more; Network.framework's own default is a minute.
         if request.timeoutInterval.isFinite, request.timeoutInterval >= 1 {
             tcp.connectionTimeout = Int(request.timeoutInterval)
         }

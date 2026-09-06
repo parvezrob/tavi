@@ -9,8 +9,8 @@ enum TerminalConnectionState: Sendable, Equatable {
     case suspended
     case ended
     case failed
-    // Another connection owns this terminal (#108). Final for this session:
-    // nothing retries, and the agent behind it is still running.
+    // Another connection owns this terminal (#108). Final: nothing retries,
+    // and the agent behind it is still running.
     case superseded
 
     var canSubmitInput: Bool {
@@ -89,9 +89,8 @@ enum TerminalConnectionReducer {
                 state
             }
         case .suspend:
-            // A superseded session must never become suspended: the scene
-            // coming back to the foreground would then redial a terminal
-            // this client no longer owns (#108).
+            // A superseded session must never become suspended: the next
+            // foreground would redial a terminal this client lost (#108).
             state.isFinal ? state : .suspended
         case .resume:
             state == .suspended ? .connecting : state

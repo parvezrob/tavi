@@ -63,6 +63,5 @@ export type ServerTerminalMessage =
   | { type: "output"; data: string }
   | { type: "pong"; id: string }
   | { type: "exit"; code: number; signal?: number }
-  // `code` is set only for a takeover: the close that follows can be lost or
-  // delayed, so the outcome must also be readable from the frame itself.
+  // Set only for a takeover; the close that follows can be lost or delayed.
   | { type: "error"; message: string; code?: "superseded" };

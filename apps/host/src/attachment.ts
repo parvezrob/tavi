@@ -182,8 +182,8 @@ export class TerminalAttachment {
     this.terminal.resize(cols, rows);
   }
 
-  // Disposing an attachment out from under its client is a takeover, not a
-  // drop: a client that is not told keeps a live-looking frozen terminal (#108).
+  // A takeover, not a drop: a client that is not told keeps a live-looking
+  // frozen terminal (#108).
   supersede(): void {
     const previous = this.client;
     this.client = undefined;

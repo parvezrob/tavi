@@ -27,10 +27,8 @@ enum HostConnectionEvent {
     case revoked(reason: String)
 }
 
-// How often the events watchdog looks at its socket, and the two idle
-// marks it acts on (#86, #107). A test shortens `pollInterval` so a run
-// takes milliseconds; it crosses the idle marks through the socket's own
-// `lastActivity` rather than by changing them.
+// How often the events watchdog looks at its socket, and the two idle marks
+// it acts on (#86, #107). Tests shorten `pollInterval` only.
 struct HostWatchdogPolicy: Sendable, Equatable {
     let pollInterval: Duration
     let pingAfterIdle: TimeInterval
@@ -111,34 +109,28 @@ final class HostConnection {
     // Network.framework, not URLSession: see NetworkWebSocketTask (#70).
     private var socket: (any HostEventsSocketing)?
     private var latencyTask: Task<Void, Never>?
-    // Reconnect coordination (#86, PRD §7.13): one probe in flight however
-    // many askers; Offline only after two dials in a row produced no frame;
-    // the backoff resets only once the stream has been up for a while.
+    // One probe in flight however many askers (#86); keyed by the epoch that
+    // asked it.
     private var probeInFlight: (origin: Int, task: Task<HostProbe, Never>)?
-    // Unstructured on purpose — the redial must never wait for a probe — so
+    // Unstructured on purpose, since the redial must never wait for a probe;
     // the link owns each by name and `stop()` ends them all (#108).
     private var connectDeadlineTask: Task<Void, Never>?
     private var firstFrameLatencyTask: Task<Void, Never>?
     private var reachabilityTask: Task<Void, Never>?
     private var consecutiveFailedDials = 0
     private var streamConnectedAt: Date?
-    // Two fences, deliberately different (#108). A *measurement* belongs to
-    // the dial that took it, so a superseded dial's round trip and path are
-    // dropped rather than shown as the current one's. A *verdict about the
-    // computer* belongs to the generation, which only stopping, reconfiguring
-    // or a snapshot moves — failed redials, the case it exists to decide,
-    // must not starve it.
+    // Two fences (#108). A measurement (round trip, path) belongs to the dial
+    // that took it. A verdict about the computer (Offline, revoked) belongs
+    // to the generation, which only stopping, reconfiguring or a snapshot
+    // moves, so failed redials cannot starve it.
     private var epoch = 0
     private var reachabilityGeneration = 0
-    // The watchdog's outstanding challenge to a quiet socket, owned here so
-    // there is never more than one and so teardown is deterministic (#107).
+    // The watchdog's one outstanding challenge to a quiet socket (#107).
     private var watchdogPing: Task<Void, Never>?
     private var watchdogPingGeneration = 0
 
-    // Tests hand in their own transport and socket so no unit test opens a
-    // real one — the seam the terminal transport already has (#99) — and
-    // their own schedule, so a redial or a connect deadline they need to
-    // happen takes milliseconds instead of seconds.
+    // Tests hand in their own transport, socket and schedule so no unit test
+    // opens a real socket or waits out a real redial (#99).
     init(
         transport: @escaping HostClient.Transport = { try await HostSession.shared.data(for: $0) },
         makeSocket: @escaping @Sendable (URLRequest) -> any HostEventsSocketing = { NetworkWebSocketTask(request: $0) },
@@ -180,8 +172,7 @@ final class HostConnection {
         isRevoked = false
         isOffline = false
         latencyMilliseconds = nil
-        // The previous computer's account of how the packets reached it is
-        // not this one's, and the header would show it as current fact.
+        // The previous computer's path is not this one's.
         path = .unknown
         streamConnectedAt = nil
         guard host != nil, !credential.isEmpty else {
@@ -234,8 +225,8 @@ final class HostConnection {
                 guard !Task.isCancelled, let self else { return }
                 guard self.hasLoaded, !self.isStale else { continue }
                 let asked = self.epoch
-                // Skipping, never returning: a link that moved on mid-probe
-                // loses this one number, not the poll (#108).
+                // A link that moved on mid-probe loses this one number, not
+                // the poll (#108).
                 if case let .reachable(latency) = await self.probeHostShared(), asked == self.epoch {
                     self.latencyMilliseconds = latency
                 }
@@ -244,9 +235,8 @@ final class HostConnection {
     }
 
     func stop() {
-        // Invalidate before cancelling: a task suspended past an `await` still
-        // resumes and still runs its `defer`s, so the fence must stand before
-        // any of that unwinds (#108).
+        // Invalidate before cancelling: a cancelled task still resumes and
+        // runs its `defer`s (#108).
         epoch += 1
         reachabilityGeneration += 1
         streamTask?.cancel()
@@ -263,8 +253,6 @@ final class HostConnection {
         if hasLoaded { isStale = true }
     }
 
-    // Emptying the shared slot also stops the next asker joining an answer
-    // already on its way.
     private func cancelProbes() {
         probeInFlight?.task.cancel()
         probeInFlight = nil
@@ -277,8 +265,8 @@ final class HostConnection {
     }
 
     private func streamOnce(handshake: URLRequest) async {
-        // This dial's place in the link's history: everything below judges the
-        // socket it opens, and a link that has since moved on is not its own.
+        // This dial's place in the link's history; everything below judges
+        // the socket it opens.
         epoch += 1
         let dial = epoch
         let socket = makeSocket(handshake)
@@ -295,18 +283,16 @@ final class HostConnection {
         let watchdog = startWatchdog(for: socket)
         defer {
             watchdog.cancel()
-            // Only this dial's challenge: the `self.socket` defer is
-            // registered first and so runs last, which makes this identity
-            // check honest — a stream unwinding late must not cancel the
-            // replacement's ping.
+            // Only this dial's challenge: the `self.socket` defer above runs
+            // after this one, so the identity check still holds here.
             if self.socket === socket { cancelWatchdogPing() }
         }
 
         var measured = false
         defer {
             // A dial that never produced a frame counts against the computer;
-            // one that did resets the count. Fenced because a cancelled dial
-            // still runs this, by which time another computer may be in place.
+            // one that did resets the count. A cancelled dial still runs this,
+            // by which time another computer may be in place.
             if dial == epoch {
                 if measured { consecutiveFailedDials = 0 } else { consecutiveFailedDials += 1 }
                 streamConnectedAt = nil
@@ -315,8 +301,6 @@ final class HostConnection {
         do {
             while !Task.isCancelled {
                 let frame = try await socket.receive()
-                // A frame that arrives after the link moved on describes a
-                // computer nobody is looking at any more.
                 guard dial == epoch else { return }
                 cancelConnectDeadline(dial)
                 guard case let .string(text) = frame else { continue }
@@ -326,7 +310,7 @@ final class HostConnection {
                 isStale = false
                 isOffline = false
                 isRevoked = false
-                // The answer any verification was looking for (#108).
+                // A frame is the answer any verification was waiting for (#108).
                 reachabilityGeneration += 1
                 reachabilityTask?.cancel()
                 reachabilityTask = nil
@@ -354,10 +338,8 @@ final class HostConnection {
     }
 
     // Bounded "Connecting…": if nothing has arrived by the deadline, ask the
-    // host directly; no answer at all is Offline, said now, while the attempt
-    // keeps going in case it is merely slow. The first frame cancels this, and
-    // a probe landing after a frame — or after the link moved on — is
-    // discarded: the frame is the truth.
+    // host directly; no answer is Offline, said now, while the attempt keeps
+    // going in case it is merely slow. The first frame cancels this.
     private func armConnectDeadline(_ dial: Int) {
         let deadline = reconnectPolicy.connectDeadline
         connectDeadlineTask?.cancel()
@@ -373,15 +355,15 @@ final class HostConnection {
     }
 
     // Only this dial's: a stream unwinding late must not cancel the
-    // replacement's, and `stop()` has already ended its own.
+    // replacement's.
     private func cancelConnectDeadline(_ dial: Int) {
         guard dial == epoch else { return }
         connectDeadlineTask?.cancel()
         connectDeadlineTask = nil
     }
 
-    // The first snapshot proves the stream; the round trip behind it is the
-    // measuring dial's.
+    // The first snapshot proves the stream; the round trip is measured
+    // right behind it.
     private func measureFirstFrameLatency(_ dial: Int) {
         firstFrameLatencyTask?.cancel()
         firstFrameLatencyTask = Task { [weak self] in
@@ -391,15 +373,14 @@ final class HostConnection {
         }
     }
 
-    // A WebSocket drop and an HTTP 401 look alike here, so ask the host
-    // directly before deciding; the same probe says whether the computer
-    // answers at all (#50). It runs beside the redial, never in front of it:
-    // waiting out the double probe (up to 11.5 s) first made the app miss
-    // every short good window on a WiFi link that goes deaf for seconds at a
-    // time (three cold reviews, 2026-09-02 night). One verification per
-    // generation, not per dial: on a computer that black-holes each question
-    // waits out its 5 s timeout while the redial arrives in 8–10 s, so
-    // restarting here meant the pair never finished and Offline never came.
+    // A WebSocket drop and an HTTP 401 look alike, so ask the host directly
+    // before deciding; the same probe says whether the computer answers at
+    // all (#50). It runs beside the redial, never in front of it: waiting the
+    // double probe out first made the app miss every short good window on a
+    // WiFi link that goes deaf for seconds (2026-09-02). One verification per
+    // generation, not per dial: on a black-holing computer each question
+    // waits out its 5 s timeout while redials arrive every 8–10 s, so a
+    // restart per dial meant the pair never finished (#108).
     private func verifyReachability(_ dial: Int) {
         guard reachabilityTask == nil else { return }
         let generation = reachabilityGeneration
@@ -418,28 +399,22 @@ final class HostConnection {
                 self.stop()
             case let .reachable(latency):
                 self.isOffline = false
-                // The number is a measurement, so it is the dial's.
                 if dial == self.epoch { self.latencyMilliseconds = latency }
             case .unreachable:
                 if self.isStale, self.consecutiveFailedDials >= 2 { self.isOffline = true }
-            // Never really asked, so nothing is known; the next drop verifies.
+            // Never really asked; the next drop verifies.
             case .superseded: break
             }
         }
     }
 
-    // The watchdog for one socket (#86, #107). Snapshots arrive on change
-    // only, so a dead socket looks exactly like a quiet evening: challenge
-    // it with a ping after `pingAfterIdle`, cycle it at `cycleAfterIdle`.
-    // The ping is never awaited in this loop — awaiting it inline let a
-    // send that suspended keep the loop from ever reaching the cycle check,
-    // so a socket 51 s idle had been pinged once and cancelled never.
+    // Snapshots arrive on change only, so a dead socket looks exactly like a
+    // quiet evening: ping after `pingAfterIdle`, cycle at `cycleAfterIdle`
+    // (#86). The ping is never awaited here: awaiting it inline let a
+    // suspended send keep the loop from ever reaching the cycle check (#107).
     private func startWatchdog(for socket: any HostEventsSocketing) -> Task<Void, Never> {
         let policy = watchdogPolicy
         return Task { [weak self, weak socket] in
-            // Whether this quiet period has already been challenged. Reset
-            // by activity; the pending send itself is owned by the link, not
-            // by the period that started it.
             var challenged = false
             while !Task.isCancelled {
                 try? await Task.sleep(for: policy.pollInterval)
@@ -461,10 +436,9 @@ final class HostConnection {
         }
     }
 
-    // One challenge in flight per link, and it stays this link's until the
-    // send actually finishes. A send that ignores cancellation must not be
-    // orphaned by a blip of activity and then multiplied by the next quiet
-    // period; cancelling the socket is what releases the real one (#107).
+    // One challenge in flight per link until the send actually finishes: a
+    // send that ignores cancellation must not be multiplied by the next
+    // quiet period. Cancelling the socket releases the real one (#107).
     private func challengeQuietSocket(_ socket: any HostEventsSocketing) {
         guard watchdogPing == nil else { return }
         watchdogPingGeneration += 1
@@ -482,12 +456,10 @@ final class HostConnection {
         watchdogPingGeneration += 1
     }
 
-    // Offline is said only after two misses a moment apart: one slow
-    // round trip on a jittery WiFi hop must not flip a live computer to
-    // "isn't answering" (owner-felt, 2026-09-02 evening). Failed redials in
-    // between do not stop it — they are the case it exists to decide — but a
-    // computer that has since spoken, or a link that has been stopped or
-    // pointed elsewhere, does.
+    // Offline is said only after two misses a moment apart: one slow round
+    // trip on a jittery WiFi hop must not flip a live computer to "isn't
+    // answering" (owner-felt, 2026-09-02). A computer that has since spoken,
+    // or a link stopped or pointed elsewhere, ends the question early.
     private func probeHostTwice(_ generation: Int) async -> HostProbe {
         let first = await probeHostChecked(generation)
         guard first == .unreachable, !Task.isCancelled, generation == reachabilityGeneration else { return first }
@@ -496,11 +468,10 @@ final class HostConnection {
         return await probeHostChecked(generation)
     }
 
-    // One check. A request the link itself cancelled says nothing about the
-    // computer, so it is re-asked in the flight that displaced it rather than
-    // counted as a miss: one timeout plus one cancelled request used to earn
-    // Offline (#108). Bounded — each attempt is a real round trip, and a link
-    // that keeps displacing them verifies again on its next drop.
+    // A request the link itself cancelled says nothing about the computer,
+    // so it is re-asked in the flight that displaced it rather than counted
+    // as a miss: one timeout plus one cancelled request used to earn Offline
+    // (#108). Bounded; a link that keeps displacing them verifies next drop.
     private func probeHostChecked(_ generation: Int) async -> HostProbe {
         for _ in 0..<Self.supersededProbeAttempts {
             let probe = await probeHostShared()
@@ -529,14 +500,12 @@ final class HostConnection {
     private func probeHost(_ origin: Int) async -> HostProbe {
         guard let client, let request = client.request("GET", "/api/host", timeout: 5) else { return .unreachable }
         let started = Date()
-        // An answer stands even if cancellation arrived behind it; a failure
-        // under cancellation is our doing, not the computer's (#108).
+        // A failure under cancellation is our doing, not the computer's (#108).
         guard case let .answered(status, data, _) = await client.send(request) else {
             return Task.isCancelled ? .superseded : .unreachable
         }
         if status == 401 { return .rejected }
-        // Last writer wins here, so an answer the link has already overtaken
-        // must not be the one that wins (#108).
+        // An answer the link has already overtaken must not write the path (#108).
         if status == 200, origin == epoch,
            let answer = try? JSONDecoder().decode(HostAnswer.self, from: data) {
             let answered = ConnectionPath(path: answer.connection?.path, relay: answer.connection?.relay)
@@ -547,10 +516,8 @@ final class HostConnection {
 
     // Single-flight: the connect deadline, the drop path and the latency poll
     // all ask the same question; on a bad link they used to ask it four times
-    // at once (#86). Keyed by the epoch it was put in, so an asker in a newer
-    // one puts its own rather than reading an answer that predates its stream
-    // as that stream's; the displaced question is cancelled, and the identity
-    // check below clears its own slot or nothing (#108).
+    // at once (#86). An asker in a newer epoch displaces an older question
+    // rather than reading its answer as its own (#108).
     private func probeHostShared() async -> HostProbe {
         let origin = epoch
         if let inFlight = probeInFlight {

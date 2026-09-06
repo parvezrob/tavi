@@ -72,8 +72,8 @@ export function bridgeTerminalV2(
   let attachment = attachments.get(target.key);
   let cursor: number;
   let resumed = false;
-  // Ownership is per connection: a frame still in flight from a superseded
-  // socket would otherwise reach the attachment its successor now owns (#108).
+  // A frame still in flight from a superseded socket must not reach the
+  // attachment its successor now owns (#108).
   let ownsAttachment = true;
 
   if (
@@ -88,11 +88,10 @@ export function bridgeTerminalV2(
   } else {
     // A resume miss (no attachment, epoch mismatch, or the offset already
     // trimmed out of the ring) gets a fresh attach: herdr repaints the whole
-    // pane, so the client is complete again without replay. The successor's
-    // pty is spawned first, because a spawn that throws must not leave the
-    // old client told it lost a terminal nobody took.
+    // pane, so the client is complete again without replay. Spawn before
+    // create: a spawn that throws must not tell the old client it lost a
+    // terminal nobody took (create supersedes the incumbent).
     const terminal = target.spawn();
-    attachment?.supersede();
     attachment = attachments.create(target.key, terminal, {
       detachedSize: target.detachedSize,
     });
@@ -171,9 +170,7 @@ export function bridgeTerminalV2(
   flush();
 
   websocket.on("message", (raw: RawData, isBinary: boolean) => {
-    // ws keeps delivering frames through the closing handshake, and on a
-    // resume hit the attachment is the successor's: a stale input or resize
-    // from this socket would land in their terminal.
+    // ws keeps delivering frames through the closing handshake.
     if (!ownsAttachment) return;
     if (isBinary) {
       sendTerminal(websocket, { type: "error", message: "Binary terminal messages are unsupported." });
