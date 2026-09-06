@@ -195,10 +195,10 @@ extension TaviChaosSoak {
         }
     }
 
-    // The home's own label, beside the event log: it must never read Offline
-    // in a window where the runner's polls all answered.
+    // The home's own health, beside the event log: the strip must never read
+    // Offline in a window where the runner's polls all answered.
     private func assertHomeNeverLiesAboutOffline() {
-        for sample in samples where sample.health == "sessions.health.offline" {
+        for sample in samples where sample.health == "offline" {
             let window = health.filter { abs($0.at - sample.at) <= ChaosBudget.healthWindow * 1_000 }
             guard !window.isEmpty, window.allSatisfy(\.answered) else { continue }
             // The contrast deliberately makes the host stop answering; a
@@ -282,6 +282,7 @@ extension TaviChaosSoak {
             ],
             "slowReadyAfterFaultSeconds": Distribution(slowReadySeconds).asJSON,
             "homePhaseSkipped": homePhaseSkipped,
+            "unfiredFaults": unfiredFaults,
             "resume": [
                 "hits": terminal.filter { $0.kind == "ready" && $0.resumed == true }.count,
                 "deliberateFreshAttaches": deliberateFreshAttaches,

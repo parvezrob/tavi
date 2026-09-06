@@ -214,14 +214,25 @@ enum TerminalFault: CaseIterable {
     case closeMidOutput1001
     case takeover
 
-    // How much of the phase this fault needs to be worth firing: its own
-    // recovery budget with room to see it, so an overrun costs one fault
-    // rather than compounding into the next.
+    // How much of the phase this fault needs to be worth firing: the thirty
+    // seconds of health in front of it plus its own recovery, so an overrun
+    // costs one fault rather than compounding into the next.
     var needsSeconds: TimeInterval {
         switch self {
         case .takeover: 150
         case .blackhole: 90
         default: 60
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .terminate: "terminate"
+        case .blackhole: "blackhole"
+        case .slowReady: "terminate+slowReady"
+        case .closeMidOutput1011: "closeMidOutput1011"
+        case .closeMidOutput1001: "closeMidOutput1001"
+        case .takeover: "takeover"
         }
     }
 }
@@ -231,6 +242,25 @@ enum EventsFault: CaseIterable {
     case blackhole
     case closeMidOutput1001
     case hostPauseContrast
+
+    // Thirty seconds of health in front, then the window itself and the
+    // recovery behind it; the two 70 s windows dominate.
+    var needsSeconds: TimeInterval {
+        switch self {
+        case .terminate, .closeMidOutput1001: 60
+        case .blackhole: 130
+        case .hostPauseContrast: 180
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .terminate: "terminate"
+        case .blackhole: "blackhole"
+        case .closeMidOutput1001: "closeMidOutput1001"
+        case .hostPauseContrast: "hostPause"
+        }
+    }
 }
 
 // One healthy stretch of one source: what has already been typed into it.

@@ -27,6 +27,12 @@ final class TaviChaosSoak: XCTestCase {
     var diagnosticsIdentifier = ""
     // Reported in the numbers: a home phase with no room left is not a zero.
     var homePhaseSkipped = false
+    // The faults a phase never got to fire, so a phase that started but ran
+    // out of budget says which ones are missing from the numbers.
+    var unfiredFaults: [String] = []
+    // One identifier per health state for the soak's computer, pinned at
+    // smoke time; the state is part of the identifier the home publishes.
+    var healthIdentifiers: [(identifier: String, state: String)] = []
     // Read once at the checkpoint and reported from there.
     var tallyCounts: [String: Int]?
     // Reported, not asserted (the plan asks for the number).
@@ -78,10 +84,12 @@ final class TaviChaosSoak: XCTestCase {
             // The terminal phase may have run long; the home phase gets what
             // is left of the budget rather than extending the run past it.
             let homeDeadline = min(ends, Date().addingTimeInterval(half))
-            if homeDeadline.timeIntervalSinceNow >= Self.homePhaseFloor {
+            let needed = EventsFault.allCases.reduce(0) { $0 + $1.needsSeconds }
+            if homeDeadline.timeIntervalSinceNow >= needed {
                 try await homePhase(app, chaos: chaos, until: homeDeadline)
             } else {
                 homePhaseSkipped = true
+                unfiredFaults.append(contentsOf: EventsFault.allCases.map(\.name))
                 XCTFail("terminal phase overran; home phase skipped")
             }
         } catch {
@@ -113,7 +121,10 @@ final class TaviChaosSoak: XCTestCase {
             let fault = TerminalFault.allCases[index % TerminalFault.allCases.count]
             // An overrun stays one fault's worth: a fault is fired only when
             // its own recovery still fits inside the phase.
-            guard deadline.timeIntervalSinceNow >= fault.needsSeconds else { break }
+            guard deadline.timeIntervalSinceNow >= fault.needsSeconds else {
+                unfiredFaults.append(fault.name)
+                break
+            }
             cycle.firedFault = true
             type(app, mark: nextMark(.beforeFault))
             index += 1
@@ -244,20 +255,20 @@ final class TaviChaosSoak: XCTestCase {
 
         let line = try await readDiagnostics(app)
         collector.merge(line)
-        // A takeover and its reopen leave retained rows for the same pane, so
-        // the row to compare against is the one the host still has an owner
-        // for. The phone publishes no stream token — the model carries no
-        // String — so "not yet released" is what identifies it.
-        let rows = ((try? await chaosAttachments(chaos)) ?? []).filter { $0.paneId == paneId && $0.releasedAt == nil }
-        guard rows.count == 1, let attachment = rows.first else {
-            XCTFail("The host has \(rows.count) live attachments for this pane; there is no offset to compare against.")
-            return
+        // One row per pane: the host keys its attachments by pane id and a
+        // replacement supersedes the incumbent, so a second row would mean
+        // the contract changed. A missing row costs this comparison and
+        // nothing else — the integrity counters and the tally still speak.
+        let rows = ((try? await chaosAttachments(chaos)) ?? []).filter { $0.paneId == paneId }
+        if rows.count == 1, let attachment = rows.first {
+            XCTAssertEqual(
+                line.terminal.acceptedOffset,
+                attachment.endOffset,
+                "The phone and the host disagree about how many bytes this stream produced."
+            )
+        } else {
+            XCTFail("The host reported \(rows.count) attachments for this pane; there is no offset to compare against.")
         }
-        XCTAssertEqual(
-            line.terminal.acceptedOffset,
-            attachment.endOffset,
-            "The phone and the host disagree about how many bytes this stream produced."
-        )
         assertIntegrity(line)
         assertMarks(paneId: paneId)
     }
@@ -274,11 +285,15 @@ final class TaviChaosSoak: XCTestCase {
                 cycle = CycleState(readyAt: lastReadyAt("events"))
             }
             guard let live = liveSeconds("events"), live >= ChaosBudget.liveBeforeFault, !cycle.firedFault else { continue }
-            cycle.firedFault = true
             let fault = EventsFault.allCases[index]
+            // As in the terminal phase: a fault is fired only when its own
+            // recovery still fits, so an overrun costs one fault, not the rest.
+            guard deadline.timeIntervalSinceNow >= fault.needsSeconds else { break }
+            cycle.firedFault = true
             index += 1
             try await fire(fault, app: app, chaos: chaos)
         }
+        unfiredFaults.append(contentsOf: EventsFault.allCases.dropFirst(index).map(\.name))
     }
 
     private func fire(_ fault: EventsFault, app: XCUIApplication, chaos: ChaosEnvironment) async throws {
@@ -320,11 +335,10 @@ final class TaviChaosSoak: XCTestCase {
         )
 
         var sawOffline = false
-        let offlineLabel = app.descendants(matching: .any)["sessions.health.offline"]
         let ends = Date().addingTimeInterval(window)
         while Date() < ends {
             try await tick(app, chaos: chaos)
-            if offlineLabel.exists { sawOffline = true }
+            if samples.last?.health == "offline" { sawOffline = true }
             if collector.first("events", "offlineEntered", after: at) != nil, sawOffline { break }
         }
         XCTAssertNotNil(collector.first("events", "offlineEntered", after: at), "The host withheld every response and the phone never said Offline.")
@@ -412,51 +426,13 @@ final class TaviChaosSoak: XCTestCase {
     private func sample(_ app: XCUIApplication) -> Sample {
         let status = app.descendants(matching: .any)["terminal.status"]
         let keyboard = app.buttons["terminal.keyboard"]
-        let healthLabel = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH 'sessions.health.'")).firstMatch
         return Sample(
             at: milliseconds(),
             terminalIsLive: keyboard.exists && !status.exists,
             status: status.exists ? status.label : nil,
             surface: (app.descendants(matching: .any)["terminal.surface"].value as? String) ?? "",
-            health: healthLabel.exists ? healthLabel.identifier : nil
+            health: currentHealth(app)
         )
-    }
-
-    // MARK: - Reading the phone
-
-    private func smokeDiagnostics(_ app: XCUIApplication) throws -> DiagnosticsLine {
-        let element = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH 'diagnostics.recovery.'")).firstMatch
-        guard element.waitForExistence(timeout: 30), let value = element.value as? String, !value.isEmpty else {
-            throw XCTSkip("No diagnostics element: the app was not launched with TAVI_DEV_HOST, or this is not a DEBUG build.")
-        }
-        let line = try JSONDecoder().decode(DiagnosticsLine.self, from: Data(value.utf8))
-        XCTAssertFalse(line.host.isEmpty, "The diagnostics element carries no host id.")
-        diagnosticsIdentifier = "diagnostics.recovery.\(line.host)"
-        return line
-    }
-
-    func readDiagnostics(_ app: XCUIApplication) async throws -> DiagnosticsLine {
-        let element = app.descendants(matching: .any)[diagnosticsIdentifier]
-        guard element.waitForExistence(timeout: 30), let value = element.value as? String, !value.isEmpty else {
-            XCTFail("The diagnostics element \(diagnosticsIdentifier) went away mid-run.")
-            throw ChaosSoakFailure.diagnosticsUnreadable
-        }
-        return try JSONDecoder().decode(DiagnosticsLine.self, from: Data(value.utf8))
-    }
-
-    // How long this source has been up, from its own events: the newest
-    // `ready` with nothing that ended a stream after it.
-    private func liveSeconds(_ source: String) -> Double? {
-        guard let ready = lastReadyAt(source) else { return nil }
-        let ended = collector.events.last { $0.source == source && ($0.kind == "cycling" || $0.kind == "streamEnded") }
-        if let ended, Double(ended.at) > ready { return nil }
-        return (milliseconds() - ready) / 1_000
-    }
-
-    private func lastReadyAt(_ source: String) -> Double? {
-        collector.events.last { $0.source == source && $0.kind == "ready" }.map { Double($0.at) }
     }
 
     // MARK: - Marks
@@ -581,7 +557,7 @@ final class TaviChaosSoak: XCTestCase {
 
     // Below this the home phase cannot fire its four faults and wait them
     // out, so it is not started at all.
-    static let homePhaseFloor: TimeInterval = 180
+    static let healthStates = ["connecting", "live", "stale", "offline", "revoked"]
 
     func milliseconds() -> Double { Date().timeIntervalSince1970 * 1_000 }
 }
