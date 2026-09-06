@@ -135,6 +135,9 @@ actor TerminalWebSocketClient: TerminalTransporting {
         } catch is DecodingError {
             finish(activeSocket, closeCode: .protocolError)
             return .failed(.invalidFrame)
+        } catch let failure as NetworkWebSocketTask.Failure where Self.isTakeover(failure) {
+            finish(activeSocket, closeCode: .normalClosure)
+            return .takenOver
         } catch NetworkWebSocketTask.Failure.handshakeRejected {
             let configuration = self.configuration
             finish(activeSocket, closeCode: .goingAway)
@@ -167,6 +170,15 @@ actor TerminalWebSocketClient: TerminalTransporting {
         socket?.cancel(with: .normalClosure, reason: nil)
         socket = nil
         negotiatedProtocolValidated = false
+    }
+
+    // The takeover signal that survives a lost error frame (#108): close
+    // 1000 with reason `superseded`. Any other close, including 1000 with no
+    // reason, stays an ordinary drop the caller retries.
+    private static func isTakeover(_ failure: NetworkWebSocketTask.Failure) -> Bool {
+        guard case let .closed(code, reason) = failure else { return false }
+        return code == UInt16(URLSessionWebSocketTask.CloseCode.normalClosure.rawValue)
+            && reason == TerminalWireProtocol.supersededCloseReason
     }
 
     private func validateNegotiatedProtocol(

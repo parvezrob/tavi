@@ -31,7 +31,9 @@ struct SocketFailure: Sendable, Equatable {
         case let failure as NetworkWebSocketTask.Failure:
             switch failure {
             case .cancelled: self.init(.cancelled)
-            case let .closed(code): self.init(.closed, code: Int(code ?? 0))
+            // The reason is peer-supplied text and stays out of the record;
+            // only the protocol number survives.
+            case let .closed(code, _): self.init(.closed, code: Int(code ?? 0))
             case .connectionFailed: self.init(.connectionFailed)
             case .handshakeRejected: self.init(.handshakeRejected)
             case .notConnected: self.init(.notConnected)

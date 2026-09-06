@@ -9,6 +9,67 @@ import Testing
 
 struct TerminalTestFailure: Error {}
 
+// The budgets the suites below reason about, so a wait and the policy that
+// armed it cannot drift apart.
+enum TerminalTestDefaults {
+    static let host = "https://mac.tailnet.ts.net"
+    static let connectDeadline = Duration.seconds(12)
+    // One second of retry delay, less up to 20 % of jitter.
+    static let retryDelay = Duration.milliseconds(800)...Duration.seconds(1)
+
+    static var reconnectPolicy: ReconnectPolicy {
+        ReconnectPolicy(
+            initialDelay: .seconds(1),
+            maximumDelay: .seconds(1),
+            multiplier: 1,
+            connectDeadline: connectDeadline,
+            sustainedHealthInterval: .seconds(30)
+        )
+    }
+}
+
+@MainActor
+func startedController(
+    _ transport: RecoveryTransport,
+    _ clock: ManualTerminalClock,
+    paneID: String = "fixture",
+    paths: ScriptedPathObserver = ScriptedPathObserver()
+) -> TerminalSessionController {
+    let controller = TerminalSessionController(
+        client: transport,
+        reconnectPolicy: TerminalTestDefaults.reconnectPolicy,
+        timing: clock.timing,
+        pathObserver: paths
+    )
+    controller.connect(
+        hostText: TerminalTestDefaults.host,
+        paneID: paneID,
+        credential: "valid-token"
+    )
+    return controller
+}
+
+@MainActor
+func waitUntilConnected(
+    _ transport: RecoveryTransport,
+    _ controller: TerminalSessionController,
+    stream: String = "epoch-a"
+) async throws {
+    try await waitUntilListening(transport, after: 0)
+    await transport.emit(.message(.ready(stream: stream, offset: 0, resumed: false)))
+    try await waitFor { controller.connectionState == .connected }
+}
+
+// `emit` hands the event to the newest waiter, and a cancelled predecessor
+// stays parked in `receive()` forever — so a frame emitted before the new
+// dial's loop has asked would go to the loop that can no longer act on it.
+// Dialling is not enough; the ask is the barrier.
+@MainActor
+func waitUntilListening(_ transport: RecoveryTransport, after dials: Int) async throws {
+    try await waitFor { await transport.connectCount > dials }
+    try await waitFor { await transport.receivesSinceConnect >= 1 }
+}
+
 // Waits for something the controller reaches on its own tasks.
 @MainActor
 func waitFor(_ condition: () async -> Bool) async throws {
@@ -64,6 +125,13 @@ actor RecoveryTransport: TerminalTransporting {
 
     private(set) var connectCount = 0
     private(set) var connectResumes: [TerminalResumePoint?] = []
+    // Every ask for the next event, so a test can say "the controller has
+    // finished with the frame before this one".
+    private(set) var receiveCount = 0
+    // Asks belonging to the current dial. An older loop cannot add to it:
+    // once the controller has bumped its generation, that loop exits at the
+    // top of its own `while` rather than asking again.
+    private(set) var receivesSinceConnect = 0
     private(set) var sentMessages: [TerminalClientMessage] = []
     // True while a disconnect is being held open, so a test can let the
     // superseded loop act before it returns.
@@ -103,10 +171,13 @@ actor RecoveryTransport: TerminalTransporting {
     func connect(configuration: TerminalConnectionConfiguration, resume: TerminalResumePoint?) throws {
         connectCount += 1
         connectResumes.append(resume)
+        receivesSinceConnect = 0
         connected = true
     }
 
     func receive() async -> TerminalTransportEvent {
+        receiveCount += 1
+        receivesSinceConnect += 1
         if !queuedEvents.isEmpty { return queuedEvents.removeFirst() }
         return await withCheckedContinuation { waiters.append($0) }
     }

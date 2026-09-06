@@ -111,6 +111,11 @@ struct TerminalSessionView: View {
                 onRendererFailure: controller.rendererDidFail,
                 onTranscript: controller.transcriptDidChange
             )
+            // Jump-to points this same screen at another pane. A new
+            // session gets a new surface, so no half-parsed escape
+            // sequence or scrollback from the previous pane survives into
+            // it; an ordinary reconnect keeps the id and the surface (#108).
+            .id(controller.sessionID)
             .background(.black)
             // Tapping the terminal is an implicit switch to live typing, so
             // the composer never lingers as a second empty text target.
@@ -122,10 +127,13 @@ struct TerminalSessionView: View {
                 }
             )
             .overlay {
-                // An ended session keeps its last screen readable — the
-                // quiet bottom bar says what happened; only a session that
-                // never attached (or died unrecoverably) gets the card.
-                if controller.needsConnectionConfiguration, controller.connectionState != .ended {
+                // A session that ended or was taken over keeps its last
+                // screen readable — the quiet bottom bar says what happened;
+                // only one that never attached (or died unrecoverably) gets
+                // the card.
+                if controller.needsConnectionConfiguration,
+                   controller.connectionState != .ended,
+                   controller.connectionState != .superseded {
                     disconnectedPrompt
                 }
             }
@@ -285,29 +293,21 @@ struct TerminalSessionView: View {
         #endif
     }
 
-    // Ended and failed are conclusions, not conditions to report.
     private var isFinalState: Bool {
-        controller.connectionState == .ended || controller.connectionState == .failed
+        controller.connectionState.isFinal
     }
 
-    // Ended is not an error: a grey dot and plain words. Red stays
-    // reserved for a session that actually failed.
+    // Ended and taken over are not errors: a grey dot and plain words. Red
+    // stays reserved for a session that actually failed.
     private var finalStateBar: some View {
-        let ended = controller.connectionState == .ended
-        return HStack(spacing: 8) {
+        HStack(spacing: 8) {
             Circle()
-                .fill(ended ? TaviTheme.statusIdle : TaviTheme.statusBlocked)
+                .fill(controller.connectionState == .failed ? TaviTheme.statusBlocked : TaviTheme.statusIdle)
                 .frame(width: 7, height: 7)
-            Text(
-                ended
-                    ? "This session ended on \(computerName ?? "the computer") — its last screen stays readable."
-                    : [controller.connectionState.accessibilityDescription, controller.errorMessage]
-                    .compactMap { $0 }
-                    .joined(separator: " — ")
-            )
-            .font(.caption)
-            .foregroundStyle(TaviTheme.textSecondary)
-            .lineLimit(2)
+            Text(finalStateSentence)
+                .font(.caption)
+                .foregroundStyle(TaviTheme.textSecondary)
+                .lineLimit(2)
             Spacer(minLength: 8)
         }
         .padding(.horizontal, TaviTheme.Spacing.card)
@@ -318,6 +318,21 @@ struct TerminalSessionView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("terminal.status")
+    }
+
+    // The two quiet endings each say what happened and what is still true;
+    // anything else falls back to the state plus whatever went wrong.
+    private var finalStateSentence: String {
+        switch controller.connectionState {
+        case .ended:
+            "This session ended on \(computerName ?? "the computer") — its last screen stays readable."
+        case .superseded:
+            "Another connection took over. Open this terminal again to reconnect."
+        default:
+            [controller.connectionState.accessibilityDescription, controller.errorMessage]
+                .compactMap { $0 }
+                .joined(separator: " — ")
+        }
     }
 
     private var connectionBanner: some View {

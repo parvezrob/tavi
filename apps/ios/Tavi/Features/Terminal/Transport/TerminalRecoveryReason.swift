@@ -11,6 +11,7 @@ enum TerminalRecoveryReason: String, Sendable {
     case heartbeatSendStalled = "heartbeat-send-stalled"
     case networkPathLost = "network-path-lost"
     case outboundFailed = "outbound-failed"
+    case outputDiscarded = "output-discarded"
     case transportDisconnected = "transport-disconnected"
     case transportFailed = "transport-failed"
 }

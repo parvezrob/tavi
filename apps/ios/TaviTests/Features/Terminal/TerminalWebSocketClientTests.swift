@@ -95,6 +95,33 @@ struct TerminalWebSocketClientTests {
         #expect(oversized.cancelCodes == [.protocolError])
     }
 
+    // The third takeover signal (#108): close 1000 with reason `superseded`,
+    // and only that. A 1000 with no reason, or the reason under any other
+    // code, stays an ordinary drop the controller retries — a takeover would
+    // stop it retrying at all.
+    @Test
+    func onlyANormalCloseCarryingTheSupersededReasonIsATakeover() async throws {
+        let takenOver = FakeTerminalWebSocketTask(negotiatedProtocol: TerminalWireProtocol.name)
+        takenOver.enqueueFailure(NetworkWebSocketTask.Failure.closed(code: 1_000, reason: "superseded"))
+        let unexplained = FakeTerminalWebSocketTask(negotiatedProtocol: TerminalWireProtocol.name)
+        unexplained.enqueueFailure(NetworkWebSocketTask.Failure.closed(code: 1_000, reason: nil))
+        let otherCode = FakeTerminalWebSocketTask(negotiatedProtocol: TerminalWireProtocol.name)
+        otherCode.enqueueFailure(NetworkWebSocketTask.Failure.closed(code: 1_011, reason: "superseded"))
+        let factory = FakeTerminalWebSocketFactory(tasks: [takenOver, unexplained, otherCode])
+        let client = TerminalWebSocketClient(makeSocket: factory.makeTask)
+
+        try await client.connect(configuration: connectionConfiguration(), resume: nil)
+        #expect(await client.receive() == .takenOver)
+        try await client.connect(configuration: connectionConfiguration(), resume: nil)
+        #expect(await client.receive() == .disconnected)
+        try await client.connect(configuration: connectionConfiguration(), resume: nil)
+        #expect(await client.receive() == .disconnected)
+
+        #expect(takenOver.cancelCodes == [.normalClosure])
+        #expect(unexplained.cancelCodes == [.goingAway])
+        #expect(otherCode.cancelCodes == [.goingAway])
+    }
+
     @Test
     func staleSocketCannotPublishIntoTheReplacementConnection() async throws {
         let stale = FakeTerminalWebSocketTask(

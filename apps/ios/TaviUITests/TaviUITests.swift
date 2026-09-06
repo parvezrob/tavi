@@ -98,6 +98,70 @@ final class TaviUITests: XCTestCase {
     }
 
     @MainActor
+    func testJumpToSwitchesPaneWithoutMixingTerminalOutput() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let host = environment["TAVI_DEV_HOST"],
+              let token = environment["TAVI_DEV_TOKEN"] else {
+            throw XCTSkip("Set TEST_RUNNER_TAVI_DEV_HOST/TOKEN to run the live pane-switch test.")
+        }
+        let first = try await createDisposableShell(host: host, token: token)
+        let second = try await createDisposableShell(host: host, token: token)
+        let app = launchIntoAgent(first, host: host, token: token)
+        XCTAssertTrue(waitForLiveTerminal(app, timeout: 20))
+        let surface = app.descendants(matching: .any)["terminal.surface"]
+
+        func printMarker(_ suffix: String) {
+            surface.tap()
+            // Cancel any shell startup prompt before sending the fixture command.
+            app.buttons["terminal.ctrl"].tap()
+            surface.typeText("c")
+            surface.typeText("TAVI_UI_PANE=\(suffix); printf 'OWNERSHIP-%s\\n' \"$TAVI_UI_PANE\"\n")
+            let printed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                (surface.value as? String)?.contains("OWNERSHIP-\(suffix)") == true
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [printed], timeout: 10), .completed)
+            app.buttons["terminal.dismissKeyboard"].tap()
+        }
+
+        func jump(to pane: String) {
+            app.buttons["terminal.jump"].tap()
+            let sheet = app.descendants(matching: .any)["terminal.jumpSheet"]
+            XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+            let row = app.buttons["jump.agent.\(pane)"]
+            for _ in 0..<12 {
+                if row.exists, row.isHittable { break }
+                sheet.swipeUp()
+            }
+            XCTAssertTrue(row.isHittable, "The disposable destination never became tappable.")
+            row.tap()
+            let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                !sheet.exists
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 5), .completed)
+            XCTAssertTrue(waitForLiveTerminal(app, timeout: 20))
+        }
+
+        printMarker("A")
+        jump(to: second)
+        printMarker("B")
+        XCTAssertFalse((surface.value as? String)?.contains("OWNERSHIP-A") == true)
+        jump(to: first)
+        surface.tap()
+        surface.typeText("printf 'RETURNED-%s\\n' \"$TAVI_UI_PANE\"\n")
+        // A fresh viewport need not include earlier scrollback; the shell's
+        // retained value proves the switch returned to the original process.
+        let restored = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (surface.value as? String)?.contains("RETURNED-A") == true
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 10), .completed)
+        XCTAssertFalse((surface.value as? String)?.contains("OWNERSHIP-B") == true)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Returned to the first disposable pane"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
     func testTerminalKeyboardLayout() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let host = environment["TAVI_DEV_HOST"],

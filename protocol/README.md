@@ -369,7 +369,7 @@ The host keeps one PTY attachment per session that survives WebSocket drops. Aft
 { "type": "error", "message": "Another connection took over this terminal.", "code": "superseded" }
 ```
 
-The optional string `code` belongs to the `error` variant; `exit.code` remains numeric. A client stops input and automatic reclamation as soon as it receives this outcome, without waiting for the close, and requires an explicit user action to attach again. For older hosts it also recognizes the exact legacy takeover message without `code`, and close `1000` with reason `superseded`. Unknown error codes keep the ordinary error behavior. The host ignores further input, resize and ping messages from the losing connection; its delayed close cannot release the new owner.
+The optional string `code` belongs to the `error` variant; `exit.code` remains numeric. A client stops input and automatic reclamation as soon as it receives this outcome, without waiting for the close, and requires an explicit user action to attach again. For older hosts it also recognizes the exact legacy takeover message without `code`, and close `1000` with reason `superseded`. Unknown error codes keep the ordinary error behavior. The host ignores further input, resize and ping messages from the losing connection; its delayed close cannot release the new owner. Roll out the updated client before the updated host when multiple clients may attach: older clients can decode the additive error field but may still retry automatically after losing ownership.
 
 If replacement PTY creation throws, the incumbent remains attached and the new connection fails with `1011` (`terminal unavailable`). A successful fresh replacement disposes only the old temporary attach PTY, never the durable herdr pane. Host shutdown remains a retryable disconnect, not a takeover. Legacy and coded takeover messages are covered by the shared terminal message compatibility fixture.
 
@@ -387,7 +387,7 @@ To resume after a drop, reconnect with query parameters:
 wss://<host>/api/agents/{paneId}/terminal?stream=<epoch>&resume=<offset>
 ```
 
-where `offset` is the absolute offset one past the last byte the client has rendered. On a hit (`resumed: true`) the host replays exactly the missed bytes — no gap, no duplication. On any miss (attachment gone or exited, epoch mismatch, offset trimmed out of the ring) the host discards the old attachment, spawns a fresh attach (herdr repaints the full pane), and answers `resumed: false` with a new `stream` and `offset` — the client must reset its offset counter to `offset`.
+where `offset` is the absolute offset one past the last byte accepted into the ordered output queue owned by the current terminal surface. Acceptance does not mean a GPU frame has completed. The client may retain a bounded queue while the initial surface is being created, but it must invalidate the resume epoch if any accepted bytes or their owning surface are discarded. Surface replacement or a deliberate change of pane starts a fresh attachment; pending output and callbacks from the previous surface cannot cross that boundary. On a hit (`resumed: true`) the host replays exactly the missed bytes — no gap, no duplication. On any miss (attachment gone or exited, epoch mismatch, offset trimmed out of the ring) the host discards the old attachment, spawns a fresh attach (herdr repaints the full pane), and answers `resumed: false` with a new `stream` and `offset` — the client must reset its offset counter to `offset`.
 
 ### Binary output frames
 
@@ -397,7 +397,7 @@ Output travels as binary WebSocket frames:
 [0x01][8-byte big-endian start offset][raw PTY bytes]
 ```
 
-The client's next resume offset is `start offset + payload length`. Frames are bounded by the 64 KiB frame limit. A client that falls further behind than the ring buffer receives an `error` and close code `1011` (`resume buffer overrun`); it should reconnect without resume parameters for a fresh attach.
+Only after accepting the entire payload, the client's next resume offset is `start offset + payload length`. If the payload cannot be retained or delivered, the client clears its resume epoch and disables input until a fresh attachment is ready. A popped terminal stops receiving; foregrounding alone cannot reopen it without a renderer. Neither reconnect nor renderer replacement replays input. Frames are bounded by the 64 KiB frame limit. A client that falls further behind than the ring buffer receives an `error` and close code `1011` (`resume buffer overrun`); it should reconnect without resume parameters for a fresh attach.
 
 ## Client invariants
 

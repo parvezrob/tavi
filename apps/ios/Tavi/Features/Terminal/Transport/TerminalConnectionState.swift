@@ -9,9 +9,23 @@ enum TerminalConnectionState: Sendable, Equatable {
     case suspended
     case ended
     case failed
+    // Another connection owns this terminal (#108). Final for this session:
+    // nothing retries, and the agent behind it is still running.
+    case superseded
 
     var canSubmitInput: Bool {
         self == .connected
+    }
+
+    // A conclusion rather than a condition to report: nothing retries out of
+    // these, and the last screen stays readable.
+    var isFinal: Bool {
+        switch self {
+        case .ended, .failed, .superseded:
+            true
+        case .idle, .connecting, .connected, .reconnecting, .waitingForNetwork, .suspended:
+            false
+        }
     }
 
     var accessibilityDescription: String {
@@ -32,6 +46,8 @@ enum TerminalConnectionState: Sendable, Equatable {
             "Terminal ended"
         case .failed:
             "Connection failed"
+        case .superseded:
+            "Another connection took over this terminal"
         }
     }
 }
@@ -45,6 +61,7 @@ enum TerminalConnectionAction: Sendable, Equatable {
     case resume
     case terminalExited
     case stop
+    case takenOver
     case unrecoverableFailure
 }
 
@@ -61,24 +78,29 @@ enum TerminalConnectionReducer {
         case let .connectionLost(nextAttempt):
             // While the network path is down, "reconnecting attempt N" would
             // be dishonest — no attempt can succeed until the path returns.
-            state == .suspended || state == .ended || state == .waitingForNetwork
+            state == .suspended || state == .ended || state == .waitingForNetwork || state == .superseded
                 ? state
                 : .reconnecting(attempt: max(1, nextAttempt))
         case .networkLost:
             switch state {
             case .connecting, .connected, .reconnecting:
                 .waitingForNetwork
-            case .idle, .waitingForNetwork, .suspended, .ended, .failed:
+            case .idle, .waitingForNetwork, .suspended, .ended, .failed, .superseded:
                 state
             }
         case .suspend:
-            state == .ended || state == .failed ? state : .suspended
+            // A superseded session must never become suspended: the scene
+            // coming back to the foreground would then redial a terminal
+            // this client no longer owns (#108).
+            state.isFinal ? state : .suspended
         case .resume:
             state == .suspended ? .connecting : state
         case .terminalExited:
             .ended
         case .stop:
             .idle
+        case .takenOver:
+            state == .ended || state == .failed ? state : .superseded
         case .unrecoverableFailure:
             .failed
         }

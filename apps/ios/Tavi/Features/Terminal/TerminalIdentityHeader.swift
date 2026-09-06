@@ -55,7 +55,9 @@ extension TerminalSessionView {
             .orange
         case .failed, .ended:
             .red
-        case .idle, .suspended:
+        // Losing the attachment is not a fault of this connection and the
+        // agent behind it is still running: quiet, not alarming.
+        case .idle, .suspended, .superseded:
             .secondary
         }
     }

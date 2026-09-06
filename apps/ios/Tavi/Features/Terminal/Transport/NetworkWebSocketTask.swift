@@ -25,8 +25,10 @@ final class NetworkWebSocketTask: TerminalWebSocketTasking, @unchecked Sendable 
         case handshakeRejected
         // The path, TCP, TLS or the WebSocket layer failed.
         case connectionFailed(String)
-        // The peer sent a close frame (its code, when it gave one).
-        case closed(code: UInt16?)
+        // The peer sent a close frame (its code and reason, when it gave
+        // them). Network.framework delivers the reason as the frame's raw
+        // UTF-8 content, not as close metadata.
+        case closed(code: UInt16?, reason: String?)
         // cancel(with:) or deinit ended the connection first.
         case cancelled
         case notConnected
@@ -152,13 +154,14 @@ final class NetworkWebSocketTask: TerminalWebSocketTasking, @unchecked Sendable 
                         if case let .protocolCode(defined) = metadata?.closeCode { code = defined.rawValue }
                         if case let .applicationCode(value) = metadata?.closeCode { code = value }
                         if case let .privateCode(value) = metadata?.closeCode { code = value }
-                        once.resume(throwing: self.fail(with: .closed(code: code)))
+                        let reason = (content?.isEmpty ?? true) ? nil : String(bytes: content ?? Data(), encoding: .utf8)
+                        once.resume(throwing: self.fail(with: .closed(code: code, reason: reason)))
                     case .ping?, .pong?, .cont?:
                         // Control frames are handled by the stack; ask again.
                         once.resume(returning: nil)
                     default:
                         // A completed receive with no frame is the peer going away.
-                        once.resume(throwing: self.fail(with: .closed(code: nil)))
+                        once.resume(throwing: self.fail(with: .closed(code: nil, reason: nil)))
                     }
                 }
             }

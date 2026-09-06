@@ -384,9 +384,16 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         resignFirstResponder()
     }
 
-    func receive(_ data: Data) {
-        guard surface != nil, !data.isEmpty else { return }
-        outputPump?.feed(data)
+    // True once the bytes are queued on the pump, in order, for a surface
+    // that is still alive. shutdown() clears `surface` and the pump together
+    // on this actor, so a false answer here is the whole of the rejection
+    // (#108): the caller may not treat these bytes as delivered.
+    @discardableResult
+    func receive(_ data: Data) -> Bool {
+        guard surface != nil, let outputPump else { return false }
+        guard !data.isEmpty else { return true }
+        outputPump.feed(data)
+        return true
     }
 
     func setActive(_ active: Bool) {
@@ -404,6 +411,7 @@ final class GhosttyTerminalSurfaceView: UIView, UIKeyInput {
         guard let surface else { return }
         self.surface = nil
         onGridSizeChange = nil
+        onTranscript = nil
         scrollMomentumActive = false
         scrollDragActive = false
         scrollDrawPending = false

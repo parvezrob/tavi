@@ -13,7 +13,7 @@ struct SocketFailureTests {
             .cancelled,
             .notConnected,
             .connectionFailed("Connection refused by mac.tailnet.ts.net:443"),
-            .closed(code: nil),
+            .closed(code: nil, reason: nil),
         ],
         [
             SocketFailure.Tag.handshakeRejected,
@@ -40,10 +40,16 @@ struct SocketFailureTests {
         #expect(failure.code == 0)
     }
 
-    // The peer's close code is a protocol number and is worth keeping.
-    @Test func aPeersCloseCodeSurvives() {
-        #expect(SocketFailure(NetworkWebSocketTask.Failure.closed(code: 1_006)).code == 1_006)
-        #expect(SocketFailure(NetworkWebSocketTask.Failure.closed(code: nil)).code == 0)
+    // The peer's close code is a protocol number and is worth keeping. Its
+    // reason is peer-supplied text: the terminal client reads it to
+    // recognize a takeover (#108), and the record maps it to nothing.
+    @Test func aPeersCloseCodeSurvivesAndItsReasonChangesNothing() {
+        #expect(SocketFailure(NetworkWebSocketTask.Failure.closed(code: 1_006, reason: nil)).code == 1_006)
+        #expect(SocketFailure(NetworkWebSocketTask.Failure.closed(code: nil, reason: nil)).code == 0)
+        #expect(
+            SocketFailure(NetworkWebSocketTask.Failure.closed(code: 1_000, reason: "superseded"))
+                == SocketFailure(NetworkWebSocketTask.Failure.closed(code: 1_000, reason: nil))
+        )
     }
 
     // A frame the app cannot read is its own reason, not "unknown": the

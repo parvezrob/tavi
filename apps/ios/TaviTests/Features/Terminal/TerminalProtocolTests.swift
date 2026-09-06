@@ -29,6 +29,40 @@ struct TerminalProtocolTests {
         }
     }
 
+    // The ownership code is additive (#108): both takeover frames in the
+    // shared fixture decode to the same outcome, and a code from a newer
+    // host decodes to none at all rather than throwing.
+    @Test
+    func decodesTheOwnershipCodeAndToleratesUnknownOnes() throws {
+        let decoder = JSONDecoder()
+        let coded = #"{"type":"error","message":"Another connection took over this terminal.","code":"superseded"}"#
+        let legacy = #"{"type":"error","message":"Another connection took over this terminal."}"#
+        let unknown = #"{"type":"error","message":"Something new happened.","code":"quarantined"}"#
+        let numeric = #"{"type":"error","message":"Something new happened.","code":7}"#
+
+        #expect(
+            try decoder.decode(TerminalServerMessage.self, from: Data(coded.utf8))
+                == .error(message: TerminalWireProtocol.takeoverMessage, code: .superseded)
+        )
+        #expect(
+            try decoder.decode(TerminalServerMessage.self, from: Data(legacy.utf8))
+                == .error(message: TerminalWireProtocol.takeoverMessage, code: nil)
+        )
+        #expect(
+            try decoder.decode(TerminalServerMessage.self, from: Data(unknown.utf8))
+                == .error(message: "Something new happened.", code: nil)
+        )
+        #expect(
+            try decoder.decode(TerminalServerMessage.self, from: Data(numeric.utf8))
+                == .error(message: "Something new happened.", code: nil)
+        )
+        // exit.code stays the numeric status it has always been.
+        #expect(
+            try decoder.decode(TerminalServerMessage.self, from: Data(#"{"type":"exit","code":137}"#.utf8))
+                == .exit(code: 137, signal: nil)
+        )
+    }
+
     @Test
     func encodesResizeAndHeartbeatWithStableFieldNames() throws {
         let encoder = JSONEncoder()

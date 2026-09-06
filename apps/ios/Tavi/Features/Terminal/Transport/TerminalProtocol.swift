@@ -6,6 +6,18 @@ enum TerminalWireProtocol {
     // v2 binary output frame: [0x01][8-byte big-endian start offset][bytes].
     static let outputFrameType: UInt8 = 0x01
     static let outputFrameHeaderBytes = 9
+    // The takeover outcome (#108). A host that predates the code sends this
+    // sentence alone, so the exact string stays part of the contract.
+    static let takeoverMessage = "Another connection took over this terminal."
+    static var supersededCloseReason: String { TerminalErrorCode.superseded.rawValue }
+}
+
+// The machine-readable half of a server `error` frame. Additive: an
+// unrecognized value decodes to nil and the frame keeps its ordinary
+// meaning, so a newer host cannot make this client fail on a word it has
+// never heard.
+enum TerminalErrorCode: String, Sendable {
+    case superseded
 }
 
 // Where in the session's output byte stream this client wants to continue.
@@ -13,7 +25,13 @@ enum TerminalWireProtocol {
 // epoch are meaningless and the host answers with a fresh attach.
 struct TerminalResumePoint: Sendable, Equatable {
     let stream: String
-    let offset: UInt64
+    private(set) var offset: UInt64
+
+    // The host may trim everything behind the offset, so it moves only for
+    // bytes the client has taken responsibility for (#108).
+    mutating func advance(to nextOffset: UInt64) {
+        offset = nextOffset
+    }
 }
 
 // A terminal is always one herdr agent pane on one host (#53).
@@ -68,7 +86,7 @@ enum TerminalServerMessage: Sendable, Equatable, Decodable {
     case outputChunk(offset: UInt64, data: Data)
     case pong(identifier: String)
     case exit(code: Int, signal: Int?)
-    case error(String)
+    case error(message: String, code: TerminalErrorCode?)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -103,7 +121,13 @@ enum TerminalServerMessage: Sendable, Equatable, Decodable {
                 signal: try container.decodeIfPresent(Int.self, forKey: .signal)
             )
         case "error":
-            self = .error(try container.decode(String.self, forKey: .message))
+            // `code` shares its key with the numeric exit status, which the
+            // exit branch decodes instead; here anything that is not a
+            // string this build knows is simply absent.
+            self = .error(
+                message: try container.decode(String.self, forKey: .message),
+                code: TerminalErrorCode(rawValue: (try? container.decode(String.self, forKey: .code)) ?? "")
+            )
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type,
@@ -114,9 +138,23 @@ enum TerminalServerMessage: Sendable, Equatable, Decodable {
     }
 }
 
+extension TerminalServerMessage {
+    // The two takeover signals a frame can carry: the machine code, and —
+    // from a host older than the code — the exact sentence on its own. Any
+    // other code is additive and leaves the frame an ordinary error (#108).
+    var isTakeoverNotice: Bool {
+        guard case let .error(message, code) = self else { return false }
+        return code == .superseded || message == TerminalWireProtocol.takeoverMessage
+    }
+}
+
 enum TerminalTransportEvent: Sendable, Equatable {
     case message(TerminalServerMessage)
     case disconnected
+    // The socket closed 1000 with reason `superseded`: another connection
+    // owns the attachment now. Not a failure — the durable agent is still
+    // running on the host (#108).
+    case takenOver
     case failed(TerminalTransportError)
 }
 
