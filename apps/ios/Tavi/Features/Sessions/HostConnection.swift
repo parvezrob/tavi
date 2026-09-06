@@ -28,7 +28,7 @@ enum HostConnectionEvent {
 }
 
 // How often the events watchdog looks at its socket, and the two idle marks
-// it acts on (#86, #107). Tests shorten `pollInterval` only.
+// it acts on (#86, #107). Tests cross the same marks on a manual clock.
 struct HostWatchdogPolicy: Sendable, Equatable {
     let pollInterval: Duration
     let pingAfterIdle: Duration

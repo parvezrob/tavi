@@ -35,6 +35,28 @@ struct RetryWaitTests {
         try await waitFor { done.value }
     }
 
+    // `stop()` cancels the stream task and the wait on one turn; the task's
+    // cancellation callback lands a turn later, by which time a reconfigured
+    // link may already be sitting out its own first delay.
+    @Test func aCancelledWaitsLateCallbackDoesNotReleaseItsReplacement() async throws {
+        let clock = ManualTerminalClock()
+        let wait = RetryWait(timing: clock.timing)
+        let (first, firstDone) = waiting(wait, dial: 1)
+        try await waitFor { await clock.hasWaiter(for: self.delay) }
+
+        first.cancel()
+        wait.cancel()
+        let (second, secondDone) = waiting(wait, dial: 2)
+        defer { second.cancel() }
+        try await waitFor { firstDone.value }
+        try await waitFor { await clock.timesScheduled(self.delay) == 2 }
+        await settle()
+
+        #expect(!secondDone.value)
+        try await clock.resumeAll(for: delay)
+        try await waitFor { secondDone.value }
+    }
+
     @Test func aWakeForThisDialEndsTheWaitEarly() async throws {
         let clock = ManualTerminalClock()
         let wait = RetryWait(timing: clock.timing)

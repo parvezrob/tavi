@@ -155,6 +155,7 @@ final class WatchdogSocket: HostEventsSocketing, @unchecked Sendable {
     // A reader is handed a frame, or nil when the socket is cancelled
     // under it.
     private var readers: [CheckedContinuation<String?, Never>] = []
+    private var isCancelled = false
 
     init(lastActivity: ContinuousClock.Instant, pingSuspends: Bool = false) {
         activity = lastActivity
@@ -202,7 +203,10 @@ final class WatchdogSocket: HostEventsSocketing, @unchecked Sendable {
     func receive() async throws -> URLSessionWebSocketTask.Message {
         let frame = await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
-                let ready = lock.withLock { () -> String? in
+                // A reader that registers after the cancel must not wait for
+                // a release that has already happened.
+                let ready = lock.withLock { () -> String?? in
+                    guard !isCancelled else { return .some(nil) }
                     guard frames.isEmpty else { return frames.removeFirst() }
                     readers.append(continuation)
                     return nil
@@ -227,7 +231,10 @@ final class WatchdogSocket: HostEventsSocketing, @unchecked Sendable {
     // A cancelled socket releases the read it was holding, as a real one
     // does: the dial ends rather than waiting for a host that has gone.
     func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        if closeCode == .goingAway { lock.withLock { goingAwayCount += 1 } }
+        lock.withLock {
+            isCancelled = true
+            if closeCode == .goingAway { goingAwayCount += 1 }
+        }
         releaseReaders()
     }
 

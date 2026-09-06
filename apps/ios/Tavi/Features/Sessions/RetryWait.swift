@@ -22,7 +22,10 @@ import Foundation
 @MainActor
 final class RetryWait {
     private let timing: ConnectionTiming
-    private var pending: CheckedContinuation<Void, Never>?
+    // The wait in progress, numbered so a timer or a cancellation callback
+    // that arrives late can only release the wait it was started for.
+    private var pending: (id: Int, continuation: CheckedContinuation<Void, Never>)?
+    private var lastID = 0
     private var credit: Int?
 
     init(timing: ConnectionTiming) {
@@ -36,10 +39,12 @@ final class RetryWait {
             self.credit = nil
             if credit == dial { return }
         }
+        lastID += 1
+        let id = lastID
         let timer = Task { [weak self, timing] in
             try? await timing.sleep(delay)
             guard !Task.isCancelled else { return }
-            self?.release()
+            self?.release(id)
         }
         defer { timer.cancel() }
         await withTaskCancellationHandler {
@@ -48,10 +53,10 @@ final class RetryWait {
                     continuation.resume()
                     return
                 }
-                pending = continuation
+                pending = (id, continuation)
             }
         } onCancel: {
-            Task { @MainActor [weak self] in self?.release() }
+            Task { @MainActor [weak self] in self?.release(id) }
         }
     }
 
@@ -68,9 +73,10 @@ final class RetryWait {
         release()
     }
 
-    private func release() {
-        guard let continuation = pending else { return }
-        pending = nil
-        continuation.resume()
+    // Without an id, whatever wait is pending; with one, only that wait.
+    private func release(_ id: Int? = nil) {
+        guard let pending, id == nil || pending.id == id else { return }
+        self.pending = nil
+        pending.continuation.resume()
     }
 }
