@@ -130,6 +130,9 @@ final class HostConnection {
     // moves, so failed redials cannot starve it.
     private var epoch = 0
     private var reachabilityGeneration = 0
+    // The dial the watchdog cycled, so its cause is not overwritten by the
+    // cancelled socket the catch then sees (#111).
+    private var watchdogCycledDial: Int?
     // The watchdog's one outstanding challenge to a quiet socket (#107).
     private var watchdogPing: Task<Void, Never>?
     private var watchdogPingGeneration = 0
@@ -322,7 +325,7 @@ final class HostConnection {
         armConnectDeadline(dial)
         defer { cancelConnectDeadline(dial) }
 
-        let watchdog = startWatchdog(for: socket)
+        let watchdog = startWatchdog(for: socket, dial: dial, attempt: attempt, since: dialledAt)
         defer {
             watchdog.cancel()
             // Only this dial's challenge: the `self.socket` defer above runs
@@ -397,11 +400,21 @@ final class HostConnection {
         recovery?.record(.ready, source: .events, generation: dial, attempt: attempt, elapsedMilliseconds: elapsed)
     }
 
-    // A stream end is both what happened and why the link cycles.
+    // The cause belongs to the watchdog, not to the cancel it performs: the
+    // catch below sees only a cancelled socket, a beat later (#111).
+    private func recordWatchdogCycle(dial: Int, attempt: Int, since: ContinuousClock.Instant) {
+        watchdogCycledDial = dial
+        let lasted = Int(since.milliseconds(to: timing.now()))
+        recovery?.record(.cycling, source: .events, reason: .watchdog, generation: dial, attempt: attempt, elapsedMilliseconds: lasted)
+    }
+
+    // A stream end is both what happened and why the link cycles — unless the
+    // watchdog already said why, in which case this is only what.
     private func recordStreamEnd(_ failure: SocketFailure, dial: Int, attempt: Int, since: ContinuousClock.Instant) {
         let cause = RecoveryLog.Reason.socket(failure.tag, code: failure.code)
         let lasted = Int(since.milliseconds(to: timing.now()))
         recovery?.record(.streamEnded, source: .events, reason: cause, generation: dial, attempt: attempt, elapsedMilliseconds: lasted)
+        guard watchdogCycledDial != dial else { return }
         recovery?.record(.cycling, source: .events, reason: cause, generation: dial, attempt: attempt, elapsedMilliseconds: lasted)
     }
 
@@ -491,7 +504,12 @@ final class HostConnection {
     // quiet evening: ping after `pingAfterIdle`, cycle at `cycleAfterIdle`
     // (#86). The ping is never awaited here: awaiting it inline let a
     // suspended send keep the loop from ever reaching the cycle check (#107).
-    private func startWatchdog(for socket: any HostEventsSocketing) -> Task<Void, Never> {
+    private func startWatchdog(
+        for socket: any HostEventsSocketing,
+        dial: Int,
+        attempt: Int,
+        since: ContinuousClock.Instant
+    ) -> Task<Void, Never> {
         let policy = watchdogPolicy
         return Task { [weak self, weak socket, timing] in
             var challenged = false
@@ -501,6 +519,7 @@ final class HostConnection {
                 let idle = socket.lastActivity.duration(to: timing.now())
                 if idle >= policy.cycleAfterIdle {
                     cancelWatchdogPing()
+                    recordWatchdogCycle(dial: dial, attempt: attempt, since: since)
                     socket.cancel(with: .goingAway, reason: nil)
                     return
                 }

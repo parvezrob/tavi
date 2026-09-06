@@ -105,6 +105,8 @@ final class AgentDirectory {
         startReposPoll()
     }
 
+    // Paused, not dropped: the log and its diagnostic path watch belong to
+    // the computer, and a background/foreground keeps both.
     func stop() {
         link.stop()
         previewer.cancel()
@@ -112,6 +114,13 @@ final class AgentDirectory {
         reviewTask = nil
         reposTask?.cancel()
         reposTask = nil
+    }
+
+    // This computer is gone from the phone, not merely asleep: nothing it
+    // owns may outlive it, least of all a path monitor (#111).
+    func tearDown() {
+        stop()
+        recovery.stop()
     }
 
     // One immediate repos poll, after the phone changed something (#81

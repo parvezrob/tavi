@@ -82,6 +82,22 @@ struct RecoveryLogTests {
         #expect(recovery.ring.last?.pathSatisfied == true)
     }
 
+    // The log is dropped with the computer it belongs to; the monitor it
+    // started must go with it.
+    @Test func stoppingTheLogEndsItsPathWatch() async throws {
+        let paths = ScriptedPathObserver()
+        let recovery = log(paths)
+        paths.emit(NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "en0"))
+        try await waitFor { recovery.pathSatisfied == true }
+
+        recovery.stop()
+        #expect(recovery.isWatching == false)
+        #expect(recovery.pathSatisfied == nil)
+        paths.emit(NetworkPathSnapshot(isSatisfied: false, interfaceIdentity: "none"))
+        await settle()
+        #expect(recovery.pathSatisfied == nil)
+    }
+
     // MARK: - The diagnostics line
 
     #if DEBUG

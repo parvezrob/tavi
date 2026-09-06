@@ -206,6 +206,7 @@
             switch self {
             case let .terminal(reason): "terminal:\(reason.rawValue)"
             case let .socket(tag, code): "socket:\(tag.rawValue):\(code)"
+            case .watchdog: "watchdog"
             case .none: "none"
             }
         }

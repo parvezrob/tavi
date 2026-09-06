@@ -57,7 +57,7 @@ final class HostFleet {
     // directories are rebuilt from what is on disk.
     func load() {
         PairedHostRegistry.migrateLegacy(in: defaults, moveCredential: credentials.migrateLegacyCredential)
-        stopAll()
+        discardAll()
         hosts = PairedHostRegistry.load(from: defaults)
         directories = [:]
         for host in hosts {
@@ -70,7 +70,7 @@ final class HostFleet {
     func add(_ host: PairedHost, credential: String) {
         credentials.save(credential, hostId: host.id)
         hosts = PairedHostRegistry.upsert(host, in: defaults)
-        directories[host.id]?.stop()
+        directories[host.id]?.tearDown()
         directories[host.id] = configuredDirectory(for: host)
     }
 
@@ -84,7 +84,7 @@ final class HostFleet {
     // Forgets one computer: credential out of the Keychain, record out of
     // the list, mirror stopped. The others keep running.
     func remove(hostId: String) {
-        directories[hostId]?.stop()
+        directories[hostId]?.tearDown()
         directories[hostId] = nil
         credentials.delete(hostId: hostId)
         hosts = PairedHostRegistry.remove(id: hostId, from: defaults)
@@ -92,7 +92,7 @@ final class HostFleet {
 
     // Back to "no paired computers".
     func removeAll() {
-        stopAll()
+        discardAll()
         for host in hosts { credentials.delete(hostId: host.id) }
         credentials.deleteAll()
         PairedHostRegistry.clear(from: defaults)
@@ -110,6 +110,12 @@ final class HostFleet {
 
     private func stopAll() {
         for directory in directories.values { directory.stop() }
+    }
+
+    // Rebuilt or forgotten, not backgrounded: these directories are never
+    // used again, so what they own goes with them (#111).
+    private func discardAll() {
+        for directory in directories.values { directory.tearDown() }
     }
 
     private func configuredDirectory(for host: PairedHost) -> AgentDirectory {

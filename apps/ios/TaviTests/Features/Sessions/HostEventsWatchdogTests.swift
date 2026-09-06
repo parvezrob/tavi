@@ -18,7 +18,7 @@ struct HostEventsWatchdogTests {
         connectDeadline: .seconds(60)
     )
 
-    private func link(_ socket: WatchdogSocket, _ clock: ManualTerminalClock) throws -> HostConnection {
+    private func link(_ socket: WatchdogSocket, _ clock: ManualTerminalClock, recovery: RecoveryLog? = nil) throws -> HostConnection {
         let connection = HostConnection(
             transport: StubHost(.silence).transport,
             makeSocket: { _ in socket },
@@ -26,7 +26,7 @@ struct HostEventsWatchdogTests {
             reconnectPolicy: Self.schedule,
             timing: clock.timing
         )
-        connection.configure(host: try Fixtures.hostEndpoint(), credential: "secret") { _ in }
+        connection.configure(host: try Fixtures.hostEndpoint(), credential: "secret", recovery: recovery) { _ in }
         return connection
     }
 
@@ -138,6 +138,29 @@ struct HostEventsWatchdogTests {
         try await poll(clock)
         try await waitFor { socket.pings == 2 }
         #expect(socket.goingAwayCancels == 0)
+    }
+
+    // MARK: - What the log is told (#111)
+
+    // The watchdog's cancel arrives in the receive loop as an ordinary
+    // cancelled socket, a beat later: the cause has to be written by the
+    // watchdog itself, and the ending must not be counted as a second cycle.
+    @Test
+    func aWatchdogCycleIsRecordedAsItsOwnCauseAndNotTwice() async throws {
+        let clock = ManualTerminalClock()
+        let socket = WatchdogSocket(lastActivity: clock.timing.now())
+        let recovery = RecoveryLog(pathObserver: ScriptedPathObserver())
+        let connection = try link(socket, clock, recovery: recovery)
+        defer { connection.stop() }
+
+        clock.advance(by: .seconds(46))
+        try await releasePoll(clock)
+        try await waitFor { socket.goingAwayCancels >= 1 }
+
+        let cycles = recovery.ring.filter { $0.source == .events && $0.kind == .cycling }
+        #expect(cycles.count == 1)
+        #expect(cycles.first?.reason == .watchdog)
+        #expect(recovery.counters[.events]?.cycles[.watchdog] == 1)
     }
 }
 

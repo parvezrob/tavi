@@ -147,6 +147,29 @@ struct HostFleetTests {
         #expect(fleet.hosts.map(\.id) == ["fp-2"])
     }
 
+    // A computer that is gone must leave nothing running behind it: the
+    // recovery log owns a path monitor from the moment it exists (#111).
+    @Test func forgettingAComputerStopsItsRecoveryLogsPathWatch() throws {
+        let (fleet, _) = try fleet(Credentials())
+        defer { fleet.stop() }
+        fleet.add(Fixtures.pairedHost(id: "fp-1"), credential: "token-1")
+        let directory = try #require(fleet.directory(for: "fp-1"))
+        #expect(directory.recovery.isWatching)
+        fleet.remove(hostId: "fp-1")
+        #expect(directory.recovery.isWatching == false)
+    }
+
+    // Backgrounding is not forgetting: the same computer's log keeps its
+    // watch across a stop/start.
+    @Test func backgroundingKeepsTheRecoveryLogWatching() throws {
+        let (fleet, _) = try fleet(Credentials())
+        defer { fleet.stop() }
+        fleet.add(Fixtures.pairedHost(id: "fp-1"), credential: "token-1")
+        let directory = try #require(fleet.directory(for: "fp-1"))
+        fleet.stop()
+        #expect(directory.recovery.isWatching)
+    }
+
     @Test func forgettingAComputerRemovesItsCredential() throws {
         let credentials = Credentials()
         let (fleet, _) = try fleet(credentials)

@@ -58,6 +58,9 @@ final class RecoveryLog {
     enum Reason: Hashable {
         case terminal(TerminalRecoveryReason)
         case socket(SocketFailure.Tag, code: Int)
+        // The events watchdog cycled a socket that had gone quiet; the cancel
+        // it performs would otherwise read as an ordinary cancelled socket.
+        case watchdog
         case none
     }
 
@@ -113,6 +116,15 @@ final class RecoveryLog {
     // Read by `record` alone; exposed so a test can wait for the watch to
     // have seen its scripted path before it asks for a stamp.
     var pathSatisfied: Bool? { pathWatch.current?.isSatisfied }
+
+    // False once the computer this log belongs to has been dropped: nothing
+    // may outlive it, least of all a path monitor (#111).
+    private(set) var isWatching = true
+
+    func stop() {
+        pathWatch.stop()
+        isWatching = false
+    }
 
     // The one door for a recovery event: the ring, the counter its kind
     // moves, and the three stamps only this type can make.
