@@ -103,6 +103,11 @@ struct TerminalSessionView: View {
                 paneID: controller.currentPaneID,
                 identity: $identity
             )
+            #if DEBUG
+                // The same counters the home publishes, so the soak can read
+                // them without leaving the terminal (#111).
+                RecoveryDiagnosticsStrip(directories: agentDirectory.map { [$0] } ?? [])
+            #endif
             AgentTerminalView(
                 bridge: controller.bridge,
                 isActive: scenePhase == .active,

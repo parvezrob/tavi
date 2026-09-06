@@ -180,4 +180,117 @@ struct TerminalOutputIntegrityTests {
             try await waitFor { await transport.inputMessages == ["deploy\r", "ls\r"] }
         }
     }
+
+    // MARK: - Contiguity and the resume answer (#111)
+
+    // P1 observes: a stream that skipped bytes is recorded and the chunk is
+    // taken exactly as it always was.
+    @Test
+    func aChunkPastTheExpectedOffsetIsRecordedAsAGapAndStillAccepted() async throws {
+        let transport = RecoveryTransport()
+        let clock = ManualTerminalClock()
+        let recovery = RecoveryLog(pathObserver: ScriptedPathObserver())
+        let controller = startedController(transport, clock, recovery: recovery)
+        let renderer = SyntheticRenderer()
+        renderer.install(into: controller.bridge)
+
+        try await withCleanup(controller, transport) {
+            try await waitUntilConnected(transport, controller)
+            await transport.emit(.message(.outputChunk(offset: 0, data: Data("hello".utf8))))
+            try await waitFor { renderer.acceptedText == "hello" }
+            await transport.emit(.message(.outputChunk(offset: 6, data: Data("world".utf8))))
+            try await waitFor { renderer.acceptedText == "helloworld" }
+
+            #expect(recovery.counters[.terminal]?.offsetGaps == 1)
+            #expect(recovery.counters[.terminal]?.offsetOverlaps == 0)
+            #expect(recovery.counters[.terminal]?.acceptedOffset == 11)
+            #expect(controller.connectionState == .connected)
+        }
+    }
+
+    @Test
+    func aChunkBehindTheExpectedOffsetIsRecordedAsAnOverlap() async throws {
+        let transport = RecoveryTransport()
+        let clock = ManualTerminalClock()
+        let recovery = RecoveryLog(pathObserver: ScriptedPathObserver())
+        let controller = startedController(transport, clock, recovery: recovery)
+        let renderer = SyntheticRenderer()
+        renderer.install(into: controller.bridge)
+
+        try await withCleanup(controller, transport) {
+            try await waitUntilConnected(transport, controller)
+            await transport.emit(.message(.outputChunk(offset: 0, data: Data("hello".utf8))))
+            try await waitFor { renderer.acceptedText == "hello" }
+            await transport.emit(.message(.outputChunk(offset: 4, data: Data("world".utf8))))
+            try await waitFor { renderer.acceptedText == "helloworld" }
+
+            #expect(recovery.counters[.terminal]?.offsetOverlaps == 1)
+            #expect(recovery.counters[.terminal]?.offsetGaps == 0)
+            #expect(recovery.counters[.terminal]?.acceptedOffset == 9)
+        }
+    }
+
+    // The resume answer is compared with the question this dial asked; an
+    // answer at another point is counted, never silently adopted.
+    @Test
+    func aResumedReadyAtTheRequestedPointIsAHit() async throws {
+        try await withResumedReady(offset: 11, resumed: true) { recovery in
+            #expect(recovery.counters[.terminal]?.resumeHits == 1)
+            #expect(recovery.counters[.terminal]?.resumeMismatches == 0)
+            #expect(recovery.counters[.terminal]?.acceptedOffset == 11)
+        }
+    }
+
+    @Test
+    func aResumedReadyAtAnotherOffsetIsAMismatch() async throws {
+        try await withResumedReady(offset: 9, resumed: true) { recovery in
+            #expect(recovery.counters[.terminal]?.resumeMismatches == 1)
+            #expect(recovery.counters[.terminal]?.resumeHits == 0)
+            #expect(recovery.counters[.terminal]?.acceptedOffset == 9)
+        }
+    }
+
+    // A fresh attach legitimately restarts the accepted offset; the initial
+    // dial is one too, so this is the second.
+    @Test
+    func aReadyThatDidNotResumeIsAMiss() async throws {
+        try await withResumedReady(offset: 0, resumed: false) { recovery in
+            #expect(recovery.counters[.terminal]?.resumeMisses == 2)
+            #expect(recovery.counters[.terminal]?.resumeHits == 0)
+            #expect(recovery.counters[.terminal]?.resumeMismatches == 0)
+            #expect(recovery.counters[.terminal]?.acceptedOffset == 0)
+        }
+    }
+
+    // Eleven bytes taken, the stream dropped, the redial asks to resume at
+    // 11 — and the host answers what the caller chose.
+    private func withResumedReady(
+        offset: UInt64,
+        resumed: Bool,
+        _ assertions: (RecoveryLog) -> Void
+    ) async throws {
+        let transport = RecoveryTransport()
+        let clock = ManualTerminalClock()
+        let recovery = RecoveryLog(pathObserver: ScriptedPathObserver())
+        let controller = startedController(transport, clock, recovery: recovery)
+        let renderer = SyntheticRenderer()
+        renderer.install(into: controller.bridge)
+
+        try await withCleanup(controller, transport) {
+            try await waitUntilConnected(transport, controller)
+            await transport.emit(.message(.outputChunk(offset: 0, data: Data("hello world".utf8))))
+            try await waitFor { renderer.acceptedText == "hello world" }
+
+            await transport.emit(.disconnected)
+            try await waitFor { controller.connectionState == .reconnecting(attempt: 1) }
+            try await waitFor { await clock.hasWaiter(within: TerminalTestDefaults.retryDelay) }
+            try await clock.resumeAll(within: TerminalTestDefaults.retryDelay)
+            try await waitUntilListening(transport, after: 1)
+            #expect(await transport.connectResumes.last ?? nil == TerminalResumePoint(stream: "epoch-a", offset: 11))
+
+            await transport.emit(.message(.ready(stream: "epoch-a", offset: offset, resumed: resumed)))
+            try await waitFor { controller.connectionState == .connected }
+            assertions(recovery)
+        }
+    }
 }

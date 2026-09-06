@@ -19,7 +19,8 @@ struct TerminalRecoveryTests {
     private func start(
         _ transport: RecoveryTransport,
         _ clock: ManualTerminalClock,
-        paths: ScriptedPathObserver = ScriptedPathObserver()
+        paths: ScriptedPathObserver = ScriptedPathObserver(),
+        recovery: RecoveryLog? = nil
     ) -> TerminalSessionController {
         let controller = TerminalSessionController(
             client: transport,
@@ -33,7 +34,7 @@ struct TerminalRecoveryTests {
             timing: clock.timing,
             pathObserver: paths
         )
-        controller.connect(hostText: Self.host, paneID: "fixture", credential: "valid-token")
+        controller.connect(hostText: Self.host, paneID: "fixture", credential: "valid-token", recovery: recovery)
         return controller
     }
 
@@ -352,6 +353,38 @@ struct TerminalRecoveryTests {
             // And the recovered terminal takes input again.
             controller.bridge.receiveTerminalInput(Data("ls\r".utf8))
             try await waitFor { await transport.inputMessages == ["deploy\r", "ls\r"] }
+        }
+    }
+
+    // MARK: - The recovery record (#111)
+
+    // The cause belongs to the connection that had it, so it is written
+    // while that connection is still the current one — before the retry
+    // dials again and the transport is asked to disconnect.
+    @Test
+    func aCycleIsRecordedWithItsReasonBeforeTheTransportIsCycled() async throws {
+        let transport = RecoveryTransport()
+        let clock = ManualTerminalClock()
+        let recovery = RecoveryLog(pathObserver: ScriptedPathObserver())
+        let controller = start(transport, clock, recovery: recovery)
+
+        try await withCleanup(controller, transport) {
+            try await waitForDeadline(transport, clock)
+            try await clock.resumeAll(for: Self.deadline)
+            try await waitFor { controller.connectionState == .reconnecting(attempt: 1) }
+
+            let event = try #require(recovery.ring.last)
+            #expect(event.source == .terminal)
+            #expect(event.kind == .cycling)
+            #expect(event.reason == .terminal(.connectDeadline))
+            #expect(event.generation == 1)
+            #expect(event.attempt == 1)
+            #expect(event.elapsedMilliseconds >= 0)
+            #expect(recovery.counters[.terminal]?.cycles[.terminal(.connectDeadline)] == 1)
+            #expect(recovery.counters[.terminal]?.dials == 1)
+            // The replacement dial — where the transport is disconnected —
+            // has not happened yet.
+            #expect(await transport.connectCount == 1)
         }
     }
 }

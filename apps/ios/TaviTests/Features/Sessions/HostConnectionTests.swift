@@ -15,12 +15,13 @@ struct HostConnectionTests {
 
     private func link(
         sockets: [FakeEventsSocket],
-        host: StubHost = StubHost()
+        host: StubHost = StubHost(),
+        recovery: RecoveryLog? = nil
     ) throws -> (HostConnection, Events) {
         let factory = FakeSockets(sockets)
         let connection = HostConnection(transport: host.transport, makeSocket: factory.make)
         let events = Events()
-        connection.configure(host: try Fixtures.hostEndpoint(), credential: "secret") { event in
+        connection.configure(host: try Fixtures.hostEndpoint(), credential: "secret", recovery: recovery) { event in
             switch event {
             case let .snapshot(agents, _, _): events.snapshots.append(agents)
             case let .revoked(reason): events.revocations.append(reason)
@@ -147,5 +148,91 @@ struct HostConnectionTests {
         let connection = HostConnection(transport: StubHost().transport, makeSocket: FakeSockets([]).make)
         connection.configure(host: nil, credential: "") { _ in }
         #expect(connection.health == .revoked)
+    }
+
+    // MARK: - The recovery record (#111)
+
+    private func recoveryLog() -> RecoveryLog {
+        RecoveryLog(pathObserver: ScriptedPathObserver())
+    }
+
+    // The cause is written while the socket that produced it is still the
+    // stream's, before the dial closes it.
+    @Test func aStreamEndRecordsWhatEndedItAndTheCycleItCaused() async throws {
+        let recovery = recoveryLog()
+        let (connection, _) = try link(
+            sockets: [FakeEventsSocket(.frame(Fixtures.agentsFrame()), .drop)],
+            host: StubHost(.json(200, "{}"), .json(200, "{}")),
+            recovery: recovery
+        )
+        defer { connection.stop() }
+        try await waitUntil { connection.health == .stale }
+
+        let cause = RecoveryLog.Reason.socket(.urlError, code: URLError.networkConnectionLost.rawValue)
+        #expect(recovery.ring.contains { $0.source == .events && $0.kind == .streamEnded && $0.reason == cause })
+        #expect(recovery.counters[.events]?.cycles[cause] == 1)
+        #expect(recovery.counters[.events]?.dials == 1)
+        #expect(recovery.counters[.events]?.readies == 1)
+    }
+
+    @Test func aSnapshotAfterADropIsRecordedAsSuch() async throws {
+        let recovery = recoveryLog()
+        let (connection, _) = try link(
+            sockets: [
+                FakeEventsSocket(.frame(Fixtures.agentsFrame()), .drop),
+                FakeEventsSocket(.frame(Fixtures.agentsFrame()), .quiet),
+            ],
+            host: StubHost(.json(200, "{}")),
+            recovery: recovery
+        )
+        defer { connection.stop() }
+        try await waitUntil(20) { recovery.ring.contains { $0.kind == .snapshotAfterDrop } }
+        #expect(connection.health == .live)
+    }
+
+    // Offline is a verdict about the computer: both earning it and clearing
+    // it are recorded, and the probes that decided it are recorded beside.
+    @Test func offlineEarnedAndClearedAreBothRecorded() async throws {
+        let recovery = recoveryLog()
+        let (connection, _) = try link(
+            sockets: [
+                FakeEventsSocket(.drop),
+                FakeEventsSocket(.drop),
+                FakeEventsSocket(.frame(Fixtures.agentsFrame()), .quiet),
+            ],
+            host: StubHost(.silence),
+            recovery: recovery
+        )
+        defer { connection.stop() }
+        try await waitUntil(20) { connection.health == .live }
+
+        #expect(recovery.counters[.events]?.offlineEntered == 1)
+        #expect(recovery.counters[.events]?.offlineCleared == 1)
+        #expect(recovery.ring.contains { $0.kind == .probe(.unreachable) })
+    }
+
+    @Test func aRejectedProbeRecordsTheProbeAndTheRevocation() async throws {
+        let recovery = recoveryLog()
+        let (connection, events) = try link(
+            sockets: [FakeEventsSocket(.frame(Fixtures.agentsFrame()), .drop)],
+            host: StubHost(.json(401, #"{"error":"Unauthorized."}"#)),
+            recovery: recovery
+        )
+        defer { connection.stop() }
+        try await waitUntil { !events.revocations.isEmpty }
+
+        #expect(recovery.ring.contains { $0.kind == .probe(.rejected) })
+        #expect(recovery.ring.contains { $0.kind == .revoked })
+    }
+
+    @Test func aReachableProbeIsRecorded() async throws {
+        let recovery = recoveryLog()
+        let (connection, _) = try link(
+            sockets: [FakeEventsSocket(.frame(Fixtures.agentsFrame()), .drop)],
+            host: StubHost(.json(200, "{}")),
+            recovery: recovery
+        )
+        defer { connection.stop() }
+        try await waitUntil(10) { recovery.ring.contains { $0.kind == .probe(.reachable) } }
     }
 }

@@ -102,9 +102,11 @@ final class HostConnection {
     // is back can end it early instead of waiting the schedule out (#111).
     private let retryWait: RetryWait
     // "Does this computer answer at all?" — the same question the deadline,
-    // the drop path and the latency poll all ask (#101).
+    // the drop path and the latency poll all ask (#101, #111).
     private let reachability: HostReachability
     private var onEvent: ((HostConnectionEvent) -> Void)?
+    // Where this link's recoveries are recorded (#111); nil records nothing.
+    private var recovery: RecoveryLog?
     private var reconnectAttempt = 0
     private var streamTask: Task<Void, Never>?
     // The live events socket. `stop()` must close it itself: cancelling the
@@ -155,6 +157,9 @@ final class HostConnection {
             onPath: { [weak self] answered in
                 guard let self, answered != path else { return }
                 path = answered
+            },
+            onAnswer: { [weak self] probe, origin in
+                self?.recovery?.record(.probe(probe), source: .events, generation: origin)
             }
         )
     }
@@ -178,15 +183,21 @@ final class HostConnection {
         return isStale ? .stale : .live
     }
 
-    func configure(host: HostEndpoint?, credential: String, onEvent: @escaping (HostConnectionEvent) -> Void) {
+    func configure(
+        host: HostEndpoint?,
+        credential: String,
+        recovery: RecoveryLog? = nil,
+        onEvent: @escaping (HostConnectionEvent) -> Void
+    ) {
         stop()
         self.host = host
         self.credential = credential
+        self.recovery = recovery
         self.onEvent = onEvent
         hasLoaded = false
         isStale = false
         isRevoked = false
-        isOffline = false
+        setOffline(false, dial: epoch)
         latencyMilliseconds = nil
         // The previous computer's path is not this one's.
         path = .unknown
@@ -296,6 +307,10 @@ final class HostConnection {
         // the socket it opens.
         epoch += 1
         let dial = epoch
+        // This dial's own numbers, so every record it makes is about itself.
+        let attempt = reconnectAttempt
+        let dialledAt = timing.now()
+        recovery?.tally(.dial, source: .events)
         let socket = makeSocket(handshake)
         self.socket = socket
         socket.resume()
@@ -333,9 +348,10 @@ final class HostConnection {
                 guard case let .string(text) = frame else { continue }
                 let snapshot = try JSONDecoder().decode(AgentsSnapshotMessage.self, from: Data(text.utf8))
                 guard snapshot.type == "agents" else { continue }
+                recordSnapshot(afterDrop: isStale || isOffline, dial: dial, attempt: attempt)
                 hasLoaded = true
                 isStale = false
-                isOffline = false
+                setOffline(false, dial: dial)
                 isRevoked = false
                 // A frame is the answer any verification was waiting for (#108).
                 reachabilityGeneration += 1
@@ -349,6 +365,7 @@ final class HostConnection {
                 if let since = streamConnectedAt, since.duration(to: timing.now()) >= Self.stableStreamInterval { reconnectAttempt = 0 }
                 if !measured {
                     measured = true
+                    recordFirstFrame(dial: dial, attempt: attempt, since: dialledAt)
                     measureFirstFrameLatency(dial)
                 }
             }
@@ -356,11 +373,43 @@ final class HostConnection {
             guard !Task.isCancelled, dial == epoch else { return }
             let failure = SocketFailure(error)
             Self.logger.info("events stream ended: reason=\(failure.tag.rawValue, privacy: .public) code=\(failure.code) priorFailedDials=\(self.consecutiveFailedDials)")
+            // Before the `defer` closes the socket: the cause is this stream's (#111).
+            recordStreamEnd(failure, dial: dial, attempt: attempt, since: dialledAt)
             // Keep the last known agents on screen, explicitly stale —
             // dropping them here made "Needs you" blink away on every
             // network blip while the agent was still waiting.
             isStale = true
             verifyReachability(dial)
+        }
+    }
+
+    // A snapshot is worth recording only when it ended a drop. Both of these
+    // are out of line because `streamOnce` is at its length and complexity
+    // bounds, not because either is worth a name of its own.
+    private func recordSnapshot(afterDrop: Bool, dial: Int, attempt: Int) {
+        guard afterDrop else { return }
+        recovery?.record(.snapshotAfterDrop, source: .events, generation: dial, attempt: attempt)
+    }
+
+    // The first frame of a dial is what proves the stream.
+    private func recordFirstFrame(dial: Int, attempt: Int, since: ContinuousClock.Instant) {
+        let elapsed = Int(since.milliseconds(to: timing.now()))
+        recovery?.record(.ready, source: .events, generation: dial, attempt: attempt, elapsedMilliseconds: elapsed)
+    }
+
+    // A stream end is both what happened and why the link cycles.
+    private func recordStreamEnd(_ failure: SocketFailure, dial: Int, attempt: Int, since: ContinuousClock.Instant) {
+        let cause = RecoveryLog.Reason.socket(failure.tag, code: failure.code)
+        let lasted = Int(since.milliseconds(to: timing.now()))
+        for kind in [RecoveryLog.Kind.streamEnded, .cycling] {
+            recovery?.record(
+                kind,
+                source: .events,
+                reason: cause,
+                generation: dial,
+                attempt: attempt,
+                elapsedMilliseconds: lasted
+            )
         }
     }
 
@@ -377,8 +426,18 @@ final class HostConnection {
             guard !Task.isCancelled, dial == self.epoch else { return }
             // Earned, not guessed (#86): the first dial that fails is
             // "Connecting…" or "Reconnecting"; Offline waits for the next.
-            if probe == .unreachable, self.consecutiveFailedDials >= 1 { self.isOffline = true }
+            if probe == .unreachable, self.consecutiveFailedDials >= 1 { self.setOffline(true, dial: dial) }
         }
+    }
+
+    // Offline is a verdict about the computer: earned and cleared once each,
+    // so the log's two counts stay paired (#111). The guard is the one
+    // non-observational effect P1 has on this type: a redundant `isOffline =
+    // false` no longer wakes every view observing it.
+    private func setOffline(_ value: Bool, dial: Int) {
+        guard isOffline != value else { return }
+        isOffline = value
+        recovery?.record(value ? .offlineEntered : .offlineCleared, source: .events, generation: dial)
     }
 
     // Only this dial's: a stream unwinding late must not cancel the
@@ -419,16 +478,17 @@ final class HostConnection {
             switch probe {
             case .rejected:
                 self.isRevoked = true
-                self.isOffline = false
+                self.setOffline(false, dial: dial)
                 self.hasLoaded = true
                 self.isStale = false
+                self.recovery?.record(.revoked, source: .events, generation: dial)
                 self.onEvent?(.revoked(reason: "This iPhone is no longer paired with this computer. Pair it again to reconnect."))
                 self.stop()
             case let .reachable(latency):
-                self.isOffline = false
+                self.setOffline(false, dial: dial)
                 if dial == self.epoch { self.latencyMilliseconds = latency }
             case .unreachable:
-                if self.isStale, self.consecutiveFailedDials >= 2 { self.isOffline = true }
+                if self.isStale, self.consecutiveFailedDials >= 2 { self.setOffline(true, dial: dial) }
             // Never really asked; the next drop verifies.
             case .superseded: break
             }
@@ -483,24 +543,3 @@ final class HostConnection {
         watchdogPingGeneration += 1
     }
 }
-
-private struct AgentsSnapshotMessage: Decodable {
-    let type: String
-    let available: Bool
-    let reason: String?
-    let agents: [AgentSummary]
-}
-
-// The events socket as this link uses it: the same seam the terminal
-// transport has for NetworkWebSocketTask (#70, #99).
-protocol HostEventsSocketing: AnyObject, Sendable {
-    // When the last frame of any kind arrived — the watchdog's idle clock.
-    var lastActivity: ContinuousClock.Instant { get }
-
-    func resume()
-    func receive() async throws -> URLSessionWebSocketTask.Message
-    func ping() async throws
-    func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?)
-}
-
-extension NetworkWebSocketTask: HostEventsSocketing {}

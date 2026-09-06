@@ -23,6 +23,12 @@ final class AgentDirectory {
     // renders as an ordinary card.
     private(set) var repos: [RepoInfo] = []
 
+    // What this computer's connections have recovered from since Tavi
+    // opened (#111). One per paired computer, read-only to everyone else:
+    // the link and the terminal write it, the diagnostics element and the
+    // connection log read it.
+    let recovery = RecoveryLog()
+
     private let link: HostConnection
     private let previewer = AgentPreviews()
     private let routes: HostRoutes
@@ -88,7 +94,7 @@ final class AgentDirectory {
                 ? "Tavi no longer has a credential for this computer. Pair it again to reconnect."
                 : "This computer's address is not valid any more. Pair it again to reconnect."
         }
-        link.configure(host: usable ? endpoint : nil, credential: usable ? credential : "") { [weak self] event in
+        link.configure(host: usable ? endpoint : nil, credential: usable ? credential : "", recovery: recovery) { [weak self] event in
             self?.handle(event)
         }
         startReposPoll()

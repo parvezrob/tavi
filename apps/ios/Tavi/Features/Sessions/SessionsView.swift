@@ -339,6 +339,10 @@ struct SessionsView: View {
                 chipSheet = fleet.entries.first { $0.id == computer.id }
             }
 
+            #if DEBUG
+                RecoveryDiagnosticsStrip(directories: fleet.entries.map(\.directory))
+            #endif
+
             // A computer in trouble says so once, right under the strip,
             // whatever else is on screen; its last known cards stay below.
             ForEach(sections.shown.filter { $0.hasLoaded && ($0.health == .stale || $0.health == .offline) }) { computer in
@@ -477,7 +481,7 @@ struct SessionsView: View {
         guard let host = fleet.host(for: hostId) else { return }
         terminalController.stop()
         terminalHostId = hostId
-        terminalController.connect(hostText: host.address, paneID: paneID, credential: fleet.credential(for: hostId))
+        terminalController.connect(hostText: host.address, paneID: paneID, credential: fleet.credential(for: hostId), recovery: fleet.directory(for: hostId)?.recovery)
         terminalIsPresented = true
     }
 

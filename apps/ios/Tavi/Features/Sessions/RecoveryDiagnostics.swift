@@ -9,6 +9,22 @@
     // here rather than on the model so the production type keeps no
     // serialisation API.
     //
+    // One element per configured computer, so a screen showing several
+    // publishes all of them and neither screen carries the gate itself.
+    struct RecoveryDiagnosticsStrip: View {
+        let directories: [AgentDirectory]
+
+        var body: some View {
+            if RecoveryDiagnosticsText.isEnabled {
+                // A directory with no host id has nothing to be found by, and
+                // two of them would collide as one row.
+                ForEach(directories.filter { !$0.hostId.isEmpty }, id: \.hostId) { directory in
+                    RecoveryDiagnosticsText(hostId: directory.hostId, log: directory.recovery)
+                }
+            }
+        }
+    }
+
     struct RecoveryDiagnosticsText: View {
         let hostId: String
         let log: RecoveryLog

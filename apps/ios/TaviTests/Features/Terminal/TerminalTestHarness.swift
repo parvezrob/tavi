@@ -33,7 +33,8 @@ func startedController(
     _ transport: RecoveryTransport,
     _ clock: ManualTerminalClock,
     paneID: String = "fixture",
-    paths: ScriptedPathObserver = ScriptedPathObserver()
+    paths: ScriptedPathObserver = ScriptedPathObserver(),
+    recovery: RecoveryLog? = nil
 ) -> TerminalSessionController {
     let controller = TerminalSessionController(
         client: transport,
@@ -44,7 +45,8 @@ func startedController(
     controller.connect(
         hostText: TerminalTestDefaults.host,
         paneID: paneID,
-        credential: "valid-token"
+        credential: "valid-token",
+        recovery: recovery
     )
     return controller
 }

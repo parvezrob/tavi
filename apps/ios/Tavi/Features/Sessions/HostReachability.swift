@@ -3,8 +3,8 @@ import Foundation
 // "Does this computer answer at all?" — the one question the events link asks
 // over HTTP when its socket says nothing useful, with the single-flight and
 // the two-misses rules that decide what an answer is worth (#50, #86, #108).
-// Carved out of `HostConnection` unchanged (#101): the link still owns the
-// verdict, this owns the asking.
+// Carved out of `HostConnection` unchanged (#101, #111 P4): the link still
+// owns the verdict, this owns the asking.
 @MainActor
 final class HostReachability {
     enum Answer: Equatable {
@@ -32,6 +32,7 @@ final class HostReachability {
     private var epoch: () -> Int = { 0 }
     private var generation: () -> Int = { 0 }
     private var onPath: (ConnectionPath) -> Void = { _ in }
+    private var onAnswer: (RecoveryLog.Probe, Int) -> Void = { _, _ in }
 
     init(timing: ConnectionTiming) {
         self.timing = timing
@@ -41,12 +42,14 @@ final class HostReachability {
         client: @escaping () -> HostClient?,
         epoch: @escaping () -> Int,
         generation: @escaping () -> Int,
-        onPath: @escaping (ConnectionPath) -> Void
+        onPath: @escaping (ConnectionPath) -> Void,
+        onAnswer: @escaping (RecoveryLog.Probe, Int) -> Void
     ) {
         self.client = client
         self.epoch = epoch
         self.generation = generation
         self.onPath = onPath
+        self.onAnswer = onAnswer
     }
 
     func cancel() {
@@ -108,14 +111,20 @@ final class HostReachability {
         let started = timing.now()
         // A failure under cancellation is our doing, not the computer's (#108).
         guard case let .answered(status, data, _) = await client.send(request) else {
-            return Task.isCancelled ? .superseded : .unreachable
+            if Task.isCancelled { return .superseded }
+            onAnswer(.unreachable, origin)
+            return .unreachable
         }
-        if status == 401 { return .rejected }
+        if status == 401 {
+            onAnswer(.rejected, origin)
+            return .rejected
+        }
         // An answer the link has already overtaken must not write the path (#108).
         if status == 200, origin == epoch(),
            let answer = try? JSONDecoder().decode(HostAnswer.self, from: data) {
             onPath(ConnectionPath(path: answer.connection?.path, relay: answer.connection?.relay))
         }
+        onAnswer(.reachable, origin)
         return .reachable(latencyMilliseconds: Int(started.milliseconds(to: timing.now())))
     }
 }

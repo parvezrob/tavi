@@ -43,6 +43,8 @@ final class TerminalSessionController {
     private var readyAt: ContinuousClock.Instant?
     private var reconnectAttempt = 0
     private var reconnectTask: Task<Void, Never>?
+    // Where this terminal's recoveries are recorded (#111); nil records nothing.
+    private var recovery: RecoveryLog?
     private var resumePoint: TerminalResumePoint?
     private var shouldReconnect = false
 
@@ -85,7 +87,7 @@ final class TerminalSessionController {
         }
     }
 
-    func connect(hostText: String, paneID: String, credential: String) {
+    func connect(hostText: String, paneID: String, credential: String, recovery: RecoveryLog? = nil) {
         do {
             guard let url = URL(string: hostText) else {
                 throw HostEndpointError.invalidURL
@@ -97,10 +99,12 @@ final class TerminalSessionController {
                 credential: credential
             )
             self.configuration = configuration
+            self.recovery = recovery
             errorMessage = nil
             shouldReconnect = true
             reconnectAttempt = 0
             resumePoint = nil
+            recovery?.noteAcceptedOffset(nil)
             metrics.reset()
             sessionID += 1
             // Cleared now, or Files mentioned and the Preview button answer
@@ -206,6 +210,7 @@ final class TerminalSessionController {
     func handleTakeover() {
         guard connectionState != .superseded else { return }
         Self.logger.info("attachment taken over by another connection")
+        record(.takenOver)
         endSession(.takenOver)
     }
 
@@ -229,6 +234,7 @@ final class TerminalSessionController {
         let generation = connectionGeneration
         let pendingDisconnect = disconnectTask
         transition(.connect)
+        recovery?.tally(.dial, source: .terminal)
         metrics.connectionStarted(at: timing.now())
         startConnectDeadline(generation: generation)
 
@@ -300,10 +306,16 @@ final class TerminalSessionController {
             reconnectTask = nil
             errorMessage = nil
             grid.forgetWhatWasSent()
+            // Read before it is replaced: whether the host answered the point
+            // this dial asked to resume from is recorded, never enforced (#111).
+            let matched = resumePoint.map { $0.stream == stream && $0.offset == offset } ?? false
             resumePoint = stream.map { TerminalResumePoint(stream: $0, offset: offset) }
             readyAt = timing.now()
             let elapsed = metrics.connectionStartedAt.map { $0.milliseconds(to: timing.now()) } ?? 0
             Self.logger.info("ready: generation=\(self.connectionGeneration) attempt=\(self.reconnectAttempt) resumed=\(resumed) afterMs=\(Int(elapsed))")
+            recovery?.tally(resumed ? (matched ? .resumeHit : .resumeMismatch) : .resumeMiss, source: .terminal)
+            recovery?.noteAcceptedOffset(resumePoint?.offset)
+            record(.ready, resumed: resumed)
             transition(.ready)
             grid.sendLatest()
             heartbeat.start(generation: connectionGeneration)
@@ -312,10 +324,16 @@ final class TerminalSessionController {
             bridge.receiveRemoteOutput(Data(text.utf8))
         case let .outputChunk(offset, data):
             metrics.outputArrived(at: timing.now())
+            // A stream that is not contiguous says so before the chunk is taken;
+            // P1 observes only, so the chunk is accepted as it always was (#111).
+            if let expected = resumePoint?.offset, offset != expected {
+                record(offset > expected ? .offsetGap : .offsetOverlap)
+            }
             // The offset the host may trim behind moves only for bytes a live
             // surface has queued; the bridge answers synchronously (#108).
             if bridge.receiveRemoteOutput(data) {
                 resumePoint?.advance(to: offset + UInt64(data.count))
+                recovery?.noteAcceptedOffset(resumePoint?.offset)
             }
         case let .pong(identifier):
             heartbeat.pongReceived(identifier)
@@ -333,10 +351,13 @@ final class TerminalSessionController {
         case .detached:
             // Whatever that surface accepted went with it; nil means a fresh attach.
             resumePoint = nil
+            recovery?.noteAcceptedOffset(nil)
             pauseSession()
         case .outputDiscarded:
             resumePoint = nil
+            recovery?.noteAcceptedOffset(nil)
             Self.logger.info("output discarded; the resume epoch is over")
+            record(.outputDiscarded)
             guard bridge.hasRenderer else {
                 pauseSession()
                 return
@@ -398,6 +419,9 @@ final class TerminalSessionController {
         Self.logger.info(
             "cycling: reason=\(reason.rawValue, privacy: .public) generation=\(generation) attempt=\(self.reconnectAttempt) delayMs=\(delay.wholeMilliseconds)"
         )
+        // Recorded before the retry cancels anything the transport is still
+        // holding: the cause belongs to the connection that had it (#111).
+        record(.cycling, reason: .terminal(reason))
         reconnectTask = Task { [weak self] in
             do {
                 try await timing.sleep(delay)
@@ -505,6 +529,20 @@ final class TerminalSessionController {
         case .backedUp:
             errorMessage = "Terminal input is backed up. Wait for the connection to catch up."
         }
+    }
+
+    // Every terminal record carries the same three: which connection it was,
+    // which attempt, and how long that connection had been up (#111).
+    private func record(_ kind: RecoveryLog.Kind, reason: RecoveryLog.Reason = .none, resumed: Bool? = nil) {
+        recovery?.record(
+            kind,
+            source: .terminal,
+            reason: reason,
+            generation: connectionGeneration,
+            attempt: reconnectAttempt,
+            elapsedMilliseconds: Int(metrics.connectionStartedAt?.milliseconds(to: timing.now()) ?? 0),
+            resumed: resumed
+        )
     }
 
     private func transition(_ action: TerminalConnectionAction) {
