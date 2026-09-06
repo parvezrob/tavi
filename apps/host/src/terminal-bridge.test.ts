@@ -88,6 +88,7 @@ class FakePty {
 function terminalTarget(ptys: FakePty[]): TerminalTarget {
   return {
     key: "fixture",
+    paneId: "fixture",
     spawn: () => {
       const terminal = new FakePty();
       ptys.push(terminal);

@@ -346,3 +346,37 @@ test("store create replaces an existing attachment", () => {
   store.disposeAll();
   assert.ok(second.killed);
 });
+
+test("counters report the attach history the chaos view reads (#111)", async () => {
+  const process = new FakeProcess();
+  const attachment = new TerminalAttachment(process, {
+    retentionMs: 60_000,
+    detachGraceMs: 1,
+    detachedSize: async () => ({ cols: 174, rows: 49 }),
+  });
+  const first = makeClient();
+  attachment.claim(first);
+  attachment.noteReady(false, 0);
+  process.emitData("hello");
+
+  const second = makeClient();
+  attachment.claim(second);
+  attachment.noteReady(true, 5);
+  assert.deepEqual(attachment.counters(), {
+    stream: attachment.stream,
+    startOffset: 0,
+    endOffset: 5,
+    claims: 2,
+    resumeHits: 1,
+    resumeMisses: 1,
+    supersedes: 1,
+    lastReadyOffset: 5,
+  });
+
+  attachment.release(second);
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  const released = attachment.counters();
+  assert.ok(released.releasedAt !== undefined && released.releasedAt <= Date.now());
+  assert.ok(released.resizedAt !== undefined && released.resizedAt >= released.releasedAt);
+  attachment.dispose();
+});

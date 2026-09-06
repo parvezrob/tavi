@@ -5,6 +5,7 @@ import { AgentKindDetector } from "./agent-kinds.js";
 import { AttachmentStore } from "./attachment.js";
 import type { AttentionOverlay } from "./attention.js";
 import { bearerToken, isAuthorized } from "./auth.js";
+import type { Chaos } from "./chaos.js";
 import type { HostConfig } from "./config.js";
 import type { GhRunner } from "./gh.js";
 import { configureGh } from "./gh.js";
@@ -19,6 +20,7 @@ import type { DiscoveryDeps } from "./preview-servers.js";
 import { ProjectHistory } from "./projects.js";
 import { EVENTS_PROTOCOL, TERMINAL_PROTOCOL, TERMINAL_PROTOCOL_V2 } from "./protocol.js";
 import { agentRoutes } from "./routes/agents.js";
+import { chaosRoutes } from "./routes/chaos.js";
 import { deviceRoutes } from "./routes/devices.js";
 import { fileRoutes } from "./routes/files.js";
 import { healthRoutes } from "./routes/health.js";
@@ -74,6 +76,8 @@ export interface TaviServerOptions {
   // How often an open WebSocket re-checks that its credential still exists,
   // so `tavi devices revoke` cuts a live phone off, not just its next call.
   authorizationRecheckMs?: number;
+  /** Fault injection (#111); present only under `TAVI_CHAOS=on`. */
+  chaos?: Chaos;
 }
 
 export async function createTaviServer(options: TaviServerOptions) {
@@ -95,6 +99,7 @@ export async function createTaviServer(options: TaviServerOptions) {
     pullRequests,
     gh,
     tailscale,
+    chaos,
   } = options;
   configureGh(config.shell);
   configureTailscale(config.shell);
@@ -132,6 +137,8 @@ export async function createTaviServer(options: TaviServerOptions) {
     const timer = setInterval(() => {
       if (credentialAuthorized(token)) return;
       clearInterval(timer);
+      // No gate may hold this one: a revoked phone reads 4401, not silence.
+      chaos?.revoke(websocket);
       websocket.close(4401, "credential revoked");
     }, recheckMs);
     timer.unref?.();
@@ -139,6 +146,9 @@ export async function createTaviServer(options: TaviServerOptions) {
   };
 
   const server = createServer(async (request, response) => {
+    // `hostPause` (#111): the answer is withheld, not refused — the request
+    // hangs until the client's own timeout ends it, and its socket with it.
+    if (chaos?.hostPaused()) return;
     try {
       await routeRequest(request, response, {
         config,
@@ -157,6 +167,7 @@ export async function createTaviServer(options: TaviServerOptions) {
         pullRequests,
         gh,
         tailscale,
+        chaos,
       });
     } catch (error) {
       const status = error instanceof InputError ? 400 : 500;
@@ -168,10 +179,11 @@ export async function createTaviServer(options: TaviServerOptions) {
   });
 
   server.on("upgrade", async (request, socket, head) => {
+    if (chaos?.hostPaused()) return;
     try {
       const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
       if (url.pathname === "/api/events") {
-        upgradeEvents({ request, socket, head, eventsWss, authorized, keepAuthorized, agentEvents });
+        upgradeEvents({ request, socket, head, eventsWss, authorized, keepAuthorized, agentEvents, chaos });
         return;
       }
       await upgradeTerminal({
@@ -199,7 +211,7 @@ export async function createTaviServer(options: TaviServerOptions) {
     (websocket: WebSocket, _request: IncomingMessage, target: TerminalTarget, resume?: TerminalResumeRequest) => {
       try {
         if (websocket.protocol === TERMINAL_PROTOCOL_V2) {
-          bridgeTerminalV2(websocket, target, attachments, resume);
+          bridgeTerminalV2(websocket, target, attachments, resume, chaos);
         } else {
           bridgeTerminal(websocket, target);
         }
@@ -245,6 +257,7 @@ const ROUTES: Route[] = [
   sourceControlRoutes,
   fileRoutes,
   previewRoutes,
+  chaosRoutes,
 ];
 
 async function routeRequest(request: IncomingMessage, response: ServerResponse, context: RouteContext): Promise<void> {

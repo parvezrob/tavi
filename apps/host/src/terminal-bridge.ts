@@ -1,6 +1,7 @@
 import type * as pty from "node-pty";
 import type { RawData, WebSocket } from "ws";
 import type { AttachmentClient, AttachmentStore } from "./attachment.js";
+import type { Chaos, ChaosTimerHandle } from "./chaos.js";
 import type { HostConfig } from "./config.js";
 import type { TerminalSize } from "./herdr-types.js";
 import {
@@ -36,6 +37,8 @@ export function parseResumeRequest(url: URL): TerminalResumeRequest | undefined 
 
 export interface TerminalTarget {
   key: string;
+  // The herdr pane behind the key: what a chaos fault names (#111).
+  paneId: string;
   spawn: () => pty.IPty;
   // What the desktop shows for this pane; handed back on phone detach (#44).
   detachedSize?: () => Promise<TerminalSize | undefined>;
@@ -68,6 +71,7 @@ export function bridgeTerminalV2(
   target: TerminalTarget,
   attachments: AttachmentStore,
   resume?: TerminalResumeRequest,
+  chaos?: Chaos,
 ): void {
   let attachment = attachments.get(target.key);
   let cursor: number;
@@ -99,12 +103,32 @@ export function bridgeTerminalV2(
   }
   const active = attachment;
 
+  // Chaos only (#111): while a blackhole holds this socket every outbound
+  // write waits, and a close that fell inside the window goes out when it ends
+  // rather than being lost.
+  let heldClose: { code: number; reason: string } | undefined;
+  const passable = (): boolean => chaos === undefined || chaos.gate(websocket);
+  const send = (message: ServerTerminalMessage): boolean => passable() && sendTerminal(websocket, message);
+  const closeSocket = (code: number, reason: string): void => {
+    if (passable()) websocket.close(code, reason);
+    else heldClose ??= { code, reason };
+  };
+
   let flushTimer: NodeJS.Timeout | undefined;
+  let readyHold: ChaosTimerHandle | undefined;
   const clearFlushTimer = () => {
     if (flushTimer) clearInterval(flushTimer);
     flushTimer = undefined;
   };
+  const clearTimers = () => {
+    readyHold?.cancel();
+    readyHold = undefined;
+    clearFlushTimer();
+  };
   const flush = () => {
+    // Nothing may precede `ready` on the wire, so a `slowReady` hold stops the
+    // pty's own output as well as the first flush; both go out in `announce`.
+    if (readyHold || !passable()) return;
     while (
       websocket.readyState === websocket.OPEN &&
       cursor < active.endOffset &&
@@ -114,11 +138,11 @@ export function bridgeTerminalV2(
       if (payload === undefined) {
         // The client fell more than the resume buffer behind; a fresh attach
         // with a full redraw beats replaying that much stale screen paint.
-        sendTerminal(websocket, {
+        send({
           type: "error",
           message: "Terminal output overran the resume buffer.",
         });
-        websocket.close(1011, "resume buffer overrun");
+        closeSocket(1011, "resume buffer overrun");
         return;
       }
       if (payload.length === 0) return;
@@ -145,47 +169,66 @@ export function bridgeTerminalV2(
     onOutput: flush,
     onExit: (exit) => {
       ownsAttachment = false;
-      clearFlushTimer();
-      sendTerminal(websocket, {
+      clearTimers();
+      send({
         type: "exit",
         code: exit.code,
         ...(typeof exit.signal === "number" ? { signal: exit.signal } : {}),
       });
-      websocket.close(1000, "terminal exited");
+      closeSocket(1000, "terminal exited");
     },
     onSuperseded: () => {
       ownsAttachment = false;
-      clearFlushTimer();
-      sendTerminal(websocket, {
+      clearTimers();
+      send({
         type: "error",
         message: "Another connection took over this terminal.",
         code: "superseded",
       });
-      websocket.close(1000, "superseded");
+      closeSocket(1000, "superseded");
     },
   };
 
   active.claim(client);
-  sendTerminal(websocket, { type: "ready", stream: active.stream, offset: cursor, resumed });
-  flush();
+  active.noteReady(resumed, cursor);
+  const announce = () => {
+    readyHold = undefined;
+    send({ type: "ready", stream: active.stream, offset: cursor, resumed });
+    flush();
+  };
+  // Chaos `slowReady` (#111): the claim above already stands, so a supersession
+  // or a close during the hold still reaches this client and cancels it; what
+  // waits is everything the client would read — `ready` and every byte the pty
+  // produces meanwhile.
+  const holdMs = chaos?.consumeSlowReady(target.paneId);
+  if (chaos && holdMs !== undefined) readyHold = chaos.setTimeout(announce, holdMs);
+  else announce();
+  chaos?.registerTerminalSocket(websocket, target.paneId, {
+    attachment: () => (active.isDisposed ? undefined : active.counters()),
+    detach: () => releaseClient(),
+    resume: () => {
+      if (heldClose) websocket.close(heldClose.code, heldClose.reason);
+      else flush();
+    },
+  });
 
   websocket.on("message", (raw: RawData, isBinary: boolean) => {
     // ws keeps delivering frames through the closing handshake.
     if (!ownsAttachment) return;
     if (isBinary) {
-      sendTerminal(websocket, { type: "error", message: "Binary terminal messages are unsupported." });
-      websocket.close(1003, "text frames required");
+      send({ type: "error", message: "Binary terminal messages are unsupported." });
+      closeSocket(1003, "text frames required");
       return;
     }
     if (Buffer.byteLength(raw.toString()) > MAX_TERMINAL_FRAME_BYTES) {
-      sendTerminal(websocket, { type: "error", message: "Terminal message is too large." });
-      websocket.close(1009, "message too large");
+      send({ type: "error", message: "Terminal message is too large." });
+      closeSocket(1009, "message too large");
       return;
     }
     try {
       const message = parseClientTerminalMessage(JSON.parse(raw.toString()));
       if (!message) {
-        sendTerminal(websocket, { type: "error", message: "Invalid terminal message." });
+        send({ type: "error", message: "Invalid terminal message." });
         return;
       }
       switch (message.type) {
@@ -196,19 +239,19 @@ export function bridgeTerminalV2(
           active.resize(clamp(message.cols, 20, 400), clamp(message.rows, 5, 200));
           break;
         case "ping":
-          sendTerminal(websocket, { type: "pong", id: message.id });
+          send({ type: "pong", id: message.id });
           break;
       }
     } catch {
       // Not swallowed: a frame the codec refused becomes an `error` frame
       // the phone shows; the pty never sees an input it cannot trust.
-      sendTerminal(websocket, { type: "error", message: "Invalid terminal message." });
+      send({ type: "error", message: "Invalid terminal message." });
     }
   });
 
   const releaseClient = () => {
     ownsAttachment = false;
-    clearFlushTimer();
+    clearTimers();
     active.release(client);
   };
   websocket.once("close", releaseClient);
@@ -339,6 +382,9 @@ export function sendTerminal(websocket: WebSocket, message: ServerTerminalMessag
   if (websocket.readyState !== websocket.OPEN) return false;
   const frame = JSON.stringify(message);
   if (Buffer.byteLength(frame) > MAX_TERMINAL_FRAME_BYTES) {
+    // A frame this codec cannot send is a host bug, not a connection fault, so
+    // it closes past a chaos gate: holding it would leave the client waiting
+    // on a frame that is never coming.
     websocket.close(1011, "server frame too large");
     return false;
   }

@@ -2,6 +2,7 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import type * as pty from "node-pty";
 import type { WebSocket, WebSocketServer } from "ws";
+import type { Chaos } from "./chaos.js";
 import type { HostConfig } from "./config.js";
 import type { HerdrAgentSource } from "./herdr-types.js";
 import type { AgentEventSource } from "./herdr-events.js";
@@ -26,9 +27,13 @@ interface UpgradeCommon {
 // The events stream (#46): one open socket per phone, carrying the whole
 // agent list on every change.
 export function upgradeEvents(
-  options: UpgradeCommon & { eventsWss: WebSocketServer; agentEvents: AgentEventSource | undefined },
+  options: UpgradeCommon & {
+    eventsWss: WebSocketServer;
+    agentEvents: AgentEventSource | undefined;
+    chaos: Chaos | undefined;
+  },
 ): void {
-  const { request, socket, head, eventsWss, authorized, keepAuthorized, agentEvents } = options;
+  const { request, socket, head, eventsWss, authorized, keepAuthorized, agentEvents, chaos } = options;
   if (!authorized(request)) {
     socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
     socket.destroy();
@@ -41,7 +46,7 @@ export function upgradeEvents(
   }
   eventsWss.handleUpgrade(request, socket, head, (websocket) => {
     keepAuthorized(websocket, request);
-    serveAgentEvents(websocket, agentEvents);
+    serveAgentEvents(websocket, agentEvents, chaos);
   });
 }
 
@@ -96,6 +101,7 @@ export async function upgradeTerminal(
   }
   const target: TerminalTarget = {
     key: `agent:${paneId}`,
+    paneId,
     spawn: () => spawnAttachmentTerminal(herdr.attachCommand(paneId), config, spawnTerminal),
     detachedSize: () => herdr.paneSize?.(paneId) ?? Promise.resolve(undefined),
   };
@@ -109,11 +115,29 @@ export async function upgradeTerminal(
 
 // Snapshot-based push: the phone always receives the full agent list, so a
 // missed frame can never leave a stale agent on screen.
-function serveAgentEvents(websocket: WebSocket, agentEvents?: AgentEventSource): void {
-  const send = (snapshot: { available: boolean; reason?: string; agents: unknown[] }) => {
+function serveAgentEvents(websocket: WebSocket, agentEvents?: AgentEventSource, chaos?: Chaos): void {
+  // Chaos only (#111): a blackholed socket keeps the *latest* snapshot it
+  // skipped and sends that one when the window ends — a snapshot is the whole
+  // list, so replaying the older ones would only paint stale state.
+  let retained: AgentsSnapshot | undefined;
+  const send = (snapshot: AgentsSnapshot) => {
     if (websocket.readyState !== websocket.OPEN) return;
+    if (chaos && !chaos.gate(websocket)) {
+      retained = snapshot;
+      return;
+    }
     websocket.send(JSON.stringify({ type: "agents", ...snapshot }));
   };
+
+  let unsubscribe: () => void = () => undefined;
+  chaos?.registerEventsSocket(websocket, {
+    detach: () => unsubscribe(),
+    resume: () => {
+      const held = retained;
+      retained = undefined;
+      if (held) send(held);
+    },
+  });
 
   if (!agentEvents) {
     send({
@@ -124,12 +148,18 @@ function serveAgentEvents(websocket: WebSocket, agentEvents?: AgentEventSource):
     return;
   }
 
-  const unsubscribe = agentEvents.subscribe(send);
+  unsubscribe = agentEvents.subscribe(send);
   if (!agentEvents.latest) {
     send({ available: false, reason: "Waiting for the first Herdr snapshot.", agents: [] });
   }
-  websocket.once("close", unsubscribe);
-  websocket.once("error", unsubscribe);
+  websocket.once("close", () => unsubscribe());
+  websocket.once("error", () => unsubscribe());
+}
+
+interface AgentsSnapshot {
+  available: boolean;
+  reason?: string;
+  agents: unknown[];
 }
 
 function offersEventsProtocol(request: IncomingMessage): boolean {

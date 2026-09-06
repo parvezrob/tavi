@@ -30,6 +30,23 @@ export interface AttachmentClient {
   onSuperseded(): void;
 }
 
+// What `GET /api/chaos/attachments` reports for one pane (#111): plain
+// bookkeeping the attachment already has the events for, so a soak can tell a
+// resume from a fresh attach and compare the phone's accepted offset with the
+// host's.
+export interface AttachmentCounters {
+  stream: string;
+  startOffset: number;
+  endOffset: number;
+  claims: number;
+  resumeHits: number;
+  resumeMisses: number;
+  supersedes: number;
+  lastReadyOffset: number;
+  releasedAt?: number;
+  resizedAt?: number;
+}
+
 export interface AttachmentOptions {
   retentionMs?: number | undefined;
   maxBufferBytes?: number | undefined;
@@ -67,6 +84,13 @@ export class TerminalAttachment {
   private nextOffset = 0;
   private retentionTimer: NodeJS.Timeout | undefined;
   private detachTimer: NodeJS.Timeout | undefined;
+  private claims = 0;
+  private resumeHits = 0;
+  private resumeMisses = 0;
+  private supersedes = 0;
+  private lastReadyOffset = 0;
+  private releasedAt: number | undefined;
+  private resizedAt: number | undefined;
 
   constructor(terminal: TerminalProcessLike, options: AttachmentOptions = {}) {
     this.terminal = terminal;
@@ -104,6 +128,28 @@ export class TerminalAttachment {
     return this.disposed;
   }
 
+  counters(): AttachmentCounters {
+    return {
+      stream: this.stream,
+      startOffset: this.firstBufferedOffset,
+      endOffset: this.nextOffset,
+      claims: this.claims,
+      resumeHits: this.resumeHits,
+      resumeMisses: this.resumeMisses,
+      supersedes: this.supersedes,
+      lastReadyOffset: this.lastReadyOffset,
+      ...(this.releasedAt === undefined ? {} : { releasedAt: this.releasedAt }),
+      ...(this.resizedAt === undefined ? {} : { resizedAt: this.resizedAt }),
+    };
+  }
+
+  /** What the client that just claimed was answered; counted for the chaos view. */
+  noteReady(resumed: boolean, offset: number): void {
+    if (resumed) this.resumeHits += 1;
+    else this.resumeMisses += 1;
+    this.lastReadyOffset = offset;
+  }
+
   contains(offset: number): boolean {
     return offset >= this.firstBufferedOffset && offset <= this.nextOffset;
   }
@@ -130,6 +176,8 @@ export class TerminalAttachment {
   claim(client: AttachmentClient): void {
     const previous = this.client;
     this.client = client;
+    this.claims += 1;
+    if (previous) this.supersedes += 1;
     this.cancelRetention();
     // A re-claim inside the grace window is a flap, not a detach: the pty
     // keeps the phone's size and the desktop never sees a resize.
@@ -140,6 +188,7 @@ export class TerminalAttachment {
   release(client: AttachmentClient): void {
     if (this.client !== client) return;
     this.client = undefined;
+    this.releasedAt = Date.now();
     if (this.disposed) return;
     this.scheduleRetention();
     if (!this.detachedSize) return;
@@ -155,7 +204,10 @@ export class TerminalAttachment {
     if (!this.detachedSize || this.client !== undefined || this.disposed) return;
     void this.detachedSize().then((size) => {
       // A phone may have re-claimed while herdr was asked; its size then wins.
-      if (size && this.client === undefined && !this.disposed) this.safeResize(size);
+      if (size && this.client === undefined && !this.disposed) {
+        this.safeResize(size);
+        this.resizedAt = Date.now();
+      }
     });
   }
 
@@ -187,6 +239,7 @@ export class TerminalAttachment {
   supersede(): void {
     const previous = this.client;
     this.client = undefined;
+    if (previous) this.supersedes += 1;
     this.dispose();
     previous?.onSuperseded();
   }

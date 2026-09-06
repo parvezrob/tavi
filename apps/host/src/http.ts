@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AgentKindDetector } from "./agent-kinds.js";
 import type { AttentionOverlay } from "./attention.js";
+import type { Chaos } from "./chaos.js";
 import type { HostConfig } from "./config.js";
 import type { GhRunner } from "./gh.js";
 import type { PullRequestLookup } from "./pull-request-cache.js";
@@ -32,6 +33,7 @@ export interface RouteContext {
   pullRequests?: PullRequestLookup | undefined;
   gh?: GhRunner | undefined;
   tailscale?: TailscaleRunner | undefined;
+  chaos?: Chaos | undefined;
 }
 
 // `true` means handled.

@@ -5,7 +5,8 @@ import { removeCommandLink } from "./command-link.js";
 import { bootstrap, BootstrapError } from "./bootstrap.js";
 import { defaultDeps } from "./bootstrap-deps.js";
 import { diagnose, doorReady, formatChecks } from "./doctor.js";
-import { durablePackageRoot, serviceEntrypoint } from "./package-root.js";
+import { chaosStartup, createChaos } from "./chaos.js";
+import { durablePackageRoot, isEphemeral, serviceEntrypoint } from "./package-root.js";
 import { PreviewRegistry } from "./preview.js";
 import { createPreviewDoor } from "./preview-door.js";
 import { installClaudeHooks, removeClaudeHooks } from "./claude-hooks.js";
@@ -253,6 +254,19 @@ const { createTaviServer } = await import("./server.js");
 // checkout or global install is whoever installed it's to update.
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const managed = isManagedRuntime(packageRoot, config.stateDir);
+// Fault injection (#111) is a developer's tool: refused before anything
+// listens on a production build, the managed runtime, or an npx run.
+const chaosDecision = chaosStartup(process.env.TAVI_CHAOS, {
+  production: process.env.NODE_ENV === "production",
+  managed,
+  ephemeral: isEphemeral(packageRoot, process.env),
+});
+if (!chaosDecision.ok) {
+  console.error(chaosDecision.error);
+  process.exit(2);
+}
+const chaos = chaosDecision.enabled ? createChaos() : undefined;
+if (chaos) log.warn("chaos", "CHAOS on: this host injects faults");
 const autoUpdate = managed && process.env.TAVI_AUTO_UPDATE !== "off";
 const updater = autoUpdate
   ? startUpdater(
@@ -274,6 +288,7 @@ let doorState: { at: number; ready: boolean } | undefined;
 const server = await createTaviServer({
   config,
   herdr,
+  ...(chaos ? { chaos } : {}),
   agentEvents,
   attention,
   previews,
