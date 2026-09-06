@@ -65,14 +65,13 @@ struct ComputerChip: View {
             // chaos soak reads what the home is saying (#111). Nothing is
             // added to a person's accessibility tree.
             .overlay(alignment: .topLeading) {
-                if RecoveryDiagnosticsText.isEnabled {
-                    Text(computer.health.label(latencyMilliseconds: nil, connection: computer.connection))
-                        .font(.system(size: 1))
-                        .foregroundStyle(.clear)
-                        .frame(width: 1, height: 1)
-                        .clipped()
-                        .allowsHitTesting(false)
-                        .accessibilityIdentifier("sessions.health.\(HostHealthLabel.identifier(for: computer.health))")
+                if DiagnosticsText.isEnabled {
+                    // Keyed by computer as well as state: a several-computer
+                    // home publishes one of these per chip.
+                    DiagnosticsText(
+                        identifier: "sessions.health.\(computer.id).\(HostHealthLabel.identifier(for: computer.health))",
+                        value: computer.health.label(latencyMilliseconds: nil, connection: computer.connection)
+                    )
                 }
             }
         #endif

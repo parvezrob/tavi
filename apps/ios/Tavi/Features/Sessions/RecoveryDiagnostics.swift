@@ -25,27 +25,41 @@
         }
     }
 
-    struct RecoveryDiagnosticsText: View {
-        let hostId: String
-        let log: RecoveryLog
+    // One pixel, invisible, and a real element in the accessibility tree:
+    // what a scripted run reads and a person never sees. The home's computer
+    // strip publishes its health the same way (#111).
+    struct DiagnosticsText: View {
+        let identifier: String
+        let value: String
 
         // The dev-host seed is what a scripted run is; a person's build
-        // never carries this element.
+        // never carries these elements.
         static var isEnabled: Bool {
             ProcessInfo.processInfo.environment["TAVI_DEV_HOST"] != nil
         }
 
-        @State private var line = ""
-
         var body: some View {
-            Text(line)
+            Text(value)
                 .font(.system(size: 1))
                 .foregroundStyle(.clear)
                 .frame(width: 1, height: 1)
                 .clipped()
                 .allowsHitTesting(false)
-                .accessibilityIdentifier("diagnostics.recovery.\(hostId)")
-                .accessibilityValue(line)
+                .accessibilityIdentifier(identifier)
+                .accessibilityValue(value)
+        }
+    }
+
+    struct RecoveryDiagnosticsText: View {
+        let hostId: String
+        let log: RecoveryLog
+
+        static var isEnabled: Bool { DiagnosticsText.isEnabled }
+
+        @State private var line = ""
+
+        var body: some View {
+            DiagnosticsText(identifier: "diagnostics.recovery.\(hostId)", value: line)
                 // Encoding fifty events belongs nowhere near `body`, which
                 // SwiftUI re-runs on every redraw (#68); the soak samples
                 // every two seconds, so once a second is ahead of it.

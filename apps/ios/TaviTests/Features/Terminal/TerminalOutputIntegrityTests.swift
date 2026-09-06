@@ -262,11 +262,26 @@ struct TerminalOutputIntegrityTests {
         }
     }
 
+    // The defect the requested-resume capture exists for: a host that flushes
+    // the missed bytes before it sends `ready` moves the client's offset past
+    // the point the dial asked to resume from. The answer still matches the
+    // question, so it is a hit — and the chunk was contiguous, so no gap.
+    @Test
+    func aResumedReadyIsAHitEvenWhenOutputArrivesBeforeIt() async throws {
+        try await withResumedReady(offset: 11, resumed: true, chunkBeforeReady: true) { recovery in
+            #expect(recovery.counters[.terminal]?.resumeHits == 1)
+            #expect(recovery.counters[.terminal]?.resumeMismatches == 0)
+            #expect(recovery.counters[.terminal]?.offsetGaps == 0)
+            #expect(recovery.counters[.terminal]?.offsetOverlaps == 0)
+        }
+    }
+
     // Eleven bytes taken, the stream dropped, the redial asks to resume at
     // 11 — and the host answers what the caller chose.
     private func withResumedReady(
         offset: UInt64,
         resumed: Bool,
+        chunkBeforeReady: Bool = false,
         _ assertions: (RecoveryLog) -> Void
     ) async throws {
         let transport = RecoveryTransport()
@@ -288,6 +303,10 @@ struct TerminalOutputIntegrityTests {
             try await waitUntilListening(transport, after: 1)
             #expect(await transport.connectResumes.last ?? nil == TerminalResumePoint(stream: "epoch-a", offset: 11))
 
+            if chunkBeforeReady {
+                await transport.emit(.message(.outputChunk(offset: 11, data: Data("!".utf8))))
+                try await waitFor { renderer.acceptedText == "hello world!" }
+            }
             await transport.emit(.message(.ready(stream: "epoch-a", offset: offset, resumed: resumed)))
             try await waitFor { controller.connectionState == .connected }
             assertions(recovery)

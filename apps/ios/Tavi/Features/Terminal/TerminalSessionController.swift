@@ -45,16 +45,15 @@ final class TerminalSessionController {
     private var reconnectTask: Task<Void, Never>?
     // Where this terminal's recoveries are recorded (#111); nil records nothing.
     private var recovery: RecoveryLog?
-    // The log's accepted offset is this and nothing else, so every place the
-    // resume point moves or is dropped says so exactly once (#111).
+    private var shouldReconnect = false
+    // The log's accepted offset is `resumePoint` and nothing else, so every
+    // place it moves or is dropped says so once; `requestedResume` is what the
+    // dial asked for, so a `ready` at another point is caught even when output
+    // arrives first. Both unobserved: private, and the offset moves per chunk (#111).
+    @ObservationIgnored private var requestedResume: TerminalResumePoint?
     @ObservationIgnored private var resumePoint: TerminalResumePoint? {
         didSet { recovery?.noteAcceptedOffset(resumePoint?.offset) }
     }
-
-    // What this dial asked the host to resume from, so a `ready` that answers
-    // another point is caught even when output arrives before it (#111).
-    @ObservationIgnored private var requestedResume: TerminalResumePoint?
-    private var shouldReconnect = false
 
     init(
         client: any TerminalTransporting = TerminalWebSocketClient(),
@@ -107,6 +106,7 @@ final class TerminalSessionController {
                 credential: credential
             )
             self.configuration = configuration
+            // Before `resumePoint` is cleared below: its `didSet` tells the log.
             self.recovery = recovery
             errorMessage = nil
             shouldReconnect = true
@@ -355,7 +355,7 @@ final class TerminalSessionController {
         case .attached:
             resumeSessionIfReady()
         case .detached:
-            // Whatever that surface accepted went with it; nil means a fresh attach.
+            // Whatever that surface accepted went with it.
             resumePoint = nil
             pauseSession()
         case .outputDiscarded:
