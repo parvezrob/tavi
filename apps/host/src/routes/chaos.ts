@@ -50,7 +50,9 @@ function parseFault(body: Record<string, unknown>): ParsedFault {
   if (!kind) return { ok: false, error: `\`kind\` must be one of ${KINDS.join(", ")}.` };
 
   // `hostPause` withholds every answer the host would give, so it names no
-  // socket; the other three each act on one.
+  // socket; the other three each act on one. The event row still needs the
+  // field, so a bare `hostPause` is recorded against `events` — a label for
+  // the log, not a target the fault touched.
   const named = SOCKETS.find((candidate) => candidate === body.socket);
   const socket = named ?? (kind === "hostPause" ? "events" : undefined);
   if (!socket) return { ok: false, error: "`socket` must be `events` or `terminal`." };

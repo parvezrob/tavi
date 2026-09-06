@@ -260,7 +260,9 @@ test("a blackholed terminal holds its flush and loses no input the phone sent", 
   }
 });
 
-test("revoking a phone inside a blackhole drops its handling at once, not on ws's close timeout", async () => {
+// Bounded on purpose: without `revoke` this test would still pass, 30 s later,
+// on ws's close timeout — the deadline is what makes it a test.
+test("revoking a phone inside a blackhole drops its handling at once, not on ws's close timeout", { timeout: 5_000 }, async () => {
   const devices = new DeviceRegistry(mkdtempSync(path.join(tmpdir(), "tavi-chaos-revoke-")), undefined, () => {});
   const { device, credential } = devices.add("phone");
   const harness = chaosHarness();
