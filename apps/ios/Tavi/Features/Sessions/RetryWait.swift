@@ -14,6 +14,11 @@ import Foundation
 // because the only two writers of `epoch` are `stop()` — which cancels the
 // wait on the same turn — and `streamOnce`, which never runs while the loop
 // is sleeping. The tag therefore only has to fence the remembered credit.
+// And one this type asks of its timing: `sleep` must suspend before it
+// returns (the live clock and the manual test clock both do), because the
+// timer is started before the continuation is registered — a sleep that
+// returned synchronously would release nothing and the wait would hang
+// until cancellation.
 @MainActor
 final class RetryWait {
     private let timing: ConnectionTiming

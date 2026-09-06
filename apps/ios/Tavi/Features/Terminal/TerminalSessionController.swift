@@ -432,13 +432,13 @@ final class TerminalSessionController {
             logPath(from: from, to: to)
             // A network that comes back is a real signal: dial now rather
             // than waiting out the retry. The attempt count stays.
-            if connectionState == .connected { askTheHeartbeat() } else { beginConnection() }
+            if connectionState == .connected { askHeartbeat() } else { beginConnection() }
         case let .changed(from, to):
             logPath(from: from, to: to)
             // Only ask: an interface change is chatter, and a dial in
             // progress keeps its ready budget — restarting it on every
             // change never let a slow host finish (#107).
-            if connectionState == .connected { askTheHeartbeat() }
+            if connectionState == .connected { askHeartbeat() }
         }
     }
 
@@ -451,7 +451,7 @@ final class TerminalSessionController {
     // A socket is judged by its own heartbeat (#86, PRD §7.13): most cellular
     // handovers leave a working socket working, so it is asked rather than
     // torn down.
-    private func askTheHeartbeat() {
+    private func askHeartbeat() {
         heartbeat.start(generation: connectionGeneration, immediately: true)
     }
 

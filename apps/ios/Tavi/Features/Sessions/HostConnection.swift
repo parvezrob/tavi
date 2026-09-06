@@ -361,9 +361,8 @@ final class HostConnection {
     // going in case it is merely slow. The first frame cancels this.
     private func armConnectDeadline(_ dial: Int) {
         let deadline = reconnectPolicy.connectDeadline
-        let timing = timing
         connectDeadlineTask?.cancel()
-        connectDeadlineTask = Task { [weak self] in
+        connectDeadlineTask = Task { [weak self, timing] in
             try? await timing.sleep(deadline)
             guard !Task.isCancelled, let self else { return }
             let probe = await self.probeHostTwice(self.reachabilityGeneration)
@@ -434,8 +433,7 @@ final class HostConnection {
     // suspended send keep the loop from ever reaching the cycle check (#107).
     private func startWatchdog(for socket: any HostEventsSocketing) -> Task<Void, Never> {
         let policy = watchdogPolicy
-        let timing = timing
-        return Task { [weak self, weak socket] in
+        return Task { [weak self, weak socket, timing] in
             var challenged = false
             while !Task.isCancelled {
                 try? await timing.sleep(policy.pollInterval)

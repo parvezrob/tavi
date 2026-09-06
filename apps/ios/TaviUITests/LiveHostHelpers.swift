@@ -1,9 +1,6 @@
 import XCTest
 
-// The address and token every live suite was started with; the pane, launch
-// and terminal waits over it are the XCTestCase extension below, shared so
-// the audit and the memory checks stage their panes the way the main suite
-// does (#111).
+// The address and token every live suite was started with (#111).
 struct LiveEnvironment {
     let host: String
     let token: String
