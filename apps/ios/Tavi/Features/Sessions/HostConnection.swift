@@ -401,16 +401,8 @@ final class HostConnection {
     private func recordStreamEnd(_ failure: SocketFailure, dial: Int, attempt: Int, since: ContinuousClock.Instant) {
         let cause = RecoveryLog.Reason.socket(failure.tag, code: failure.code)
         let lasted = Int(since.milliseconds(to: timing.now()))
-        for kind in [RecoveryLog.Kind.streamEnded, .cycling] {
-            recovery?.record(
-                kind,
-                source: .events,
-                reason: cause,
-                generation: dial,
-                attempt: attempt,
-                elapsedMilliseconds: lasted
-            )
-        }
+        recovery?.record(.streamEnded, source: .events, reason: cause, generation: dial, attempt: attempt, elapsedMilliseconds: lasted)
+        recovery?.record(.cycling, source: .events, reason: cause, generation: dial, attempt: attempt, elapsedMilliseconds: lasted)
     }
 
     // Bounded "Connecting…": if nothing has arrived by the deadline, ask the

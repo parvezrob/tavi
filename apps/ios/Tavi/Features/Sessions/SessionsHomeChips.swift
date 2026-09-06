@@ -58,6 +58,24 @@ struct ComputerChip: View {
         .accessibilityValue(computer.summary)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityIdentifier("sessions.computer.\(computer.id)")
+        #if DEBUG
+            // The chip is deliberately one accessibility element, so its dot
+            // cannot carry an identifier of its own. Under a scripted run the
+            // health rides beside it as a 1-pt element, which is how the
+            // chaos soak reads what the home is saying (#111). Nothing is
+            // added to a person's accessibility tree.
+            .overlay(alignment: .topLeading) {
+                if RecoveryDiagnosticsText.isEnabled {
+                    Text(computer.health.label(latencyMilliseconds: nil, connection: computer.connection))
+                        .font(.system(size: 1))
+                        .foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .clipped()
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("sessions.health.\(HostHealthLabel.identifier(for: computer.health))")
+                }
+            }
+        #endif
     }
 }
 

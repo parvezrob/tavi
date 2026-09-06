@@ -38,7 +38,9 @@ struct HostHealthLabel: View {
         }
     }
 
-    private static func identifier(for health: HostHealth) -> String {
+    // Shared with the home's computer strip, which draws the same health as
+    // a bare dot inside one accessibility element of its own (#111).
+    static func identifier(for health: HostHealth) -> String {
         switch health {
         case .connecting: "connecting"
         case .live: "live"

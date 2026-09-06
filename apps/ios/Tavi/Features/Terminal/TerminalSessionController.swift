@@ -45,7 +45,15 @@ final class TerminalSessionController {
     private var reconnectTask: Task<Void, Never>?
     // Where this terminal's recoveries are recorded (#111); nil records nothing.
     private var recovery: RecoveryLog?
-    private var resumePoint: TerminalResumePoint?
+    // The log's accepted offset is this and nothing else, so every place the
+    // resume point moves or is dropped says so exactly once (#111).
+    @ObservationIgnored private var resumePoint: TerminalResumePoint? {
+        didSet { recovery?.noteAcceptedOffset(resumePoint?.offset) }
+    }
+
+    // What this dial asked the host to resume from, so a `ready` that answers
+    // another point is caught even when output arrives before it (#111).
+    @ObservationIgnored private var requestedResume: TerminalResumePoint?
     private var shouldReconnect = false
 
     init(
@@ -104,7 +112,6 @@ final class TerminalSessionController {
             shouldReconnect = true
             reconnectAttempt = 0
             resumePoint = nil
-            recovery?.noteAcceptedOffset(nil)
             metrics.reset()
             sessionID += 1
             // Cleared now, or Files mentioned and the Preview button answer
@@ -247,6 +254,7 @@ final class TerminalSessionController {
                 guard isCurrentConnection(generation) else { return }
                 await client.disconnect()
                 guard isCurrentConnection(generation) else { return }
+                requestedResume = resumePoint
                 try await client.connect(configuration: configuration, resume: resumePoint)
                 while isCurrentConnection(generation) {
                     let event = await client.receive()
@@ -306,15 +314,14 @@ final class TerminalSessionController {
             reconnectTask = nil
             errorMessage = nil
             grid.forgetWhatWasSent()
-            // Read before it is replaced: whether the host answered the point
-            // this dial asked to resume from is recorded, never enforced (#111).
-            let matched = resumePoint.map { $0.stream == stream && $0.offset == offset } ?? false
+            // Against what this dial asked for, not against where the stream
+            // has since got to: recorded, never enforced (#111).
+            let matched = requestedResume.map { $0.stream == stream && $0.offset == offset } ?? false
             resumePoint = stream.map { TerminalResumePoint(stream: $0, offset: offset) }
             readyAt = timing.now()
             let elapsed = metrics.connectionStartedAt.map { $0.milliseconds(to: timing.now()) } ?? 0
             Self.logger.info("ready: generation=\(self.connectionGeneration) attempt=\(self.reconnectAttempt) resumed=\(resumed) afterMs=\(Int(elapsed))")
             recovery?.tally(resumed ? (matched ? .resumeHit : .resumeMismatch) : .resumeMiss, source: .terminal)
-            recovery?.noteAcceptedOffset(resumePoint?.offset)
             record(.ready, resumed: resumed)
             transition(.ready)
             grid.sendLatest()
@@ -333,7 +340,6 @@ final class TerminalSessionController {
             // surface has queued; the bridge answers synchronously (#108).
             if bridge.receiveRemoteOutput(data) {
                 resumePoint?.advance(to: offset + UInt64(data.count))
-                recovery?.noteAcceptedOffset(resumePoint?.offset)
             }
         case let .pong(identifier):
             heartbeat.pongReceived(identifier)
@@ -351,11 +357,9 @@ final class TerminalSessionController {
         case .detached:
             // Whatever that surface accepted went with it; nil means a fresh attach.
             resumePoint = nil
-            recovery?.noteAcceptedOffset(nil)
             pauseSession()
         case .outputDiscarded:
             resumePoint = nil
-            recovery?.noteAcceptedOffset(nil)
             Self.logger.info("output discarded; the resume epoch is over")
             record(.outputDiscarded)
             guard bridge.hasRenderer else {
@@ -534,14 +538,10 @@ final class TerminalSessionController {
     // Every terminal record carries the same three: which connection it was,
     // which attempt, and how long that connection had been up (#111).
     private func record(_ kind: RecoveryLog.Kind, reason: RecoveryLog.Reason = .none, resumed: Bool? = nil) {
+        let held = Int(metrics.connectionStartedAt?.milliseconds(to: timing.now()) ?? 0)
         recovery?.record(
-            kind,
-            source: .terminal,
-            reason: reason,
-            generation: connectionGeneration,
-            attempt: reconnectAttempt,
-            elapsedMilliseconds: Int(metrics.connectionStartedAt?.milliseconds(to: timing.now()) ?? 0),
-            resumed: resumed
+            kind, source: .terminal, reason: reason, generation: connectionGeneration,
+            attempt: reconnectAttempt, elapsedMilliseconds: held, resumed: resumed
         )
     }
 

@@ -32,6 +32,9 @@ final class HostReachability {
     private var epoch: () -> Int = { 0 }
     private var generation: () -> Int = { 0 }
     private var onPath: (ConnectionPath) -> Void = { _ in }
+    // Recorded here rather than at the call sites: `ask()` is single-flight,
+    // so several askers share one answer, and recording where it is read
+    // would count one round trip several times (#111).
     private var onAnswer: (RecoveryLog.Probe, Int) -> Void = { _, _ in }
 
     init(timing: ConnectionTiming) {
