@@ -28,7 +28,7 @@ final class TerminalSessionController {
     private let heartbeat: TerminalHeartbeat
     private let mentioned = MentionedPorts()
     private let outbound: TerminalOutbound
-    private let pathObserver: any NetworkPathObserving
+    private let pathWatch: NetworkPathWatch
     private let reconnectPolicy: ReconnectPolicy
     private let timing: ConnectionTiming
 
@@ -38,10 +38,8 @@ final class TerminalSessionController {
     private var disconnectTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
     private var isSceneActive = true
-    private var lastPathSnapshot: NetworkPathSnapshot?
     private var lastSentGrid: TerminalGridSize?
     @ObservationIgnored private var metrics = TerminalLatencyMetrics()
-    private var pathTask: Task<Void, Never>?
     // When the current connection last said ready; nil while it is not up.
     private var readyAt: ContinuousClock.Instant?
     private var reconnectAttempt = 0
@@ -59,7 +57,7 @@ final class TerminalSessionController {
         self.client = client
         heartbeat = TerminalHeartbeat(policy: heartbeatPolicy, timing: timing)
         outbound = TerminalOutbound(client: client)
-        self.pathObserver = pathObserver
+        pathWatch = NetworkPathWatch(observer: pathObserver)
         self.reconnectPolicy = reconnectPolicy
         self.timing = timing
         outbound.installGenerationCheck { [weak self] generation in
@@ -110,7 +108,7 @@ final class TerminalSessionController {
             latestTranscript = ""
             mentioned.clear()
             bridge.beginSession(sessionID)
-            startPathMonitoringIfNeeded()
+            pathWatch.start { [weak self] event in self?.handlePath(event) }
             beginConnection()
         } catch {
             errorMessage = error.localizedDescription
@@ -121,10 +119,8 @@ final class TerminalSessionController {
     }
 
     func stop() {
-        pathTask?.cancel()
-        pathTask = nil
+        pathWatch.stop()
         mentioned.clear()
-        lastPathSnapshot = nil
         endSession(.stop)
     }
 
@@ -396,7 +392,7 @@ final class TerminalSessionController {
         }
         readyAt = nil
         reconnectAttempt += 1
-        if lastPathSnapshot?.isSatisfied == false {
+        if pathWatch.current?.isSatisfied == false {
             transition(.networkLost)
         } else {
             transition(.connectionLost(nextAttempt: reconnectAttempt))
@@ -422,55 +418,41 @@ final class TerminalSessionController {
         }
     }
 
-    private func startPathMonitoringIfNeeded() {
-        guard pathTask == nil else { return }
-        let observer = pathObserver
-        pathTask = Task { [weak self] in
-            for await snapshot in observer.updates() {
-                guard let self, !Task.isCancelled else { return }
-                handlePathUpdate(snapshot)
-            }
-        }
-    }
-
-    private func handlePathUpdate(_ snapshot: NetworkPathSnapshot) {
-        let previous = lastPathSnapshot
-        lastPathSnapshot = snapshot
+    private func handlePath(_ event: NetworkPathWatch.Event) {
         guard configuration != nil, shouldReconnect, connectionState != .suspended else { return }
-        guard previous != snapshot else { return }
 
-        if !snapshot.isSatisfied {
+        switch event {
+        case .lost:
             Self.logger.info("network path lost: generation=\(self.connectionGeneration)")
             transition(.networkLost)
             // Keep the retry loop alive so recovery never depends on the
             // monitor delivering a satisfied event later.
             connectionEndedUnexpectedly(.networkPathLost)
-            return
+        case let .restored(from, to):
+            logPath(from: from, to: to)
+            // A network that comes back is a real signal: dial now rather
+            // than waiting out the retry. The attempt count stays.
+            if connectionState == .connected { askTheHeartbeat() } else { beginConnection() }
+        case let .changed(from, to):
+            logPath(from: from, to: to)
+            // Only ask: an interface change is chatter, and a dial in
+            // progress keeps its ready budget — restarting it on every
+            // change never let a slow host finish (#107).
+            if connectionState == .connected { askTheHeartbeat() }
         }
+    }
 
-        // The first snapshot only records the baseline; churning a healthy
-        // startup connection would add latency for nothing.
-        guard let previous else { return }
+    private func logPath(from: NetworkPathSnapshot, to: NetworkPathSnapshot) {
         Self.logger.info(
-            "network path restored or changed (\(previous.interfaceIdentity) -> \(snapshot.interfaceIdentity))"
+            "network path restored or changed (\(from.interfaceIdentity) -> \(to.interfaceIdentity))"
         )
-        // A socket is judged by its own heartbeat (#86, PRD §7.13): most
-        // cellular handovers leave a working socket working. Ask it now.
-        if connectionState == .connected {
-            heartbeat.start(generation: connectionGeneration, immediately: true)
-            return
-        }
-        // A network that comes back is a real signal: dial now rather than
-        // waiting out the retry. The attempt count stays.
-        if !previous.isSatisfied {
-            beginConnection()
-            return
-        }
-        // Satisfied to satisfied is chatter, and a dial in progress keeps its
-        // ready budget: restarting it on every interface change never let a
-        // slow host finish (#107).
-        guard connectionState != .connecting, reconnectTask == nil else { return }
-        beginConnection()
+    }
+
+    // A socket is judged by its own heartbeat (#86, PRD §7.13): most cellular
+    // handovers leave a working socket working, so it is asked rather than
+    // torn down.
+    private func askTheHeartbeat() {
+        heartbeat.start(generation: connectionGeneration, immediately: true)
     }
 
     private func startConnectDeadline(generation: Int) {

@@ -353,16 +353,35 @@ private final class ManualInstant: @unchecked Sendable {
 final class ScriptedPathObserver: NetworkPathObserving {
     private let stream: AsyncStream<NetworkPathSnapshot>
     private let continuation: AsyncStream<NetworkPathSnapshot>.Continuation
+    private let subscriptions = Subscriptions()
+
+    // How many times a caller asked for the updates: one stream is handed
+    // out, so only the count proves a second monitor was never started.
+    var subscriptionCount: Int { subscriptions.count }
 
     init() {
         (stream, continuation) = AsyncStream.makeStream()
     }
 
     func updates() -> AsyncStream<NetworkPathSnapshot> {
-        stream
+        subscriptions.record()
+        return stream
     }
 
     func emit(_ snapshot: NetworkPathSnapshot) {
         continuation.yield(snapshot)
+    }
+}
+
+// The lock is the whole invariant: written from the watch's task, read from
+// the test.
+private final class Subscriptions: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    var count: Int { lock.withLock { value } }
+
+    func record() {
+        lock.withLock { value += 1 }
     }
 }
