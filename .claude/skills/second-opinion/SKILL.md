@@ -16,12 +16,19 @@ after a significant implementation, or whenever two Claude passes agree a little
 
 ## Step 1: Pick the model (roster in workflow.md — defaults, not limits)
 
-- `gpt-5.6-sol` — adversarial / final-artifact reviews (default for this skill).
-- `gpt-5.6-terra` — balanced second opinion when sol feels like overkill.
-- `gpt-5.6-luna` — quick mechanical sanity checks.
+- `gpt-6-astra` — **the default for every review in this skill** (owner directive 2026-09-06:
+  "use gpt6 astra from now on instead of gpt-5.6 sol"). Plan reviews, contract locks, and
+  code reviews all go here. Verified 2026-09-06 with codex-cli 0.153.4: `codex exec -m gpt-6-astra`
+  answers and identifies as GPT-6; efforts low/medium/high/xhigh/max/ultra are listed for it in
+  `~/.codex/models_cache.json`. Keep `xhigh` (Step 3); `ultra` delegates sub-tasks on its own and
+  is not a review posture.
+- `gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna` — the previous roster; still installed. Use
+  one only when the owner asks for a different-vendor-family seat or astra is unavailable (a
+  400 on the model id).
 
-Model ids are dated observations (2026-07); if a run 400s, re-verify ids against the installed
-CLI (`codex exec --help`, or try the family variants) before concluding anything.
+Model ids are dated observations (2026-09); if a run 400s, re-verify ids against the installed
+CLI (`python3 -c 'import json;[print(m["slug"]) for m in json.load(open("$HOME/.codex/models_cache.json"))["models"]]'`
+lists what the CLI knows) before concluding anything.
 
 ## Step 2: Build a SELF-CONTAINED prompt
 
@@ -67,7 +74,7 @@ an optional watchdog runs ONE per seat, on that seat's own home.
 ## Step 3: Run it
 
 ```bash
-codex exec -m gpt-5.6-sol -s read-only \
+codex exec -m gpt-6-astra -s read-only \
   -c model_reasoning_effort=xhigh \
   --output-last-message /tmp/second-opinion.md \
   "<self-contained prompt>" < /dev/null
@@ -87,7 +94,7 @@ codex exec -m gpt-5.6-sol -s read-only \
 - `--output-last-message <file>` — stdout is hook-noisy; the file holds the verdict. Read it
   with `cat`.
 - Runs can exceed 10 minutes — set a generous Bash timeout or run in the background.
-- **A healthy sol run finishes in ~10 min; treat silence past ~15 as a hang, not depth**
+- **A healthy astra/sol run finishes in ~10 min; treat silence past ~15 as a hang, not depth**
   (environment-specific heuristic observed on this machine, not a guaranteed liveness signal).
   Liveness check: the newest `~/.codex/sessions/<date>/rollout-*.jsonl` must keep growing
   during a live review — a file that wrote its header and froze is a dead run (kill + retry).
@@ -123,6 +130,11 @@ codex exec -m gpt-5.6-sol -s read-only \
   done
   ```
 
+- **Run from inside the repo** (observed 2026-09-06): with an isolated `CODEX_HOME` the CLI
+  has no trust list, and from a directory outside a git checkout it exits 1 with
+  `Not inside a trusted directory and --skip-git-repo-check was not specified` before the
+  review starts. `cd` into the repo (or a worktree of it) first; the verdict file may still
+  live in the scratchpad.
 - **Minimal `CODEX_HOME` isolation is PROVEN (2026-08-05, multiple runs):** a scratch dir
   containing only `auth.json`, exported as `CODEX_HOME`, eliminates the plugin-stack boot hangs
   (two hung runs at 0% CPU for 30 min reproduced them the same night; every minimal-home run
