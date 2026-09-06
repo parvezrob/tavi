@@ -7,7 +7,7 @@ import XCTest
 // never from when the two-second sampler happened to look. The sampler's own
 // observations are checked separately, with their ±2 s allowance.
 extension TaviChaosSoak {
-    func report(_ chaos: ChaosEnvironment, paneId: String) async throws {
+    func report(_ chaos: ChaosEnvironment) async throws {
         let records = (try? await chaosFaults(chaos)) ?? []
         var detection: [String: [Double]] = [:]
         var recovery: [String: [Double]] = [:]
@@ -32,7 +32,7 @@ extension TaviChaosSoak {
 
         assertSampler()
         let offline = assertFalseOffline()
-        try attach(detection: detection, recovery: recovery, attempts: attempts, offline: offline, paneId: paneId)
+        try attach(detection: detection, recovery: recovery, attempts: attempts, offline: offline)
     }
 
     // MARK: - Budgets
@@ -60,18 +60,19 @@ extension TaviChaosSoak {
             // second one at the 12 s deadline.
             let cycles = collector.all("terminal", "cycling", from: fault.at, to: Double(back.at)).count
             XCTAssertEqual(cycles, 1, "A held ready induced \(cycles) cycles; the deadline should have covered it.")
-            let toReady = (Double(back.at) - fault.at) / 1_000
-            XCTAssertLessThanOrEqual(toReady, ChaosBudget.terminalReadyDeadline, "The slow ready landed \(toReady) s after the fault, past the 12 s deadline.")
+            // Reported, not asserted: the plan asks for upgrade + lookup + 6 s
+            // against the 12 s deadline as a number to read.
+            slowReadySeconds.append((Double(back.at) - fault.at) / 1_000)
             let consumed = records.first { $0.id == fault.id }?.consumedByAttachAt
             XCTAssertNotNil(consumed, "The host never reported an attach consuming this fault's slowReady.")
-        case ("blackhole", "events"):
-            XCTAssertLessThanOrEqual(detection, ChaosBudget.eventsWatchdogCycle, "The watchdog took \(detection) s to cycle a blackholed events socket.")
-            XCTAssertLessThanOrEqual(
-                seconds,
-                ChaosBudget.eventsDelay(attempt) + ChaosBudget.eventsLiveAgainAfterDial,
-                "The events link took \(seconds) s to come back at attempt \(attempt)."
-            )
         case (_, "events"):
+            if fault.name == "blackhole" {
+                XCTAssertLessThanOrEqual(
+                    detection,
+                    ChaosBudget.eventsWatchdogCycle,
+                    "The watchdog took \(detection) s to cycle a blackholed events socket."
+                )
+            }
             XCTAssertLessThanOrEqual(
                 seconds,
                 ChaosBudget.eventsDelay(attempt) + ChaosBudget.eventsLiveAgainAfterDial,
@@ -100,14 +101,16 @@ extension TaviChaosSoak {
         )
     }
 
-    // The first attach of the run, and the first after the takeover.
+    // The first attach of the run, and one for every takeover this soak
+    // performed and then explicitly reopened — the rotation reaches the
+    // takeover every sixth fault, so there is rarely only one.
     private var deliberateFreshAttaches: Int {
-        var count = collector.events.contains { $0.source == "terminal" && $0.kind == "ready" } ? 1 : 0
-        if let takeover = collector.events.first(where: { $0.kind == "takenOver" }),
-           collector.first("terminal", "ready", after: Double(takeover.at)) != nil {
-            count += 1
-        }
-        return count
+        let initial = collector.events.contains { $0.source == "terminal" && $0.kind == "ready" } ? 1 : 0
+        let reopened = collector.events
+            .filter { $0.kind == "takenOver" }
+            .filter { collector.first("terminal", "ready", after: Double($0.at)) != nil }
+            .count
+        return initial + reopened
     }
 
     // MARK: - The fixture's tally
@@ -121,6 +124,7 @@ extension TaviChaosSoak {
             return
         }
         let counts = contents.split(separator: "\n").map(String.init).reduce(into: [String: Int]()) { $0[$1, default: 0] += 1 }
+        tallyCounts = counts
         for mark in marks {
             let name = "MARK-\(mark.number)"
             let count = counts[name] ?? 0
@@ -131,9 +135,10 @@ extension TaviChaosSoak {
         }
     }
 
-    private func markAcks(paneId: String) -> [String: [String: Int]] {
-        let contents = (try? String(contentsOfFile: TaviChaosSoak.tallyPath(paneId), encoding: .utf8)) ?? ""
-        let counts = contents.split(separator: "\n").map(String.init).reduce(into: [String: Int]()) { $0[$1, default: 0] += 1 }
+    // The counts the checkpoint already read; a run that never reached the
+    // checkpoint has none, and every MARK reads as never executed.
+    private var markAcks: [String: [String: Int]] {
+        let counts = tallyCounts ?? [:]
         var byWindow: [String: [String: Int]] = [:]
         for mark in marks {
             let count = counts["MARK-\(mark.number)"] ?? 0
@@ -183,7 +188,9 @@ extension TaviChaosSoak {
                   Double(back.at - cycle.at) / 1_000 > 4 else { continue }
             let from = Double(cycle.at) - ChaosBudget.samplerAllowance * 1_000
             let to = Double(back.at) + ChaosBudget.samplerAllowance * 1_000
-            let seen = samples.contains { $0.at >= from && $0.at <= to && !$0.terminalIsLive }
+            // `terminal.keyboard` is also absent while a MARK is being typed,
+            // so the recovering label itself is the signal.
+            let seen = samples.contains { $0.at >= from && $0.at <= to && $0.status != nil }
             XCTAssertTrue(seen, "A recovery lasting more than four seconds was never visible on the terminal screen.")
         }
     }
@@ -246,8 +253,7 @@ extension TaviChaosSoak {
         detection: [String: [Double]],
         recovery: [String: [Double]],
         attempts: [Int],
-        offline: OfflineTally,
-        paneId: String
+        offline: OfflineTally
     ) throws {
         var table = "chaos soak — seconds per fault kind\n"
         table += "kind                  n  det.min  det.med  det.max  rec.min  rec.med  rec.max\n"
@@ -267,9 +273,15 @@ extension TaviChaosSoak {
         let payload: [String: Any] = [
             "faults": faults,
             "attemptsAtEachCycle": attempts,
-            // Dial latency as the phone measured it: cycling → ready, which
-            // is the redial delay plus the dial itself.
-            "dialLatencySeconds": Distribution(recovery.values.flatMap { $0 }).asJSON,
+            // The dial itself, as the phone timed it: the elapsed time each
+            // `ready` carries. The redial delay in front of it is already
+            // under "recovery" above.
+            "dialLatencyMs": [
+                "terminal": Distribution(readyElapsed("terminal")).asJSON,
+                "events": Distribution(readyElapsed("events")).asJSON,
+            ],
+            "slowReadyAfterFaultSeconds": Distribution(slowReadySeconds).asJSON,
+            "homePhaseSkipped": homePhaseSkipped,
             "resume": [
                 "hits": terminal.filter { $0.kind == "ready" && $0.resumed == true }.count,
                 "deliberateFreshAttaches": deliberateFreshAttaches,
@@ -284,7 +296,7 @@ extension TaviChaosSoak {
                 "incompleteMeasurements": offline.incomplete,
                 "probeDisagreements": offline.probeDisagreements,
             ],
-            "markAcks": markAcks(paneId: paneId),
+            "markAcks": markAcks,
             "events": collector.events.map {
                 ["at": $0.at, "source": $0.source, "kind": $0.kind, "reason": $0.reason, "attempt": $0.attempt, "elapsedMs": $0.elapsedMs]
             },
@@ -295,6 +307,10 @@ extension TaviChaosSoak {
         attachment.name = "chaos-soak-numbers.json"
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    private func readyElapsed(_ source: String) -> [Double] {
+        collector.events.filter { $0.source == source && $0.kind == "ready" }.map { Double($0.elapsedMs) }
     }
 
     // The fixture prints `SOAK <n>` five times a second; the highest number

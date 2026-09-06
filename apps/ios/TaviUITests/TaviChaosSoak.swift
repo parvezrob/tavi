@@ -25,6 +25,12 @@ final class TaviChaosSoak: XCTestCase {
     // Pinned at smoke time, so every later read binds the one element this
     // computer publishes rather than whichever matched a prefix first.
     var diagnosticsIdentifier = ""
+    // Reported in the numbers: a home phase with no room left is not a zero.
+    var homePhaseSkipped = false
+    // Read once at the checkpoint and reported from there.
+    var tallyCounts: [String: Int]?
+    // Reported, not asserted (the plan asks for the number).
+    var slowReadySeconds: [Double] = []
     // Set once the run is armed; every step below asks the same host.
     var chaos: ChaosEnvironment?
 
@@ -64,19 +70,31 @@ final class TaviChaosSoak: XCTestCase {
 
         let started = Date()
         let half = TimeInterval(chaos.minutes) * 60 / 2
-        try await terminalPhase(app, chaos: chaos, paneId: paneId, until: started.addingTimeInterval(half))
-        // The terminal phase may have run long; the home phase gets what is
-        // left of the budget rather than extending the run past it.
-        let remaining = started.addingTimeInterval(TimeInterval(chaos.minutes) * 60)
-        try await homePhase(app, chaos: chaos, until: min(remaining, Date().addingTimeInterval(half)))
-        try await report(chaos, paneId: paneId)
+        let ends = started.addingTimeInterval(TimeInterval(chaos.minutes) * 60)
+        // A step that gives up mid-run is a finding, not a reason to lose the
+        // twenty minutes of numbers behind it: the report always runs.
+        do {
+            try await terminalPhase(app, chaos: chaos, paneId: paneId, until: started.addingTimeInterval(half))
+            // The terminal phase may have run long; the home phase gets what
+            // is left of the budget rather than extending the run past it.
+            let homeDeadline = min(ends, Date().addingTimeInterval(half))
+            if homeDeadline.timeIntervalSinceNow >= Self.homePhaseFloor {
+                try await homePhase(app, chaos: chaos, until: homeDeadline)
+            } else {
+                homePhaseSkipped = true
+                XCTFail("terminal phase overran; home phase skipped")
+            }
+        } catch {
+            XCTFail("The soak stopped early: \(error)")
+        }
+        try await report(chaos)
     }
 
     // MARK: - Terminal phase
 
     private func terminalPhase(_ app: XCUIApplication, chaos: ChaosEnvironment, paneId: String, until deadline: Date) async throws {
         XCTAssertTrue(waitForLiveTerminal(app, timeout: 60), "The terminal never came up against the chaos host.")
-        installFixture(app, paneId: paneId)
+        try installFixture(app, paneId: paneId)
 
         var index = 0
         var cycle = CycleState()
@@ -92,9 +110,12 @@ final class TaviChaosSoak: XCTestCase {
                 type(app, mark: nextMark(.healthy))
             }
             guard let live, live >= ChaosBudget.liveBeforeFault, cycle.markedHealthy, !cycle.firedFault else { continue }
+            let fault = TerminalFault.allCases[index % TerminalFault.allCases.count]
+            // An overrun stays one fault's worth: a fault is fired only when
+            // its own recovery still fits inside the phase.
+            guard deadline.timeIntervalSinceNow >= fault.needsSeconds else { break }
             cycle.firedFault = true
             type(app, mark: nextMark(.beforeFault))
-            let fault = TerminalFault.allCases[index % TerminalFault.allCases.count]
             index += 1
             try await fire(fault, app: app, chaos: chaos, paneId: paneId)
         }
@@ -128,7 +149,7 @@ final class TaviChaosSoak: XCTestCase {
         ].joined(separator: "\n")
     }
 
-    private func installFixture(_ app: XCUIApplication, paneId: String) {
+    private func installFixture(_ app: XCUIApplication, paneId: String) throws {
         let surface = app.descendants(matching: .any)["terminal.surface"]
         surface.tap()
         // One bracketed paste, the way the composer sends text, so no line of
@@ -144,15 +165,15 @@ final class TaviChaosSoak: XCTestCase {
             "sh -n \(path) && echo FIXTURE-OK || echo FIXTURE-BAD",
         ] as [String]).joined(separator: "\n")
         surface.typeText("\u{1B}[200~\(install)\u{1B}[201~\r")
-        XCTAssertTrue(
-            waitForTranscript(of: surface, timeout: 30) { $0.contains("FIXTURE-OK") },
-            "sh -n rejected the soak fixture, or the host never answered."
-        )
+        guard waitForTranscript(of: surface, timeout: 30, until: { $0.contains("FIXTURE-OK") }) else {
+            XCTFail("sh -n rejected the soak fixture, or the host never answered.")
+            throw ChaosSoakFailure.fixtureRejected
+        }
         surface.typeText("\u{1B}[200~. \(path)\u{1B}[201~\r")
-        XCTAssertTrue(
-            waitForTranscript(of: surface, timeout: 30) { $0.contains("SOAK ") },
-            "The fixture never started streaming."
-        )
+        guard waitForTranscript(of: surface, timeout: 30, until: { $0.contains("SOAK ") }) else {
+            XCTFail("The fixture never started streaming.")
+            throw ChaosSoakFailure.fixtureRejected
+        }
         app.buttons["terminal.dismissKeyboard"].tap()
     }
 
@@ -223,10 +244,18 @@ final class TaviChaosSoak: XCTestCase {
 
         let line = try await readDiagnostics(app)
         collector.merge(line)
-        let attachment = try await chaosAttachments(chaos).first { $0.paneId == paneId }
+        // A takeover and its reopen leave retained rows for the same pane, so
+        // the row to compare against is the one the host still has an owner
+        // for. The phone publishes no stream token — the model carries no
+        // String — so "not yet released" is what identifies it.
+        let rows = ((try? await chaosAttachments(chaos)) ?? []).filter { $0.paneId == paneId && $0.releasedAt == nil }
+        guard rows.count == 1, let attachment = rows.first else {
+            XCTFail("The host has \(rows.count) live attachments for this pane; there is no offset to compare against.")
+            return
+        }
         XCTAssertEqual(
             line.terminal.acceptedOffset,
-            attachment?.endOffset,
+            attachment.endOffset,
             "The phone and the host disagree about how many bytes this stream produced."
         )
         assertIntegrity(line)
@@ -305,7 +334,11 @@ final class TaviChaosSoak: XCTestCase {
         // question: an HTTP call into a withholding host hangs for its whole
         // timeout, and the report is what the run exists to produce.
         try await waitForHostToAnswer(chaos, within: window + 30)
-        try await waitForEventsRecovery(app, chaos: chaos, after: milliseconds(), detection: 60)
+        // Anchored on the fault, and on a snapshot rather than a cycle: when
+        // the host starts answering again the next dial simply succeeds, and
+        // no further cycle follows it.
+        let back = try await waitForEvent(app, source: "events", kind: "ready", after: at, within: 120)
+        XCTAssertTrue(back, "The events link never came back after the host stopped withholding.")
     }
 
     private func waitForHostToAnswer(_ chaos: ChaosEnvironment, within seconds: Double) async throws {
@@ -346,7 +379,8 @@ final class TaviChaosSoak: XCTestCase {
             XCTFail("The events link never recorded a cycle within \(detection) s of the fault.")
             return
         }
-        _ = try await waitForEvent(app, source: "events", kind: "ready", after: at, within: 90)
+        let back = try await waitForEvent(app, source: "events", kind: "ready", after: at, within: 90)
+        XCTAssertTrue(back, "The events link never delivered a snapshot again after the fault.")
     }
 
     private func waitForEvent(
@@ -544,6 +578,10 @@ final class TaviChaosSoak: XCTestCase {
     static func tallyPath(_ paneId: String) -> String { "/tmp/tavi-soak-\(paneId).tally" }
 
     static func fixturePath(_ paneId: String) -> String { "/tmp/tavi-soak-\(paneId).sh" }
+
+    // Below this the home phase cannot fire its four faults and wait them
+    // out, so it is not started at all.
+    static let homePhaseFloor: TimeInterval = 180
 
     func milliseconds() -> Double { Date().timeIntervalSince1970 * 1_000 }
 }
