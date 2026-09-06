@@ -62,8 +62,9 @@ final class NetworkWebSocketTask: TerminalWebSocketTasking, @unchecked Sendable 
         let tcp = NWProtocolTCP.Options()
         // Terminal keystrokes are tiny writes; never let Nagle hold one back.
         tcp.noDelay = true
-        // URLRequest's timeout is the caller's handshake budget (the events
-        // stream sets 15 s); Network.framework's default is a minute.
+        // URLRequest's timeout becomes the TCP connection budget and nothing
+        // more — TLS, the upgrade and the first frame are the caller's to
+        // bound. Network.framework's own default is a minute.
         if request.timeoutInterval.isFinite, request.timeoutInterval >= 1 {
             tcp.connectionTimeout = Int(request.timeoutInterval)
         }

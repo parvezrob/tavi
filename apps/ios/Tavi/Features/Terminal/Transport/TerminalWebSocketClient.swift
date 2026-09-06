@@ -100,9 +100,12 @@ actor TerminalWebSocketClient: TerminalTransporting {
         }
 
         var request = URLRequest(url: endpoint)
-        // The handshake budget; the controller's connect deadline is shorter
-        // and cycles a silent attempt first.
-        request.timeoutInterval = 10
+        // The TCP connection budget, and only that: NetworkWebSocketTask
+        // maps it to NWProtocolTCP.Options.connectionTimeout. The
+        // controller's ready deadline sits above it and bounds everything
+        // after the socket is up — TLS, the upgrade, and the wait for
+        // ready (#107).
+        request.timeoutInterval = ReconnectPolicy.terminalTCPConnectionTimeout
         request.setValue("Bearer \(configuration.credential)", forHTTPHeaderField: "Authorization")
         request.setValue(TerminalWireProtocol.name, forHTTPHeaderField: "Sec-WebSocket-Protocol")
 

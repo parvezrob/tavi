@@ -24,11 +24,20 @@ final class TerminalSessionController {
     let bridge = TerminalIOBridge()
 
     private let client: any TerminalTransporting
-    private let clock = ContinuousClock()
-    private let heartbeatPolicy: HeartbeatPolicy
-    private let outbound: TerminalOutbound
     private let reconnectPolicy: ReconnectPolicy
-    private let timing: TerminalTiming
+    // Not private: the heartbeat lives in TerminalSessionHeartbeat.swift,
+    // which is the only other reader, and Swift has no narrower scope than
+    // the module for that.
+    let heartbeatPolicy: HeartbeatPolicy
+    let outbound: TerminalOutbound
+    let timing: TerminalTiming
+    // Answer bound and send bound are separate handles under separate
+    // tokens: a pong proves the host replied, not that our send returned.
+    var heartbeatDeadlineTask: Task<Void, Never>?
+    var heartbeatSendBound: Task<Void, Never>?
+    var heartbeatTask: Task<Void, Never>?
+    var outstandingHeartbeatID: String?
+    var outstandingHeartbeatSendID: String?
 
     private var configuration: TerminalConnectionConfiguration?
     private var connectDeadlineTask: Task<Void, Never>?
@@ -38,14 +47,13 @@ final class TerminalSessionController {
     private var lastPathSnapshot: NetworkPathSnapshot?
     private var pathTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
-    private var heartbeatDeadlineTask: Task<Void, Never>?
-    private var heartbeatTask: Task<Void, Never>?
     private var inputSentAt: ContinuousClock.Instant?
     private var lastSentGrid: TerminalGridSize?
-    private var outstandingHeartbeatID: String?
     private let mentioned = MentionedPorts()
     private var reconnectTask: Task<Void, Never>?
     private var reconnectAttempt = 0
+    // When the current connection last said ready; nil while it is not up.
+    private var readyAt: ContinuousClock.Instant?
     private var resumeOffset: UInt64 = 0
     private var resumeStream: String?
     private var shouldReconnect = false
@@ -106,17 +114,11 @@ final class TerminalSessionController {
     }
 
     func stop() {
-        shouldReconnect = false
-        configuration = nil
-        resumeStream = nil
-        resumeOffset = 0
         pathTask?.cancel()
         pathTask = nil
         mentioned.clear()
         lastPathSnapshot = nil
-        invalidateConnectionTasks()
-        scheduleDisconnect()
-        transition(.stop)
+        endSession(.stop)
     }
 
     func sceneDidBecomeActive() {
@@ -203,11 +205,7 @@ final class TerminalSessionController {
 
     func rendererDidFail(_ message: String) {
         errorMessage = message
-        shouldReconnect = false
-        configuration = nil
-        invalidateConnectionTasks()
-        scheduleDisconnect()
-        transition(.unrecoverableFailure)
+        endSession(.unrecoverableFailure)
     }
 
     #if DEBUG
@@ -220,14 +218,19 @@ final class TerminalSessionController {
         guard shouldReconnect, let configuration else { return }
         eventTask?.cancel()
         heartbeatTask?.cancel()
-        heartbeatDeadlineTask?.cancel()
+        clearHeartbeatBounds()
+        readyAt = nil
         outbound.cancel()
+        // Cancelled *and* released: a retained handle held the retry gate in
+        // connectionEndedUnexpectedly() shut forever, and the terminal stayed
+        // on Connecting (#107).
         reconnectTask?.cancel()
+        reconnectTask = nil
         connectionGeneration += 1
         let generation = connectionGeneration
         let pendingDisconnect = disconnectTask
         transition(.connect)
-        connectionStartedAt = clock.now
+        connectionStartedAt = timing.now()
         startConnectDeadline(generation: generation)
 
         eventTask = Task { [weak self] in
@@ -258,11 +261,11 @@ final class TerminalSessionController {
                 if error.isPermanentConnectionFailure {
                     failPermanently(error)
                 } else {
-                    connectionEndedUnexpectedly()
+                    connectionEndedUnexpectedly(.transportFailed)
                 }
             } catch {
                 guard isCurrentConnection(generation) else { return }
-                connectionEndedUnexpectedly()
+                connectionEndedUnexpectedly(.transportFailed)
             }
         }
     }
@@ -272,12 +275,12 @@ final class TerminalSessionController {
         case let .message(message):
             handle(message)
         case .disconnected:
-            connectionEndedUnexpectedly()
+            connectionEndedUnexpectedly(.transportDisconnected)
         case let .failed(error):
             if error.isPermanentConnectionFailure {
                 failPermanently(error)
             } else {
-                connectionEndedUnexpectedly()
+                connectionEndedUnexpectedly(.transportFailed)
             }
         }
     }
@@ -287,18 +290,24 @@ final class TerminalSessionController {
         case let .ready(stream, offset, resumed):
             connectDeadlineTask?.cancel()
             connectDeadlineTask = nil
-            reconnectAttempt = 0
+            // A ready that lands after the deadline fired, while the retry
+            // is still waiting out its delay, is a success and not a
+            // straggler: letting the scheduled dial run would tear down a
+            // socket that just proved itself (#107).
+            reconnectTask?.cancel()
+            reconnectTask = nil
             errorMessage = nil
-            outstandingHeartbeatID = nil
             lastSentGrid = nil
             resumeStream = stream
             resumeOffset = offset
-            Self.logger.info("ready: resumed=\(resumed) offset=\(offset)")
+            readyAt = timing.now()
+            let elapsed = connectionStartedAt.map { $0.milliseconds(to: timing.now()) } ?? 0
+            Self.logger.info("ready: generation=\(self.connectionGeneration) attempt=\(self.reconnectAttempt) resumed=\(resumed) afterMs=\(Int(elapsed))")
             transition(.ready)
             if let grid = latestGridSize {
                 outbound.send(.resize(columns: grid.columns, rows: grid.rows), generation: connectionGeneration)
             }
-            startHeartbeat()
+            startHeartbeat(generation: connectionGeneration)
         case let .output(text):
             recordOutputTimings()
             bridge.receiveRemoteOutput(Data(text.utf8))
@@ -309,30 +318,42 @@ final class TerminalSessionController {
         case let .pong(identifier):
             if outstandingHeartbeatID == identifier {
                 outstandingHeartbeatID = nil
+                // Release the answer bound only: sitting its budget out made
+                // a healthy cadence interval + timeout, and a reply says
+                // nothing about our own queue draining.
+                heartbeatDeadlineTask?.cancel()
+                heartbeatDeadlineTask = nil
             }
         case .exit:
-            shouldReconnect = false
-            configuration = nil
-            resumeStream = nil
-            resumeOffset = 0
-            invalidateConnectionTasks()
-            scheduleDisconnect()
-            transition(.terminalExited)
+            endSession(.terminalExited)
         case let .error(message):
             errorMessage = message
         }
     }
 
-    private func connectionEndedUnexpectedly() {
+    private func connectionEndedUnexpectedly(_ reason: TerminalRecoveryReason) {
         guard shouldReconnect, connectionState != .suspended, connectionState != .ended else {
             return
         }
-        guard reconnectTask == nil else { return }
+        // A trigger dropped because a dial is already scheduled is exactly
+        // what #107 is about; it leaves a trace rather than vanishing.
+        guard reconnectTask == nil else {
+            Self.logger.info("cycle ignored, retry pending: reason=\(reason.rawValue, privacy: .public) generation=\(self.connectionGeneration)")
+            return
+        }
 
         connectDeadlineTask?.cancel()
         connectDeadlineTask = nil
         heartbeatTask?.cancel()
-        heartbeatDeadlineTask?.cancel()
+        clearHeartbeatBounds()
+        // The backoff forgets the attempts behind it only once a connection
+        // has held for the documented period, so repeated flaps cannot walk
+        // the delay back to its shortest value (#107) — the events stream's
+        // rule.
+        if let readyAt, readyAt.duration(to: timing.now()) >= reconnectPolicy.sustainedHealthInterval {
+            reconnectAttempt = 0
+        }
+        readyAt = nil
         reconnectAttempt += 1
         if lastPathSnapshot?.isSatisfied == false {
             transition(.networkLost)
@@ -342,6 +363,12 @@ final class TerminalSessionController {
         let delay = reconnectPolicy.delay(forAttempt: reconnectAttempt)
         let generation = connectionGeneration
         let timing = timing
+        // The reason is public on purpose: Logger redacts dynamic strings by
+        // default, and this closed enum of fixed tokens is the one field the
+        // record exists to carry.
+        Self.logger.info(
+            "cycling: reason=\(reason.rawValue, privacy: .public) generation=\(generation) attempt=\(self.reconnectAttempt) delayMs=\(delay.wholeMilliseconds)"
+        )
         reconnectTask = Task { [weak self] in
             do {
                 try await timing.sleep(delay)
@@ -349,9 +376,11 @@ final class TerminalSessionController {
                 return
             }
             guard let self, shouldReconnect, isCurrentConnection(generation) else { return }
+            // Straight into the dial, with no await in between: the
+            // generation bump inside beginConnection() happens synchronously
+            // here, so the intentional close the old receive loop would
+            // otherwise report as a failure is discarded (#107).
             reconnectTask = nil
-            await client.disconnect()
-            guard isCurrentConnection(generation) else { return }
             beginConnection()
         }
     }
@@ -363,10 +392,10 @@ final class TerminalSessionController {
 
     private func recordOutputTimings() {
         if firstPaintMilliseconds == nil, let connectionStartedAt {
-            firstPaintMilliseconds = connectionStartedAt.milliseconds(to: clock.now)
+            firstPaintMilliseconds = connectionStartedAt.milliseconds(to: timing.now())
         }
         if let inputSentAt {
-            inputToOutputMilliseconds = inputSentAt.milliseconds(to: clock.now)
+            inputToOutputMilliseconds = inputSentAt.milliseconds(to: timing.now())
             self.inputSentAt = nil
         }
     }
@@ -389,11 +418,11 @@ final class TerminalSessionController {
         guard previous != snapshot else { return }
 
         if !snapshot.isSatisfied {
-            Self.logger.info("network path lost")
+            Self.logger.info("network path lost: generation=\(self.connectionGeneration)")
             transition(.networkLost)
             // Keep the retry loop alive so recovery never depends on the
             // monitor delivering a satisfied event later.
-            connectionEndedUnexpectedly()
+            connectionEndedUnexpectedly(.networkPathLost)
             return
         }
 
@@ -410,19 +439,21 @@ final class TerminalSessionController {
         // since its packets may be on the old path — without resetting
         // the backoff, so a flapping path cannot defeat it.
         if connectionState == .connected {
-            startHeartbeat(immediately: true)
+            startHeartbeat(generation: connectionGeneration, immediately: true)
             return
         }
         // A network that comes back after being lost is a real signal, not
         // a flap: dial now rather than waiting out the scheduled retry —
         // the attempt count stays, so the next failure backs off further.
+        // beginConnection() releases the scheduled retry itself.
         if !previous.isSatisfied {
-            reconnectTask?.cancel()
-            reconnectTask = nil
             beginConnection()
             return
         }
-        guard reconnectTask == nil else { return }
+        // Satisfied to satisfied is chatter, and a dial in progress owns its
+        // ready budget: restarting it handed it a fresh deadline on every
+        // interface change, so a flapping route never let a host finish.
+        guard connectionState != .connecting, reconnectTask == nil else { return }
         beginConnection()
     }
 
@@ -439,61 +470,20 @@ final class TerminalSessionController {
             guard let self,
                   isCurrentConnection(generation),
                   connectionState == .connecting else { return }
-            Self.logger.info("connect attempt exceeded deadline; cycling")
-            connectionEndedUnexpectedly()
+            connectionEndedUnexpectedly(.connectDeadline)
         }
     }
 
-    private func startHeartbeat(immediately: Bool = false) {
-        heartbeatTask?.cancel()
-        heartbeatDeadlineTask?.cancel()
-        let generation = connectionGeneration
-        var skipFirstWait = immediately
-        heartbeatTask = Task { [weak self] in
-            while !Task.isCancelled {
-                do {
-                    guard let self else { return }
-                    if skipFirstWait {
-                        skipFirstWait = false
-                    } else {
-                        try await timing.sleep(heartbeatPolicy.interval)
-                    }
-                } catch {
-                    return
-                }
-                guard let self,
-                      isCurrentConnection(generation),
-                      connectionState == .connected else { return }
-
-                let identifier = UUID().uuidString
-                outstandingHeartbeatID = identifier
-                let deadlineTask = Task { @MainActor [weak self] in
-                    do {
-                        guard let self else { return }
-                        try await timing.sleep(heartbeatPolicy.timeout)
-                    } catch {
-                        return
-                    }
-                    guard let self,
-                          isCurrentConnection(generation),
-                          outstandingHeartbeatID == identifier else { return }
-                    errorMessage = "The host stopped responding. Reconnecting."
-                    connectionEndedUnexpectedly()
-                }
-                heartbeatDeadlineTask = deadlineTask
-                let sendTask = outbound.send(.ping(identifier: identifier), generation: connectionGeneration)
-                await sendTask.value
-                guard isCurrentConnection(generation) else { return }
-                reconcileGridIfNeeded()
-                await deadlineTask.value
-                guard isCurrentConnection(generation) else { return }
-            }
-        }
+    // Either heartbeat bound expiring says the same thing to the person:
+    // the host is not answering. Which bound it was stays in the log.
+    func heartbeatDidTimeOut(_ reason: TerminalRecoveryReason) {
+        errorMessage = "The host stopped responding. Reconnecting."
+        connectionEndedUnexpectedly(reason)
     }
 
     private func deliverTerminalInput(_ data: Data, canCoalesce: Bool = true) {
         guard connectionState.canSubmitInput, !data.isEmpty else { return }
-        inputSentAt = clock.now
+        inputSentAt = timing.now()
         outbound.submitInput(data, generation: connectionGeneration, canCoalesce: canCoalesce)
     }
 
@@ -517,7 +507,7 @@ final class TerminalSessionController {
                     : "Input was not sent."
                 inputSentAt = nil
             }
-            connectionEndedUnexpectedly()
+            connectionEndedUnexpectedly(.outboundFailed)
         case .drained:
             reconcileGridIfNeeded()
         case .backedUp:
@@ -534,20 +524,30 @@ final class TerminalSessionController {
         connectDeadlineTask?.cancel()
         connectDeadlineTask = nil
         eventTask?.cancel()
-        heartbeatDeadlineTask?.cancel()
         heartbeatTask?.cancel()
+        clearHeartbeatBounds()
         outbound.cancel()
         reconnectTask?.cancel()
         eventTask = nil
-        heartbeatDeadlineTask = nil
         heartbeatTask = nil
         reconnectTask = nil
+        readyAt = nil
         inputSentAt = nil
         lastSentGrid = nil
-        outstandingHeartbeatID = nil
     }
 
-    private func isCurrentConnection(_ generation: Int) -> Bool {
+    // Both bounds and the tokens they answer to, released together: neither
+    // may outlive the round that armed it.
+    func clearHeartbeatBounds() {
+        heartbeatDeadlineTask?.cancel()
+        heartbeatDeadlineTask = nil
+        heartbeatSendBound?.cancel()
+        heartbeatSendBound = nil
+        outstandingHeartbeatID = nil
+        outstandingHeartbeatSendID = nil
+    }
+
+    func isCurrentConnection(_ generation: Int) -> Bool {
         generation == connectionGeneration && !Task.isCancelled
     }
 
@@ -564,7 +564,7 @@ final class TerminalSessionController {
     // grid even when an individual resize send is lost, raced by a layout
     // transition, or deferred while reconnecting. Reconciliation runs after
     // the outbound queue drains and on every heartbeat.
-    private func reconcileGridIfNeeded() {
+    func reconcileGridIfNeeded() {
         guard connectionState.canSubmitInput,
               outbound.isIdle,
               let latestGridSize,
@@ -574,13 +574,19 @@ final class TerminalSessionController {
     }
 
     private func failPermanently(_ error: TerminalTransportError) {
+        errorMessage = error.localizedDescription
+        endSession(.unrecoverableFailure)
+    }
+
+    // Every way a session ends for good: nothing is retried, no resume point
+    // survives it, and the socket is closed exactly once.
+    private func endSession(_ action: TerminalConnectionAction) {
         shouldReconnect = false
         configuration = nil
         resumeStream = nil
         resumeOffset = 0
-        errorMessage = error.localizedDescription
         invalidateConnectionTasks()
         scheduleDisconnect()
-        transition(.unrecoverableFailure)
+        transition(action)
     }
 }

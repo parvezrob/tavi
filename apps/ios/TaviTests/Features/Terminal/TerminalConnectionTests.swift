@@ -71,15 +71,15 @@ struct TerminalConnectionTests {
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
-        try await waitUntil { controller.connectionState == .connected }
+        try await waitFor { controller.connectionState == .connected }
 
         paths.emit(NetworkPathSnapshot(isSatisfied: false, interfaceIdentity: "none"))
-        try await waitUntil { controller.connectionState == .waitingForNetwork }
+        try await waitFor { controller.connectionState == .waitingForNetwork }
 
         paths.emit(NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "en0"))
-        try await waitUntil { await transport.connectCount >= 2 }
+        try await waitFor { await transport.connectCount >= 2 }
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
-        try await waitUntil { controller.connectionState == .connected }
+        try await waitFor { controller.connectionState == .connected }
         controller.stop()
     }
 
@@ -105,10 +105,10 @@ struct TerminalConnectionTests {
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
-        try await waitUntil { controller.connectionState == .connected }
+        try await waitFor { controller.connectionState == .connected }
 
         paths.emit(NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "en0"))
-        await yieldExecution()
+        await settle()
         #expect(await transport.connectCount == 1)
 
         // A path *change* while connected (#86, PRD §7.13): on cellular the
@@ -116,7 +116,7 @@ struct TerminalConnectionTests {
         // socket working. The socket is asked, not torn down; its heartbeat
         // timeout decides.
         paths.emit(NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "pdp_ip0"))
-        try await waitUntil { await transport.latestPingIdentifier != nil }
+        try await waitFor { await transport.latestPingIdentifier != nil }
         #expect(await transport.connectCount == 1)
         #expect(controller.connectionState == .connected)
         controller.stop()
@@ -125,7 +125,7 @@ struct TerminalConnectionTests {
     @Test
     @MainActor
     func stalledConnectAttemptIsCycledAtTheDeadline() async throws {
-        let sleeper = ManualTerminalSleeper()
+        let clock = ManualTerminalClock()
         let transport = ScriptedTerminalTransport()
         let controller = TerminalSessionController(
             client: transport,
@@ -135,7 +135,7 @@ struct TerminalConnectionTests {
                 multiplier: 1,
                 connectDeadline: .seconds(3)
             ),
-            timing: sleeper.timing
+            timing: clock.timing
         )
 
         controller.connect(
@@ -144,9 +144,9 @@ struct TerminalConnectionTests {
             credential: "valid-token"
         )
         #expect(controller.connectionState == .connecting)
-        try await waitUntil { await sleeper.hasWaiter(for: .seconds(3)) }
-        try await sleeper.resumeFirst(for: .seconds(3))
-        try await waitUntil {
+        try await waitFor { await clock.hasWaiter(for: .seconds(3)) }
+        try await clock.resumeAll(for: .seconds(3))
+        try await waitFor {
             if case .reconnecting = controller.connectionState { return true }
             return false
         }
@@ -173,13 +173,13 @@ struct TerminalConnectionTests {
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-a", offset: 0, resumed: false)))
-        try await waitUntil { controller.connectionState == .connected }
+        try await waitFor { controller.connectionState == .connected }
         try await transport.emit(.message(.outputChunk(offset: 0, data: Data("hello".utf8))))
         try await transport.emit(.message(.outputChunk(offset: 5, data: Data(" world".utf8))))
-        try await waitUntil { await transport.receiveCount >= 3 }
+        try await waitFor { await transport.receiveCount >= 3 }
 
         try await transport.emit(.disconnected)
-        try await waitUntil { await transport.connectCount >= 2 }
+        try await waitFor { await transport.connectCount >= 2 }
 
         let resumes = await transport.connectResumes
         #expect(resumes.first ?? nil == nil)
@@ -208,7 +208,7 @@ struct TerminalConnectionTests {
         let sender = FailingTerminalSender()
         let delivery = TerminalInputDelivery(sender: sender)
 
-        await #expect(throws: TestFailure.self) {
+        await #expect(throws: TerminalTestFailure.self) {
             try await delivery.submitOnce(Data("dangerous-command\r".utf8))
         }
         #expect(await sender.calls == 1)
@@ -226,10 +226,10 @@ struct TerminalConnectionTests {
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
-        try await waitUntil { controller.connectionState == .connected }
+        try await waitFor { controller.connectionState == .connected }
 
         controller.bridge.receiveTerminalInput(Data("ls -la\r".utf8))
-        try await waitUntil {
+        try await waitFor {
             await transport.sentMessages.contains(.input("ls -la\r"))
         }
 
@@ -249,11 +249,11 @@ struct TerminalConnectionTests {
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
-        try await waitUntil { controller.connectionState == .connected }
+        try await waitFor { controller.connectionState == .connected }
 
         controller.paste("echo safe")
         let expected = TerminalClientMessage.input("\u{1B}[200~echo safe\u{1B}[201~")
-        try await waitUntil {
+        try await waitFor {
             await transport.sentMessages.contains(expected)
         }
 
@@ -273,12 +273,12 @@ struct TerminalConnectionTests {
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
-        try await waitUntil { controller.connectionState == .connected }
+        try await waitFor { controller.connectionState == .connected }
 
         controller.sendComposedText("line one\nline two")
         let pasted = TerminalClientMessage.input("\u{1B}[200~line one\nline two\u{1B}[201~")
         let returnKey = TerminalClientMessage.input("\r")
-        try await waitUntil {
+        try await waitFor {
             await transport.sentMessages.contains(returnKey)
         }
 
@@ -302,18 +302,18 @@ struct TerminalConnectionTests {
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
-        try await waitUntil { controller.connectionState == .connected }
+        try await waitFor { controller.connectionState == .connected }
 
         controller.toggleControlLatch()
         #expect(controller.controlLatchActive)
         controller.bridge.receiveTerminalInput(Data("r".utf8))
-        try await waitUntil {
+        try await waitFor {
             await transport.sentMessages.contains(.input("\u{12}"))
         }
         #expect(!controller.controlLatchActive)
 
         controller.bridge.receiveTerminalInput(Data("r".utf8))
-        try await waitUntil {
+        try await waitFor {
             await transport.sentMessages.contains(.input("r"))
         }
         controller.stop()
@@ -333,12 +333,12 @@ struct TerminalConnectionTests {
         )
         controller.terminalGridDidChange(TerminalGridSize(columns: 80, rows: 24))
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
-        try await waitUntil {
+        try await waitFor {
             await transport.sentMessages.filter { $0 == resize }.count == 1
         }
 
         controller.terminalRendererDidAttach()
-        try await waitUntil {
+        try await waitFor {
             await transport.sentMessages.filter { $0 == resize }.count == 2
         }
 
@@ -358,20 +358,20 @@ struct TerminalConnectionTests {
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
-        try await waitUntil { controller.connectionState == .connected }
+        try await waitFor { controller.connectionState == .connected }
 
         controller.bridge.receiveTerminalInput(Data("a".utf8))
-        try await waitUntil { await transport.inputMessages == ["a"] }
+        try await waitFor { await transport.inputMessages == ["a"] }
 
         let queuedText = "bcdefghijklmnopqrstuvwxyz"
         for byte in queuedText.utf8 {
             controller.bridge.receiveTerminalInput(Data([byte]))
         }
-        await yieldExecution()
+        await settle()
         #expect(await transport.inputMessages == ["a"])
 
         try await transport.resumeNextSend()
-        try await waitUntil { await transport.inputMessages == ["a", queuedText] }
+        try await waitFor { await transport.inputMessages == ["a", queuedText] }
         try await transport.resumeNextSend()
 
         #expect(await transport.inputMessages.joined() == "a" + queuedText)
@@ -396,8 +396,8 @@ struct TerminalConnectionTests {
             paneID: "fixture",
             credential: "wrong-token"
         )
-        try await waitUntil { controller.connectionState == .failed }
-        await yieldExecution()
+        try await waitFor { controller.connectionState == .failed }
+        await settle()
 
         #expect(await transport.connectCount == 1)
         #expect(controller.errorMessage?.contains("rejected") == true)
@@ -409,7 +409,7 @@ struct TerminalConnectionTests {
     @Test
     @MainActor
     func missingHeartbeatPongTriggersReconnect() async throws {
-        let sleeper = ManualTerminalSleeper()
+        let clock = ManualTerminalClock()
         let transport = ScriptedTerminalTransport()
         let controller = TerminalSessionController(
             client: transport,
@@ -418,11 +418,14 @@ struct TerminalConnectionTests {
                 maximumDelay: .seconds(1),
                 multiplier: 1
             ),
+            // Three distinct budgets, so resuming one says which bound the
+            // connection was cycled on (#107).
             heartbeatPolicy: HeartbeatPolicy(
                 interval: .seconds(10),
-                timeout: .seconds(5)
+                timeout: .seconds(5),
+                sendTimeout: .seconds(2)
             ),
-            timing: sleeper.timing
+            timing: clock.timing
         )
 
         controller.connect(
@@ -431,11 +434,14 @@ struct TerminalConnectionTests {
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
-        try await waitUntil { await sleeper.hasWaiter(for: .seconds(10)) }
-        try await sleeper.resumeFirst(for: .seconds(10))
-        try await waitUntil { await sleeper.hasWaiter(for: .seconds(5)) }
-        try await sleeper.resumeFirst(for: .seconds(5))
-        try await waitUntil {
+        try await waitFor { await clock.hasWaiter(for: .seconds(10)) }
+        try await clock.resumeAll(for: .seconds(10))
+        // The ping is on the wire and the host's own budget is running: this
+        // is the missing-pong path, not the stalled-send one.
+        try await waitFor { await transport.latestPingIdentifier != nil }
+        try await waitFor { await clock.hasWaiter(for: .seconds(5)) }
+        try await clock.resumeAll(for: .seconds(5))
+        try await waitFor {
             if case .reconnecting = controller.connectionState { return true }
             return false
         }
@@ -451,15 +457,16 @@ struct TerminalConnectionTests {
     @Test
     @MainActor
     func matchingHeartbeatPongKeepsConnectionHealthy() async throws {
-        let sleeper = ManualTerminalSleeper()
+        let clock = ManualTerminalClock()
         let transport = ScriptedTerminalTransport()
         let controller = TerminalSessionController(
             client: transport,
             heartbeatPolicy: HeartbeatPolicy(
                 interval: .seconds(10),
-                timeout: .seconds(5)
+                timeout: .seconds(5),
+                sendTimeout: .seconds(2)
             ),
-            timing: sleeper.timing
+            timing: clock.timing
         )
 
         controller.connect(
@@ -468,15 +475,17 @@ struct TerminalConnectionTests {
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
-        try await waitUntil { controller.connectionState == .connected }
-        try await waitUntil { await sleeper.hasWaiter(for: .seconds(10)) }
-        try await sleeper.resumeFirst(for: .seconds(10))
+        try await waitFor { controller.connectionState == .connected }
+        try await waitFor { await clock.hasWaiter(for: .seconds(10)) }
+        try await clock.resumeAll(for: .seconds(10))
         let pingIdentifier = try await waitForPingIdentifier(in: transport)
-        let receiveCount = await transport.receiveCount
+        try await waitFor { await clock.hasWaiter(for: .seconds(5)) }
         try await transport.emit(.message(.pong(identifier: pingIdentifier)))
-        try await waitUntil { await transport.receiveCount > receiveCount }
-        try await sleeper.resumeFirst(for: .seconds(5))
-        await yieldExecution()
+        // The answer released the round rather than being ignored until the
+        // budget ran out: the next beat is one interval away (#107).
+        try await waitFor { await clock.hasWaiter(for: .seconds(5)) == false }
+        try await waitFor { await clock.hasWaiter(for: .seconds(10)) }
+        await settle()
 
         #expect(controller.connectionState == .connected)
         #expect(await transport.sentMessages.contains { message in
@@ -489,7 +498,7 @@ struct TerminalConnectionTests {
     @Test
     @MainActor
     func hangingHeartbeatSendStillTimesOut() async throws {
-        let sleeper = ManualTerminalSleeper()
+        let clock = ManualTerminalClock()
         let transport = ScriptedTerminalTransport(hangsSends: true)
         let controller = TerminalSessionController(
             client: transport,
@@ -500,9 +509,10 @@ struct TerminalConnectionTests {
             ),
             heartbeatPolicy: HeartbeatPolicy(
                 interval: .seconds(10),
-                timeout: .seconds(5)
+                timeout: .seconds(5),
+                sendTimeout: .seconds(2)
             ),
-            timing: sleeper.timing
+            timing: clock.timing
         )
 
         controller.connect(
@@ -511,11 +521,15 @@ struct TerminalConnectionTests {
             credential: "valid-token"
         )
         try await transport.emit(.message(.ready(stream: "epoch-1", offset: 0, resumed: false)))
-        try await waitUntil { await sleeper.hasWaiter(for: .seconds(10)) }
-        try await sleeper.resumeFirst(for: .seconds(10))
+        try await waitFor { await clock.hasWaiter(for: .seconds(10)) }
+        try await clock.resumeAll(for: .seconds(10))
         _ = try await waitForPingIdentifier(in: transport)
-        try await sleeper.resumeFirst(for: .seconds(5))
-        try await waitUntil {
+        // The send never completes, so this is the send bound; the host's
+        // budget was never armed because nothing was ever asked.
+        try await waitFor { await clock.hasWaiter(for: .seconds(2)) }
+        #expect(await clock.timesScheduled(.seconds(5)) == 0)
+        try await clock.resumeAll(for: .seconds(2))
+        try await waitFor {
             if case .reconnecting = controller.connectionState { return true }
             return false
         }
@@ -525,47 +539,14 @@ struct TerminalConnectionTests {
     }
 
     @MainActor
-    private func waitUntil(condition: () async -> Bool) async throws {
-        for _ in 0..<10_000 {
-            if await condition() { return }
-            await Task.yield()
-        }
-        throw TestFailure()
-    }
-
     private func waitForPingIdentifier(
         in transport: ScriptedTerminalTransport
     ) async throws -> String {
-        for _ in 0..<10_000 {
-            if let identifier = await transport.latestPingIdentifier { return identifier }
-            await Task.yield()
+        try await waitFor { await transport.latestPingIdentifier != nil }
+        guard let identifier = await transport.latestPingIdentifier else {
+            throw TerminalTestFailure()
         }
-        throw TestFailure()
-    }
-
-    private func yieldExecution() async {
-        for _ in 0..<100 {
-            await Task.yield()
-        }
-    }
-}
-
-private struct TestFailure: Error {}
-
-private final class ScriptedPathObserver: NetworkPathObserving {
-    private let stream: AsyncStream<NetworkPathSnapshot>
-    private let continuation: AsyncStream<NetworkPathSnapshot>.Continuation
-
-    init() {
-        (stream, continuation) = AsyncStream.makeStream()
-    }
-
-    func updates() -> AsyncStream<NetworkPathSnapshot> {
-        stream
-    }
-
-    func emit(_ snapshot: NetworkPathSnapshot) {
-        continuation.yield(snapshot)
+        return identifier
     }
 }
 
@@ -574,7 +555,7 @@ private actor FailingTerminalSender: TerminalMessageSending {
 
     func send(_ message: TerminalClientMessage) async throws {
         calls += 1
-        throw TestFailure()
+        throw TerminalTestFailure()
     }
 }
 
@@ -693,7 +674,7 @@ private actor GatedTerminalTransport: TerminalTransporting {
     }
 
     func resumeNextSend() throws {
-        guard !sendContinuations.isEmpty else { throw TestFailure() }
+        guard !sendContinuations.isEmpty else { throw TerminalTestFailure() }
         sendContinuations.removeFirst().resume()
     }
 
@@ -704,57 +685,5 @@ private actor GatedTerminalTransport: TerminalTransporting {
         } else {
             queuedEvents.append(event)
         }
-    }
-}
-
-private actor ManualTerminalSleeper {
-    private struct Waiter {
-        let id: UUID
-        let duration: Duration
-        let continuation: CheckedContinuation<Void, Error>
-    }
-
-    private var waiters: [Waiter] = []
-
-    nonisolated var timing: TerminalTiming {
-        TerminalTiming { duration in
-            try await self.sleep(for: duration)
-        }
-    }
-
-    func hasWaiter(for duration: Duration) -> Bool {
-        waiters.contains { $0.duration == duration }
-    }
-
-    func resumeFirst(for duration: Duration) throws {
-        guard let index = waiters.firstIndex(where: { $0.duration == duration }) else {
-            throw TestFailure()
-        }
-        let waiter = waiters.remove(at: index)
-        waiter.continuation.resume()
-    }
-
-    private func sleep(for duration: Duration) async throws {
-        let id = UUID()
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation {
-                (continuation: CheckedContinuation<Void, Error>) in
-                if Task.isCancelled {
-                    continuation.resume(throwing: CancellationError())
-                } else {
-                    waiters.append(
-                        Waiter(id: id, duration: duration, continuation: continuation)
-                    )
-                }
-            }
-        } onCancel: {
-            Task { await self.cancel(id: id) }
-        }
-    }
-
-    private func cancel(id: UUID) {
-        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
-        let waiter = waiters.remove(at: index)
-        waiter.continuation.resume(throwing: CancellationError())
     }
 }

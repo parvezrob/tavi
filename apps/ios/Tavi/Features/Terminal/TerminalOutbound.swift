@@ -108,6 +108,11 @@ final class TerminalOutbound {
                 } else {
                     try await client.send(message)
                 }
+                // Success is fenced like failure is: a resize that completes
+                // after its connection was replaced would otherwise move the
+                // live one's idea of the host's grid, and reconciliation
+                // would then stop correcting it (#107).
+                guard isCurrentConnection?(generation) == true else { return }
                 outcomeConsumer?(.sent(message))
             } catch let error as TerminalTransportError {
                 guard isCurrentConnection?(generation) == true else { return }

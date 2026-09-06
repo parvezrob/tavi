@@ -11,10 +11,19 @@ struct TerminalOutboundTests {
         var outcomes: [TerminalOutbound.Outcome] = []
     }
 
-    private static func outbound(_ transport: GatedTransport) -> (TerminalOutbound, Recorder) {
+    // Which generation the controller would call current, moved by the test
+    // while a send is in flight.
+    private final class LiveGeneration {
+        var value = 1
+    }
+
+    private static func outbound(
+        _ transport: GatedTransport,
+        liveGeneration: @escaping @MainActor (Int) -> Bool = { _ in true }
+    ) -> (TerminalOutbound, Recorder) {
         let outbound = TerminalOutbound(client: transport)
         let recorder = Recorder()
-        outbound.installGenerationCheck { _ in true }
+        outbound.installGenerationCheck(liveGeneration)
         outbound.installOutcomeConsumer { recorder.outcomes.append($0) }
         return (outbound, recorder)
     }
@@ -123,6 +132,24 @@ struct TerminalOutboundTests {
         #expect(await transport.inputs == ["a"])
     }
 
+    // A send that succeeds after its connection was replaced is as stale as
+    // one that fails: reporting it moved the live connection's idea of the
+    // host's grid, and reconciliation then stopped correcting it (#107).
+    @Test func aSendThatSucceedsUnderASupersededGenerationIsNotReported() async throws {
+        let transport = GatedTransport()
+        let live = LiveGeneration()
+        let (outbound, recorder) = Self.outbound(transport, liveGeneration: { live.value == $0 })
+        outbound.send(.resize(columns: 80, rows: 24), generation: 1)
+        try await waitUntil { await transport.resizes.count == 1 }
+
+        // The connection is replaced while the resize is still in flight.
+        live.value = 2
+        await transport.release()
+        await settle()
+
+        #expect(recorder.outcomes.contains { if case .sent = $0 { return true } else { return false } } == false)
+    }
+
     // MARK: - The Ctrl latch
 
     @Test func theCtrlLatchTurnsTheNextKeyIntoItsControlCode() async throws {
@@ -151,6 +178,7 @@ struct TerminalOutboundTests {
 // the queue behind it is observable.
 private actor GatedTransport: TerminalTransporting {
     private(set) var inputs: [String] = []
+    private(set) var resizes: [TerminalClientMessage] = []
     private var waiting: [CheckedContinuation<Void, Never>] = []
 
     func connect(configuration: TerminalConnectionConfiguration, resume: TerminalResumePoint?) {}
@@ -159,6 +187,7 @@ private actor GatedTransport: TerminalTransporting {
 
     func send(_ message: TerminalClientMessage) async {
         if case let .input(value) = message { inputs.append(value) }
+        if case .resize = message { resizes.append(message) }
         await withCheckedContinuation { continuation in
             waiting.append(continuation)
         }

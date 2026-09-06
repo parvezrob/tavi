@@ -60,6 +60,22 @@ enum HostConnectionEvent {
     case revoked(reason: String)
 }
 
+// How often the events watchdog looks at its socket, and the two idle
+// marks it acts on (#86, #107). A test shortens `pollInterval` so a run
+// takes milliseconds; it crosses the idle marks through the socket's own
+// `lastActivity` rather than by changing them.
+struct HostWatchdogPolicy: Sendable, Equatable {
+    let pollInterval: Duration
+    let pingAfterIdle: TimeInterval
+    let cycleAfterIdle: TimeInterval
+
+    static let live = HostWatchdogPolicy(
+        pollInterval: .seconds(5),
+        pingAfterIdle: 30,
+        cycleAfterIdle: 45
+    )
+}
+
 // The events stream for one paired computer (#50): the socket, the
 // reconnect schedule, and the reachability probe behind the home's
 // connection header. What the host says about agents goes to the
@@ -114,6 +130,7 @@ final class HostConnection {
     private var credential = ""
     private let transport: HostClient.Transport
     private let makeSocket: @Sendable (URLRequest) -> any HostEventsSocketing
+    private let watchdogPolicy: HostWatchdogPolicy
     private var onEvent: ((HostConnectionEvent) -> Void)?
     private var reconnectAttempt = 0
     private var streamTask: Task<Void, Never>?
@@ -131,15 +148,21 @@ final class HostConnection {
     private var probeInFlight: Task<HostProbe, Never>?
     private var consecutiveFailedDials = 0
     private var streamConnectedAt: Date?
+    // The watchdog's outstanding challenge to a quiet socket, owned here so
+    // there is never more than one and so teardown is deterministic (#107).
+    private var watchdogPing: Task<Void, Never>?
+    private var watchdogPingGeneration = 0
 
     // Tests hand in their own transport and socket so no unit test opens a
     // real one — the seam the terminal transport already has (#99).
     init(
         transport: @escaping HostClient.Transport = { try await HostSession.shared.data(for: $0) },
-        makeSocket: @escaping @Sendable (URLRequest) -> any HostEventsSocketing = { NetworkWebSocketTask(request: $0) }
+        makeSocket: @escaping @Sendable (URLRequest) -> any HostEventsSocketing = { NetworkWebSocketTask(request: $0) },
+        watchdogPolicy: HostWatchdogPolicy = .live
     ) {
         self.transport = transport
         self.makeSocket = makeSocket
+        self.watchdogPolicy = watchdogPolicy
     }
 
     // Everything this link asks the host over HTTP goes through one client,
@@ -233,6 +256,7 @@ final class HostConnection {
         streamTask = nil
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
+        cancelWatchdogPing()
         latencyTask?.cancel()
         latencyTask = nil
         isRunning = false
@@ -266,28 +290,15 @@ final class HostConnection {
         }
         defer { deadline.cancel() }
 
-        // Snapshots arrive on change only, so a dead socket looks exactly
-        // like a quiet evening: ping after 30 s of silence, cycle at 45 s
-        // (#86). The host's WebSocket server answers pings on its own.
-        let watchdog = Task { [weak socket] in
-            var pinged = false
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
-                guard !Task.isCancelled, let socket else { return }
-                let idle = Date().timeIntervalSince(socket.lastActivity)
-                if idle >= 45 {
-                    socket.cancel(with: .goingAway, reason: nil)
-                    return
-                }
-                if idle >= 30, !pinged {
-                    pinged = true
-                    try? await socket.ping()
-                } else if idle < 30 {
-                    pinged = false
-                }
-            }
+        let watchdog = startWatchdog(for: socket)
+        defer {
+            watchdog.cancel()
+            // Only this dial's challenge. The defer that clears `self.socket`
+            // is registered first and so runs last, which makes the identity
+            // check here the honest one: a superseded stream unwinding late
+            // must not cancel the replacement's ping.
+            if self.socket === socket { cancelWatchdogPing() }
         }
-        defer { watchdog.cancel() }
 
         var measured = false
         defer {
@@ -325,7 +336,8 @@ final class HostConnection {
             }
         } catch {
             guard !Task.isCancelled else { return }
-            Self.logger.info("events stream ended: \(error.localizedDescription)")
+            let failure = SocketFailure(error)
+            Self.logger.info("events stream ended: reason=\(failure.tag.rawValue, privacy: .public) code=\(failure.code) priorFailedDials=\(self.consecutiveFailedDials)")
             // Keep the last known agents on screen, explicitly stale —
             // dropping them here made "Needs you" blink away on every
             // network blip while the agent was still waiting.
@@ -361,6 +373,60 @@ final class HostConnection {
                 }
             }
         }
+    }
+
+    // The watchdog for one socket (#86, #107). Snapshots arrive on change
+    // only, so a dead socket looks exactly like a quiet evening: challenge
+    // it with a ping after `pingAfterIdle`, cycle it at `cycleAfterIdle`.
+    // The ping is never awaited in this loop — awaiting it inline let a
+    // send that suspended keep the loop from ever reaching the cycle check,
+    // so a socket 51 s idle had been pinged once and cancelled never.
+    private func startWatchdog(for socket: any HostEventsSocketing) -> Task<Void, Never> {
+        let policy = watchdogPolicy
+        return Task { [weak self, weak socket] in
+            // Whether this quiet period has already been challenged. Reset
+            // by activity; the pending send itself is owned by the link, not
+            // by the period that started it.
+            var challenged = false
+            while !Task.isCancelled {
+                try? await Task.sleep(for: policy.pollInterval)
+                guard !Task.isCancelled, let self, let socket else { return }
+                let idle = Date().timeIntervalSince(socket.lastActivity)
+                if idle >= policy.cycleAfterIdle {
+                    cancelWatchdogPing()
+                    socket.cancel(with: .goingAway, reason: nil)
+                    return
+                }
+                guard idle >= policy.pingAfterIdle else {
+                    challenged = false
+                    continue
+                }
+                guard !challenged else { continue }
+                challenged = true
+                challengeQuietSocket(socket)
+            }
+        }
+    }
+
+    // One challenge in flight per link, and it stays this link's until the
+    // send actually finishes. A send that ignores cancellation must not be
+    // orphaned by a blip of activity and then multiplied by the next quiet
+    // period; cancelling the socket is what releases the real one (#107).
+    private func challengeQuietSocket(_ socket: any HostEventsSocketing) {
+        guard watchdogPing == nil else { return }
+        watchdogPingGeneration += 1
+        let generation = watchdogPingGeneration
+        watchdogPing = Task { [weak self, weak socket] in
+            try? await socket?.ping()
+            guard let self, watchdogPingGeneration == generation else { return }
+            watchdogPing = nil
+        }
+    }
+
+    private func cancelWatchdogPing() {
+        watchdogPing?.cancel()
+        watchdogPing = nil
+        watchdogPingGeneration += 1
     }
 
     // Offline is said only after two misses a moment apart: one slow
