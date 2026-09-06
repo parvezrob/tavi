@@ -16,7 +16,7 @@ extension TaviChaosSoak {
         for fault in fired {
             let source = fault.socket == "terminal" ? "terminal" : "events"
             let key = "\(source).\(fault.name)"
-            guard let cycled = collector.first(source, "cycling", after: fault.at) else {
+            guard let cycled = collector.first(source, "cycling", at: fault.at) else {
                 XCTFail("\(fault.name) on the \(fault.socket) socket produced no cycle at all.")
                 continue
             }
@@ -24,7 +24,7 @@ extension TaviChaosSoak {
             // span measured in wall clock; everything else is the phone's own
             // monotonic clock, which nothing can adjust under the run.
             detection[key, default: []].append((Double(cycled.at) - fault.at) / 1_000)
-            guard let back = collector.first(source, "ready", after: Double(cycled.at)) else {
+            guard let back = collector.first(source, "ready", after: cycled) else {
                 XCTFail("\(fault.name) on the \(fault.socket) socket never came back.")
                 continue
             }
@@ -116,7 +116,7 @@ extension TaviChaosSoak {
         let initial = collector.events.contains { $0.source == "terminal" && $0.kind == "ready" } ? 1 : 0
         let reopened = collector.events
             .filter { $0.kind == "takenOver" }
-            .filter { collector.first("terminal", "ready", after: Double($0.at)) != nil }
+            .filter { collector.first("terminal", "ready", after: $0) != nil }
             .count
         return initial + reopened
     }
@@ -187,8 +187,15 @@ extension TaviChaosSoak {
             }
             // And the window opens at the recovery, not before it: the surface
             // republishes asynchronously.
-            guard sample.at - ready >= ChaosBudget.freshness * 1_000 else { continue }
-            guard let number = Self.latestSoakNumber(in: sample.surface) else { continue }
+            let since = (sample.at - ready) / 1_000
+            guard since >= ChaosBudget.freshness else { continue }
+            // A surface with nothing on it is not fresh: a terminal that came
+            // back blank and stayed blank must not pass by having no number
+            // to compare.
+            guard let number = Self.latestSoakNumber(in: sample.surface) else {
+                XCTFail("no SOAK output on the surface \(since) s after ready")
+                return
+            }
             if number != lastNumber {
                 lastNumber = number
                 lastChange = sample.at
@@ -209,7 +216,7 @@ extension TaviChaosSoak {
         fired.contains { fault in
             guard at >= fault.at else { return false }
             let source = fault.socket == "terminal" ? "terminal" : "events"
-            guard let back = collector.first(source, "ready", after: fault.at) else { return true }
+            guard let back = collector.first(source, "ready", at: fault.at) else { return true }
             return at <= Double(back.at)
         }
     }
@@ -219,7 +226,7 @@ extension TaviChaosSoak {
     private func assertRecoveriesAreVisible() {
         let cycles = collector.events.filter { $0.source == "terminal" && $0.kind == "cycling" }
         for cycle in cycles {
-            guard let back = collector.first("terminal", "ready", after: Double(cycle.at)),
+            guard let back = collector.first("terminal", "ready", after: cycle),
                   Double(back.monotonic - cycle.monotonic) / 1_000 > 4 else { continue }
             let from = Double(cycle.at) - ChaosBudget.samplerAllowance * 1_000
             let to = Double(back.at) + ChaosBudget.samplerAllowance * 1_000

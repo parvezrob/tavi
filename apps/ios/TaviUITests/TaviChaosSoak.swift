@@ -391,9 +391,9 @@ final class TaviChaosSoak: XCTestCase {
         while Date() < ends {
             try await tick(app, chaos: chaos)
             if samples.last?.health == "offline" { sawOffline = true }
-            if collector.first("events", "offlineEntered", after: at) != nil, sawOffline { break }
+            if collector.first("events", "offlineEntered", at: at) != nil, sawOffline { break }
         }
-        XCTAssertNotNil(collector.first("events", "offlineEntered", after: at), "The host withheld every response and the phone never said Offline.")
+        XCTAssertNotNil(collector.first("events", "offlineEntered", at: at), "The host withheld every response and the phone never said Offline.")
         XCTAssertTrue(sawOffline, "The phone recorded Offline but the home never showed it.")
 
         // The window must be over before anything else asks the host a
@@ -459,7 +459,7 @@ final class TaviChaosSoak: XCTestCase {
         let deadline = Date().addingTimeInterval(seconds)
         while Date() < deadline {
             try await tick(app, chaos: chaos)
-            if collector.first(source, kind, after: at) != nil { return true }
+            if collector.first(source, kind, at: at) != nil { return true }
         }
         return false
     }

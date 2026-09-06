@@ -137,12 +137,22 @@ final class RingCollector {
         events.sort { $0.monotonic < $1.monotonic }
     }
 
-    func first(_ source: String, _ kind: String, after at: Double) -> DiagnosticsEvent? {
-        events.first { $0.source == source && $0.kind == kind && Double($0.at) > at }
+    // Anchored on a host timestamp — a fault's `at`. Both sides export whole
+    // milliseconds, so a cycle inside the fault's own millisecond belongs to
+    // the window rather than before it.
+    func first(_ source: String, _ kind: String, at anchor: Double) -> DiagnosticsEvent? {
+        events.first { $0.source == source && $0.kind == kind && Double($0.at) >= anchor }
+    }
+
+    // Anchored on another of the phone's own events, so the phone's monotonic
+    // stamps order them: no two events of one source share an instant, so this
+    // is a strict ordering even written as `>=`.
+    func first(_ source: String, _ kind: String, after event: DiagnosticsEvent) -> DiagnosticsEvent? {
+        events.first { $0.source == source && $0.kind == kind && $0.monotonic >= event.monotonic }
     }
 
     func all(_ source: String, _ kind: String, from: Double, to: Double) -> [DiagnosticsEvent] {
-        events.filter { $0.source == source && $0.kind == kind && Double($0.at) > from && Double($0.at) <= to }
+        events.filter { $0.source == source && $0.kind == kind && Double($0.at) >= from && Double($0.at) <= to }
     }
 }
 
