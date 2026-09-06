@@ -2,871 +2,871 @@
   {
     "text": "    static func blocks(_ markdown: String) -> [Block] {",
     "violation": {
-      "ruleIdentifier": "cyclomatic_complexity",
-      "reason": "Function should have complexity 10 or less; currently complexity is 15",
-      "ruleName": "Cyclomatic Complexity",
-      "ruleDescription": "Complexity of function bodies should be limited.",
       "severity": "warning",
+      "ruleIdentifier": "cyclomatic_complexity",
+      "ruleDescription": "Complexity of function bodies should be limited.",
       "location": {
         "line": 290,
-        "character": 5,
-        "file": "Tavi/Features/Files/FileViewerView.swift"
-      }
+        "file": "Tavi/Features/Files/FileViewerView.swift",
+        "character": 5
+      },
+      "reason": "Function should have complexity 10 or less; currently complexity is 15",
+      "ruleName": "Cyclomatic Complexity"
     }
   },
   {
     "text": "}",
     "violation": {
-      "ruleIdentifier": "file_length",
-      "reason": "File should contain 400 lines or less: currently contains 441",
-      "ruleName": "File Length",
-      "ruleDescription": "Files should not span too many lines.",
       "severity": "warning",
+      "ruleIdentifier": "file_length",
+      "ruleDescription": "Files should not span too many lines.",
       "location": {
         "line": 441,
-        "character": 1,
-        "file": "Tavi/Features/Files/FileViewerView.swift"
-      }
+        "file": "Tavi/Features/Files/FileViewerView.swift",
+        "character": 1
+      },
+      "reason": "File should contain 400 lines or less: currently contains 441",
+      "ruleName": "File Length"
     }
   },
   {
     "text": "}",
     "violation": {
-      "ruleIdentifier": "file_length",
-      "reason": "File should contain 400 lines or less: currently contains 474",
-      "ruleName": "File Length",
-      "ruleDescription": "Files should not span too many lines.",
       "severity": "warning",
+      "ruleIdentifier": "file_length",
+      "ruleDescription": "Files should not span too many lines.",
       "location": {
         "line": 474,
-        "character": 1,
-        "file": "Tavi/Features/Files/FilesSheet.swift"
-      }
+        "file": "Tavi/Features/Files/FilesSheet.swift",
+        "character": 1
+      },
+      "reason": "File should contain 400 lines or less: currently contains 474",
+      "ruleName": "File Length"
     }
   },
   {
     "text": "        struct Device: Decodable { let id: String; let name: String }",
     "violation": {
-      "ruleIdentifier": "nesting",
-      "reason": "Types should be nested at most 1 level deep",
-      "ruleName": "Nesting",
-      "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
       "severity": "warning",
+      "ruleIdentifier": "nesting",
+      "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
       "location": {
         "line": 40,
-        "character": 9,
-        "file": "Tavi/Features/Pairing/HostPairing.swift"
-      }
+        "file": "Tavi/Features/Pairing/HostPairing.swift",
+        "character": 9
+      },
+      "reason": "Types should be nested at most 1 level deep",
+      "ruleName": "Nesting"
     }
   },
   {
     "text": "        struct Host: Decodable { let name: String; let fingerprint: String }",
     "violation": {
-      "ruleIdentifier": "nesting",
-      "reason": "Types should be nested at most 1 level deep",
-      "ruleName": "Nesting",
-      "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
       "severity": "warning",
+      "ruleIdentifier": "nesting",
+      "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
       "location": {
         "line": 41,
-        "character": 9,
-        "file": "Tavi/Features/Pairing/HostPairing.swift"
-      }
+        "file": "Tavi/Features/Pairing/HostPairing.swift",
+        "character": 9
+      },
+      "reason": "Types should be nested at most 1 level deep",
+      "ruleName": "Nesting"
     }
   },
   {
     "text": "}",
     "violation": {
-      "ruleIdentifier": "file_length",
-      "reason": "File should contain 400 lines or less: currently contains 520",
-      "ruleName": "File Length",
-      "ruleDescription": "Files should not span too many lines.",
       "severity": "warning",
+      "ruleIdentifier": "file_length",
+      "ruleDescription": "Files should not span too many lines.",
       "location": {
         "line": 520,
-        "character": 1,
-        "file": "Tavi/Features/Preview/PreviewSheet.swift"
-      }
+        "file": "Tavi/Features/Preview/PreviewSheet.swift",
+        "character": 1
+      },
+      "reason": "File should contain 400 lines or less: currently contains 520",
+      "ruleName": "File Length"
     }
   },
   {
     "text": "    private func streamOnce(handshake: URLRequest) async {",
     "violation": {
-      "ruleIdentifier": "cyclomatic_complexity",
-      "reason": "Function should have complexity 10 or less; currently complexity is 13",
-      "ruleName": "Cyclomatic Complexity",
-      "ruleDescription": "Complexity of function bodies should be limited.",
       "severity": "warning",
+      "ruleIdentifier": "cyclomatic_complexity",
+      "ruleDescription": "Complexity of function bodies should be limited.",
       "location": {
         "line": 308,
-        "character": 13,
-        "file": "Tavi/Features/Sessions/HostConnection.swift"
-      }
+        "file": "Tavi/Features/Sessions/HostConnection.swift",
+        "character": 13
+      },
+      "reason": "Function should have complexity 10 or less; currently complexity is 13",
+      "ruleName": "Cyclomatic Complexity"
     }
   },
   {
     "text": "}",
     "violation": {
-      "ruleIdentifier": "file_length",
-      "reason": "File should contain 400 lines or less: currently contains 556",
-      "ruleName": "File Length",
-      "ruleDescription": "Files should not span too many lines.",
       "severity": "warning",
+      "ruleIdentifier": "file_length",
+      "ruleDescription": "Files should not span too many lines.",
       "location": {
         "line": 556,
-        "character": 1,
-        "file": "Tavi/Features/Sessions/HostConnection.swift"
-      }
+        "file": "Tavi/Features/Sessions/HostConnection.swift",
+        "character": 1
+      },
+      "reason": "File should contain 400 lines or less: currently contains 556",
+      "ruleName": "File Length"
     }
   },
   {
     "text": "            }) {",
     "violation": {
-      "ruleIdentifier": "multiple_closures_with_trailing_closure",
-      "reason": "Trailing closure syntax should not be used when passing more than one closure argument",
-      "ruleName": "Multiple Closures with Trailing Closure",
-      "ruleDescription": "Trailing closure syntax should not be used when passing more than one closure argument",
       "severity": "warning",
+      "ruleIdentifier": "multiple_closures_with_trailing_closure",
+      "ruleDescription": "Trailing closure syntax should not be used when passing more than one closure argument",
       "location": {
         "line": 136,
-        "character": 16,
-        "file": "Tavi/Features/Sessions/SessionsView.swift"
-      }
+        "file": "Tavi/Features/Sessions/SessionsView.swift",
+        "character": 16
+      },
+      "reason": "Trailing closure syntax should not be used when passing more than one closure argument",
+      "ruleName": "Multiple Closures with Trailing Closure"
     }
   },
   {
     "text": "            }) {",
     "violation": {
-      "ruleIdentifier": "multiple_closures_with_trailing_closure",
-      "reason": "Trailing closure syntax should not be used when passing more than one closure argument",
-      "ruleName": "Multiple Closures with Trailing Closure",
-      "ruleDescription": "Trailing closure syntax should not be used when passing more than one closure argument",
       "severity": "warning",
+      "ruleIdentifier": "multiple_closures_with_trailing_closure",
+      "ruleDescription": "Trailing closure syntax should not be used when passing more than one closure argument",
       "location": {
         "line": 154,
-        "character": 16,
-        "file": "Tavi/Features/Sessions/SessionsView.swift"
-      }
+        "file": "Tavi/Features/Sessions/SessionsView.swift",
+        "character": 16
+      },
+      "reason": "Trailing closure syntax should not be used when passing more than one closure argument",
+      "ruleName": "Multiple Closures with Trailing Closure"
     }
   },
   {
     "text": "            }) { target in",
     "violation": {
-      "ruleIdentifier": "multiple_closures_with_trailing_closure",
-      "reason": "Trailing closure syntax should not be used when passing more than one closure argument",
-      "ruleName": "Multiple Closures with Trailing Closure",
-      "ruleDescription": "Trailing closure syntax should not be used when passing more than one closure argument",
       "severity": "warning",
+      "ruleIdentifier": "multiple_closures_with_trailing_closure",
+      "ruleDescription": "Trailing closure syntax should not be used when passing more than one closure argument",
       "location": {
         "line": 195,
-        "character": 16,
-        "file": "Tavi/Features/Sessions/SessionsView.swift"
-      }
+        "file": "Tavi/Features/Sessions/SessionsView.swift",
+        "character": 16
+      },
+      "reason": "Trailing closure syntax should not be used when passing more than one closure argument",
+      "ruleName": "Multiple Closures with Trailing Closure"
     }
   },
   {
     "text": "}",
     "violation": {
-      "ruleIdentifier": "file_length",
-      "reason": "File should contain 400 lines or less: currently contains 512",
-      "ruleName": "File Length",
-      "ruleDescription": "Files should not span too many lines.",
       "severity": "warning",
+      "ruleIdentifier": "file_length",
+      "ruleDescription": "Files should not span too many lines.",
       "location": {
         "line": 512,
-        "character": 1,
-        "file": "Tavi/Features/Sessions/SessionsView.swift"
-      }
+        "file": "Tavi/Features/Sessions/SessionsView.swift",
+        "character": 1
+      },
+      "reason": "File should contain 400 lines or less: currently contains 512",
+      "ruleName": "File Length"
     }
   },
   {
     "text": "    private func content(_ preview: RemovalPreview) -> some View {",
     "violation": {
-      "ruleIdentifier": "function_body_length",
-      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 85 lines",
-      "ruleName": "Function Body Length",
-      "ruleDescription": "Function bodies should not span too many lines",
       "severity": "warning",
+      "ruleIdentifier": "function_body_length",
+      "ruleDescription": "Function bodies should not span too many lines",
       "location": {
         "line": 75,
-        "character": 13,
-        "file": "Tavi/Features/SourceControl/RemoveWorktreeSheet.swift"
-      }
+        "file": "Tavi/Features/SourceControl/RemoveWorktreeSheet.swift",
+        "character": 13
+      },
+      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 85 lines",
+      "ruleName": "Function Body Length"
     }
   },
   {
     "text": "            }) {",
     "violation": {
-      "ruleIdentifier": "multiple_closures_with_trailing_closure",
-      "reason": "Trailing closure syntax should not be used when passing more than one closure argument",
-      "ruleName": "Multiple Closures with Trailing Closure",
-      "ruleDescription": "Trailing closure syntax should not be used when passing more than one closure argument",
       "severity": "warning",
+      "ruleIdentifier": "multiple_closures_with_trailing_closure",
+      "ruleDescription": "Trailing closure syntax should not be used when passing more than one closure argument",
       "location": {
         "line": 105,
-        "character": 16,
-        "file": "Tavi/Features/SourceControl/SourceControlSheet.swift"
-      }
+        "file": "Tavi/Features/SourceControl/SourceControlSheet.swift",
+        "character": 16
+      },
+      "reason": "Trailing closure syntax should not be used when passing more than one closure argument",
+      "ruleName": "Multiple Closures with Trailing Closure"
     }
   },
   {
     "text": "    private func changedRow(_ file: ChangedFile) -> some View {",
     "violation": {
-      "ruleIdentifier": "function_body_length",
-      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 61 lines",
-      "ruleName": "Function Body Length",
-      "ruleDescription": "Function bodies should not span too many lines",
       "severity": "warning",
+      "ruleIdentifier": "function_body_length",
+      "ruleDescription": "Function bodies should not span too many lines",
       "location": {
         "line": 197,
-        "character": 13,
-        "file": "Tavi/Features/SourceControl/SourceControlSheet.swift"
-      }
+        "file": "Tavi/Features/SourceControl/SourceControlSheet.swift",
+        "character": 13
+      },
+      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 61 lines",
+      "ruleName": "Function Body Length"
     }
   },
   {
     "text": "    private func run(_ continuation: AsyncThrowingStream<DictationUpdate, any Error>.Continuation) async throws {",
     "violation": {
+      "severity": "warning",
       "ruleIdentifier": "cyclomatic_complexity",
-      "reason": "Function should have complexity 10 or less; currently complexity is 16",
-      "ruleName": "Cyclomatic Complexity",
       "ruleDescription": "Complexity of function bodies should be limited.",
-      "severity": "warning",
       "location": {
         "line": 55,
-        "character": 13,
-        "file": "Tavi/Features/Terminal/Dictation/SpeechDictationEngine.swift"
-      }
+        "file": "Tavi/Features/Terminal/Dictation/SpeechDictationEngine.swift",
+        "character": 13
+      },
+      "reason": "Function should have complexity 10 or less; currently complexity is 16",
+      "ruleName": "Cyclomatic Complexity"
     }
   },
   {
     "text": "    private func run(_ continuation: AsyncThrowingStream<DictationUpdate, any Error>.Continuation) async throws {",
     "violation": {
-      "ruleIdentifier": "function_body_length",
-      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 95 lines",
-      "ruleName": "Function Body Length",
-      "ruleDescription": "Function bodies should not span too many lines",
       "severity": "warning",
+      "ruleIdentifier": "function_body_length",
+      "ruleDescription": "Function bodies should not span too many lines",
       "location": {
         "line": 55,
-        "character": 13,
-        "file": "Tavi/Features/Terminal/Dictation/SpeechDictationEngine.swift"
-      }
+        "file": "Tavi/Features/Terminal/Dictation/SpeechDictationEngine.swift",
+        "character": 13
+      },
+      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 95 lines",
+      "ruleName": "Function Body Length"
     }
   },
   {
     "text": "    var dictationCaption: (text: String, isFailure: Bool, offersSettings: Bool)? {",
     "violation": {
-      "ruleIdentifier": "large_tuple",
-      "reason": "Tuples should have at most 2 members",
-      "ruleName": "Large Tuple",
-      "ruleDescription": "Tuples shouldn't have too many members. Create a custom type instead.",
       "severity": "warning",
+      "ruleIdentifier": "large_tuple",
+      "ruleDescription": "Tuples shouldn't have too many members. Create a custom type instead.",
       "location": {
         "line": 39,
-        "character": 27,
-        "file": "Tavi/Features/Terminal/Dictation/TerminalDictation.swift"
-      }
+        "file": "Tavi/Features/Terminal/Dictation/TerminalDictation.swift",
+        "character": 27
+      },
+      "reason": "Tuples should have at most 2 members",
+      "ruleName": "Large Tuple"
     }
   },
   {
     "text": "        let raw = String(decoding: UnsafeRawBufferPointer(start: pointer, count: Int(text.text_len)), as: UTF8.self)",
     "violation": {
-      "ruleIdentifier": "optional_data_string_conversion",
-      "reason": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
-      "ruleName": "Optional Data -> String Conversion",
-      "ruleDescription": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
       "severity": "warning",
+      "ruleIdentifier": "optional_data_string_conversion",
+      "ruleDescription": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
       "location": {
         "line": 32,
-        "character": 19,
-        "file": "Tavi/Features/Terminal/Renderer/GhosttyScreenText.swift"
-      }
+        "file": "Tavi/Features/Terminal/Renderer/GhosttyScreenText.swift",
+        "character": 19
+      },
+      "reason": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
+      "ruleName": "Optional Data -> String Conversion"
     }
   },
   {
     "text": "    init(",
     "violation": {
-      "ruleIdentifier": "function_body_length",
-      "reason": "Initializer body should span 60 lines or less excluding comments and whitespace: currently spans 65 lines",
-      "ruleName": "Function Body Length",
-      "ruleDescription": "Function bodies should not span too many lines",
       "severity": "warning",
+      "ruleIdentifier": "function_body_length",
+      "ruleDescription": "Function bodies should not span too many lines",
       "location": {
         "line": 80,
-        "character": 5,
-        "file": "Tavi/Features/Terminal/Renderer/GhosttyTerminalSurfaceView.swift"
-      }
+        "file": "Tavi/Features/Terminal/Renderer/GhosttyTerminalSurfaceView.swift",
+        "character": 5
+      },
+      "reason": "Initializer body should span 60 lines or less excluding comments and whitespace: currently spans 65 lines",
+      "ruleName": "Function Body Length"
     }
   },
   {
     "text": "    override class var layerClass: AnyClass {",
     "violation": {
-      "ruleIdentifier": "static_over_final_class",
-      "reason": "Prefer `static` over `class` in a final class",
-      "ruleName": "Static Over Final Class",
-      "ruleDescription": "Prefer `static` over `class` when the declaration is not allowed to be overridden in child classes due to its context being final. Likewise, the compiler complains about `open` being used in `final` classes.",
       "severity": "warning",
+      "ruleIdentifier": "static_over_final_class",
+      "ruleDescription": "Prefer `static` over `class` when the declaration is not allowed to be overridden in child classes due to its context being final. Likewise, the compiler complains about `open` being used in `final` classes.",
       "location": {
         "line": 184,
-        "character": 5,
-        "file": "Tavi/Features/Terminal/Renderer/GhosttyTerminalSurfaceView.swift"
-      }
+        "file": "Tavi/Features/Terminal/Renderer/GhosttyTerminalSurfaceView.swift",
+        "character": 5
+      },
+      "reason": "Prefer `static` over `class` in a final class",
+      "ruleName": "Static Over Final Class"
     }
   },
   {
     "text": "}",
     "violation": {
-      "ruleIdentifier": "file_length",
-      "reason": "File should contain 400 lines or less: currently contains 505",
-      "ruleName": "File Length",
-      "ruleDescription": "Files should not span too many lines.",
       "severity": "warning",
+      "ruleIdentifier": "file_length",
+      "ruleDescription": "Files should not span too many lines.",
       "location": {
         "line": 505,
-        "character": 1,
-        "file": "Tavi/Features/Terminal/Renderer/GhosttyTerminalSurfaceView.swift"
-      }
+        "file": "Tavi/Features/Terminal/Renderer/GhosttyTerminalSurfaceView.swift",
+        "character": 1
+      },
+      "reason": "File should contain 400 lines or less: currently contains 505",
+      "ruleName": "File Length"
     }
   },
   {
     "text": "        let value = String(decoding: data, as: UTF8.self)",
     "violation": {
-      "ruleIdentifier": "optional_data_string_conversion",
-      "reason": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
-      "ruleName": "Optional Data -> String Conversion",
-      "ruleDescription": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
       "severity": "warning",
+      "ruleIdentifier": "optional_data_string_conversion",
+      "ruleDescription": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
       "location": {
         "line": 154,
-        "character": 21,
-        "file": "Tavi/Features/Terminal/TerminalOutbound.swift"
-      }
+        "file": "Tavi/Features/Terminal/TerminalOutbound.swift",
+        "character": 21
+      },
+      "reason": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
+      "ruleName": "Optional Data -> String Conversion"
     }
   },
   {
     "text": "final class TerminalSessionController {",
     "violation": {
-      "ruleIdentifier": "type_body_length",
-      "reason": "Class body should span 400 lines or less excluding comments and whitespace: currently spans 484 lines",
-      "ruleName": "Type Body Length",
-      "ruleDescription": "Type bodies should not span too many lines",
       "severity": "warning",
+      "ruleIdentifier": "type_body_length",
+      "ruleDescription": "Type bodies should not span too many lines",
       "location": {
         "line": 7,
-        "character": 7,
-        "file": "Tavi/Features/Terminal/TerminalSessionController.swift"
-      }
+        "file": "Tavi/Features/Terminal/TerminalSessionController.swift",
+        "character": 7
+      },
+      "reason": "Class body should span 400 lines or less excluding comments and whitespace: currently spans 484 lines",
+      "ruleName": "Type Body Length"
     }
   },
   {
     "text": "    private func beginConnection() {",
     "violation": {
-      "ruleIdentifier": "cyclomatic_complexity",
-      "reason": "Function should have complexity 10 or less; currently complexity is 13",
-      "ruleName": "Cyclomatic Complexity",
-      "ruleDescription": "Complexity of function bodies should be limited.",
       "severity": "warning",
+      "ruleIdentifier": "cyclomatic_complexity",
+      "ruleDescription": "Complexity of function bodies should be limited.",
       "location": {
         "line": 230,
-        "character": 13,
-        "file": "Tavi/Features/Terminal/TerminalSessionController.swift"
-      }
+        "file": "Tavi/Features/Terminal/TerminalSessionController.swift",
+        "character": 13
+      },
+      "reason": "Function should have complexity 10 or less; currently complexity is 13",
+      "ruleName": "Cyclomatic Complexity"
     }
   },
   {
     "text": "}",
     "violation": {
-      "ruleIdentifier": "file_length",
-      "reason": "File should contain 400 lines or less: currently contains 600",
-      "ruleName": "File Length",
-      "ruleDescription": "Files should not span too many lines.",
       "severity": "warning",
+      "ruleIdentifier": "file_length",
+      "ruleDescription": "Files should not span too many lines.",
       "location": {
         "line": 600,
-        "character": 1,
-        "file": "Tavi/Features/Terminal/TerminalSessionController.swift"
-      }
+        "file": "Tavi/Features/Terminal/TerminalSessionController.swift",
+        "character": 1
+      },
+      "reason": "File should contain 400 lines or less: currently contains 600",
+      "ruleName": "File Length"
     }
   },
   {
     "text": "                        once.resume(returning: .string(String(decoding: content ?? Data(), as: UTF8.self)))",
     "violation": {
-      "ruleIdentifier": "optional_data_string_conversion",
-      "reason": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
-      "ruleName": "Optional Data -> String Conversion",
-      "ruleDescription": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
       "severity": "warning",
+      "ruleIdentifier": "optional_data_string_conversion",
+      "ruleDescription": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
       "location": {
         "line": 147,
-        "character": 56,
-        "file": "Tavi/Features/Terminal/Transport/NetworkWebSocketTask.swift"
-      }
+        "file": "Tavi/Features/Terminal/Transport/NetworkWebSocketTask.swift",
+        "character": 56
+      },
+      "reason": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
+      "ruleName": "Optional Data -> String Conversion"
     }
   },
   {
     "text": "        let value = String(decoding: data, as: UTF8.self)",
     "violation": {
-      "ruleIdentifier": "optional_data_string_conversion",
-      "reason": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
-      "ruleName": "Optional Data -> String Conversion",
-      "ruleDescription": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
       "severity": "warning",
+      "ruleIdentifier": "optional_data_string_conversion",
+      "ruleDescription": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
       "location": {
         "line": 8,
-        "character": 21,
-        "file": "Tavi/Features/Terminal/Transport/TerminalInputDelivery.swift"
-      }
+        "file": "Tavi/Features/Terminal/Transport/TerminalInputDelivery.swift",
+        "character": 21
+      },
+      "reason": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
+      "ruleName": "Optional Data -> String Conversion"
     }
   },
   {
     "text": "        struct Agent: Decodable {",
     "violation": {
-      "ruleIdentifier": "nesting",
-      "reason": "Types should be nested at most 1 level deep",
-      "ruleName": "Nesting",
-      "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
       "severity": "warning",
+      "ruleIdentifier": "nesting",
+      "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
       "location": {
         "line": 26,
-        "character": 9,
-        "file": "Tavi/Features/Terminal/Transport/TerminalWebSocketClient.swift"
-      }
+        "file": "Tavi/Features/Terminal/Transport/TerminalWebSocketClient.swift",
+        "character": 9
+      },
+      "reason": "Types should be nested at most 1 level deep",
+      "ruleName": "Nesting"
     }
   },
   {
     "text": "        let defaults = UserDefaults(suiteName: \"tavi.tests.\\(UUID().uuidString)\")!",
     "violation": {
-      "ruleIdentifier": "force_unwrapping",
-      "reason": "Force unwrapping should be avoided",
-      "ruleName": "Force Unwrapping",
-      "ruleDescription": "Force unwrapping should be avoided",
       "severity": "warning",
+      "ruleIdentifier": "force_unwrapping",
+      "ruleDescription": "Force unwrapping should be avoided",
       "location": {
         "line": 61,
-        "character": 82,
-        "file": "TaviTests/Features/Pairing/PairingPayloadTests.swift"
-      }
+        "file": "TaviTests/Features/Pairing/PairingPayloadTests.swift",
+        "character": 82
+      },
+      "reason": "Force unwrapping should be avoided",
+      "ruleName": "Force Unwrapping"
     }
   },
   {
     "text": "        let defaults = UserDefaults(suiteName: \"tavi.tests.\\(UUID().uuidString)\")!",
     "violation": {
-      "ruleIdentifier": "force_unwrapping",
-      "reason": "Force unwrapping should be avoided",
-      "ruleName": "Force Unwrapping",
-      "ruleDescription": "Force unwrapping should be avoided",
       "severity": "warning",
+      "ruleIdentifier": "force_unwrapping",
+      "ruleDescription": "Force unwrapping should be avoided",
       "location": {
         "line": 146,
-        "character": 82,
-        "file": "TaviTests/Features/Pairing/PairingPayloadTests.swift"
-      }
+        "file": "TaviTests/Features/Pairing/PairingPayloadTests.swift",
+        "character": 82
+      },
+      "reason": "Force unwrapping should be avoided",
+      "ruleName": "Force Unwrapping"
     }
   },
   {
     "text": "        let defaults = UserDefaults(suiteName: \"tavi.tests.\\(UUID().uuidString)\")!",
     "violation": {
-      "ruleIdentifier": "force_unwrapping",
-      "reason": "Force unwrapping should be avoided",
-      "ruleName": "Force Unwrapping",
-      "ruleDescription": "Force unwrapping should be avoided",
       "severity": "warning",
+      "ruleIdentifier": "force_unwrapping",
+      "ruleDescription": "Force unwrapping should be avoided",
       "location": {
         "line": 179,
-        "character": 82,
-        "file": "TaviTests/Features/Pairing/PairingPayloadTests.swift"
-      }
+        "file": "TaviTests/Features/Pairing/PairingPayloadTests.swift",
+        "character": 82
+      },
+      "reason": "Force unwrapping should be avoided",
+      "ruleName": "Force Unwrapping"
     }
   },
   {
     "text": "        let defaults = UserDefaults(suiteName: \"tavi.tests.\\(UUID().uuidString)\")!",
     "violation": {
-      "ruleIdentifier": "force_unwrapping",
-      "reason": "Force unwrapping should be avoided",
-      "ruleName": "Force Unwrapping",
-      "ruleDescription": "Force unwrapping should be avoided",
       "severity": "warning",
+      "ruleIdentifier": "force_unwrapping",
+      "ruleDescription": "Force unwrapping should be avoided",
       "location": {
         "line": 193,
-        "character": 82,
-        "file": "TaviTests/Features/Pairing/PairingPayloadTests.swift"
-      }
+        "file": "TaviTests/Features/Pairing/PairingPayloadTests.swift",
+        "character": 82
+      },
+      "reason": "Force unwrapping should be avoided",
+      "ruleName": "Force Unwrapping"
     }
   },
   {
     "text": "        let defaults = UserDefaults(suiteName: \"tavi.tests.\\(UUID().uuidString)\")!",
     "violation": {
-      "ruleIdentifier": "force_unwrapping",
-      "reason": "Force unwrapping should be avoided",
-      "ruleName": "Force Unwrapping",
-      "ruleDescription": "Force unwrapping should be avoided",
       "severity": "warning",
+      "ruleIdentifier": "force_unwrapping",
+      "ruleDescription": "Force unwrapping should be avoided",
       "location": {
         "line": 205,
-        "character": 82,
-        "file": "TaviTests/Features/Pairing/PairingPayloadTests.swift"
-      }
+        "file": "TaviTests/Features/Pairing/PairingPayloadTests.swift",
+        "character": 82
+      },
+      "reason": "Force unwrapping should be avoided",
+      "ruleName": "Force Unwrapping"
     }
   },
   {
     "text": "            ])]",
     "violation": {
-      "ruleIdentifier": "trailing_comma",
-      "reason": "Multi-line collection literals should have trailing commas",
-      "ruleName": "Trailing Comma",
-      "ruleDescription": "Trailing commas in arrays and dictionaries should be avoided/enforced.",
       "severity": "warning",
+      "ruleIdentifier": "trailing_comma",
+      "ruleDescription": "Trailing commas in arrays and dictionaries should be avoided/enforced.",
       "location": {
         "line": 261,
-        "character": 15,
-        "file": "TaviTests/Features/Sessions/HomeGroupingTests.swift"
-      }
+        "file": "TaviTests/Features/Sessions/HomeGroupingTests.swift",
+        "character": 15
+      },
+      "reason": "Multi-line collection literals should have trailing commas",
+      "ruleName": "Trailing Comma"
     }
   },
   {
     "text": "            defaults = UserDefaults(suiteName: name)!",
     "violation": {
-      "ruleIdentifier": "force_unwrapping",
-      "reason": "Force unwrapping should be avoided",
-      "ruleName": "Force Unwrapping",
-      "ruleDescription": "Force unwrapping should be avoided",
       "severity": "warning",
+      "ruleIdentifier": "force_unwrapping",
+      "ruleDescription": "Force unwrapping should be avoided",
       "location": {
         "line": 13,
-        "character": 53,
-        "file": "TaviTests/Features/Settings/TerminalFontPreferenceTests.swift"
-      }
+        "file": "TaviTests/Features/Settings/TerminalFontPreferenceTests.swift",
+        "character": 53
+      },
+      "reason": "Force unwrapping should be avoided",
+      "ruleName": "Force Unwrapping"
     }
   },
   {
     "text": "struct TerminalConnectionTests {",
     "violation": {
-      "ruleIdentifier": "type_body_length",
-      "reason": "Struct body should span 400 lines or less excluding comments and whitespace: currently spans 467 lines",
-      "ruleName": "Type Body Length",
-      "ruleDescription": "Type bodies should not span too many lines",
       "severity": "warning",
+      "ruleIdentifier": "type_body_length",
+      "ruleDescription": "Type bodies should not span too many lines",
       "location": {
         "line": 7,
-        "character": 1,
-        "file": "TaviTests/Features/Terminal/TerminalConnectionTests.swift"
-      }
+        "file": "TaviTests/Features/Terminal/TerminalConnectionTests.swift",
+        "character": 1
+      },
+      "reason": "Struct body should span 400 lines or less excluding comments and whitespace: currently spans 467 lines",
+      "ruleName": "Type Body Length"
     }
   },
   {
     "text": "            throw XCTSkip(\"The host could not create a disposable agent tab (HTTP \\(status): \\(String(decoding: data.prefix(300), as: UTF8.self))).\")",
     "violation": {
-      "ruleIdentifier": "optional_data_string_conversion",
-      "reason": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
-      "ruleName": "Optional Data -> String Conversion",
-      "ruleDescription": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
       "severity": "warning",
+      "ruleIdentifier": "optional_data_string_conversion",
+      "ruleDescription": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
       "location": {
         "line": 46,
-        "character": 96,
-        "file": "TaviUITests/LiveHostHelpers.swift"
-      }
+        "file": "TaviUITests/LiveHostHelpers.swift",
+        "character": 96
+      },
+      "reason": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
+      "ruleName": "Optional Data -> String Conversion"
     }
   },
   {
     "text": "}",
     "violation": {
-      "ruleIdentifier": "file_length",
-      "reason": "File should contain 400 lines or less: currently contains 548",
-      "ruleName": "File Length",
-      "ruleDescription": "Files should not span too many lines.",
       "severity": "warning",
+      "ruleIdentifier": "file_length",
+      "ruleDescription": "Files should not span too many lines.",
       "location": {
-        "line": 548,
-        "character": 1,
-        "file": "TaviUITests/TaviChaosSoak.swift"
-      }
+        "line": 560,
+        "file": "TaviUITests/TaviChaosSoak.swift",
+        "character": 1
+      },
+      "reason": "File should contain 400 lines or less: currently contains 560",
+      "ruleName": "File Length"
     }
   },
   {
     "text": "final class TaviScreenshotAudit: XCTestCase {",
     "violation": {
-      "ruleIdentifier": "type_body_length",
-      "reason": "Class body should span 400 lines or less excluding comments and whitespace: currently spans 457 lines",
-      "ruleName": "Type Body Length",
-      "ruleDescription": "Type bodies should not span too many lines",
       "severity": "warning",
+      "ruleIdentifier": "type_body_length",
+      "ruleDescription": "Type bodies should not span too many lines",
       "location": {
         "line": 9,
-        "character": 7,
-        "file": "TaviUITests/TaviScreenshotAudit.swift"
-      }
+        "file": "TaviUITests/TaviScreenshotAudit.swift",
+        "character": 7
+      },
+      "reason": "Class body should span 400 lines or less excluding comments and whitespace: currently spans 457 lines",
+      "ruleName": "Type Body Length"
     }
   },
   {
     "text": "    func testCaptureAuditScreens() async throws {",
     "violation": {
-      "ruleIdentifier": "function_body_length",
-      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 74 lines",
-      "ruleName": "Function Body Length",
-      "ruleDescription": "Function bodies should not span too many lines",
       "severity": "warning",
+      "ruleIdentifier": "function_body_length",
+      "ruleDescription": "Function bodies should not span too many lines",
       "location": {
         "line": 15,
-        "character": 5,
-        "file": "TaviUITests/TaviScreenshotAudit.swift"
-      }
+        "file": "TaviUITests/TaviScreenshotAudit.swift",
+        "character": 5
+      },
+      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 74 lines",
+      "ruleName": "Function Body Length"
     }
   },
   {
     "text": "    func testCaptureSourceControl() throws {",
     "violation": {
-      "ruleIdentifier": "function_body_length",
-      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 74 lines",
-      "ruleName": "Function Body Length",
-      "ruleDescription": "Function bodies should not span too many lines",
       "severity": "warning",
+      "ruleIdentifier": "function_body_length",
+      "ruleDescription": "Function bodies should not span too many lines",
       "location": {
         "line": 204,
-        "character": 5,
-        "file": "TaviUITests/TaviScreenshotAudit.swift"
-      }
+        "file": "TaviUITests/TaviScreenshotAudit.swift",
+        "character": 5
+      },
+      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 74 lines",
+      "ruleName": "Function Body Length"
     }
   },
   {
     "text": "            var request = URLRequest(url: URL(string: \"\\(host)/api/agents\")!)",
     "violation": {
-      "ruleIdentifier": "force_unwrapping",
-      "reason": "Force unwrapping should be avoided",
-      "ruleName": "Force Unwrapping",
-      "ruleDescription": "Force unwrapping should be avoided",
       "severity": "warning",
+      "ruleIdentifier": "force_unwrapping",
+      "ruleDescription": "Force unwrapping should be avoided",
       "location": {
         "line": 544,
-        "character": 76,
-        "file": "TaviUITests/TaviScreenshotAudit.swift"
-      }
+        "file": "TaviUITests/TaviScreenshotAudit.swift",
+        "character": 76
+      },
+      "reason": "Force unwrapping should be avoided",
+      "ruleName": "Force Unwrapping"
     }
   },
   {
     "text": "}",
     "violation": {
-      "ruleIdentifier": "file_length",
-      "reason": "File should contain 400 lines or less: currently contains 556",
-      "ruleName": "File Length",
-      "ruleDescription": "Files should not span too many lines.",
       "severity": "warning",
+      "ruleIdentifier": "file_length",
+      "ruleDescription": "Files should not span too many lines.",
       "location": {
         "line": 556,
-        "character": 1,
-        "file": "TaviUITests/TaviScreenshotAudit.swift"
-      }
+        "file": "TaviUITests/TaviScreenshotAudit.swift",
+        "character": 1
+      },
+      "reason": "File should contain 400 lines or less: currently contains 556",
+      "ruleName": "File Length"
     }
   },
   {
     "text": "final class TaviUITests: XCTestCase {",
     "violation": {
-      "ruleIdentifier": "type_body_length",
-      "reason": "Class body should span 400 lines or less excluding comments and whitespace: currently spans 1223 lines",
-      "ruleName": "Type Body Length",
-      "ruleDescription": "Type bodies should not span too many lines",
       "severity": "warning",
+      "ruleIdentifier": "type_body_length",
+      "ruleDescription": "Type bodies should not span too many lines",
       "location": {
         "line": 5,
-        "character": 7,
-        "file": "TaviUITests/TaviUITests.swift"
-      }
+        "file": "TaviUITests/TaviUITests.swift",
+        "character": 7
+      },
+      "reason": "Class body should span 400 lines or less excluding comments and whitespace: currently spans 1223 lines",
+      "ruleName": "Type Body Length"
     }
   },
   {
     "text": "        app.launchEnvironment[\"TAVI_DEV_RENDERER_STRESS_CHUNKS\"] = String(",
     "violation": {
-      "ruleIdentifier": "optional_data_string_conversion",
-      "reason": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
-      "ruleName": "Optional Data -> String Conversion",
-      "ruleDescription": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
       "severity": "warning",
+      "ruleIdentifier": "optional_data_string_conversion",
+      "ruleDescription": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
       "location": {
         "line": 62,
-        "character": 68,
-        "file": "TaviUITests/TaviUITests.swift"
-      }
+        "file": "TaviUITests/TaviUITests.swift",
+        "character": 68
+      },
+      "reason": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
+      "ruleName": "Optional Data -> String Conversion"
     }
   },
   {
     "text": "            environment: [\"TAVI_DEV_RENDERER_STRESS_CHUNKS\": String(decoding: corpusData, as: UTF8.self)]",
     "violation": {
-      "ruleIdentifier": "optional_data_string_conversion",
-      "reason": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
-      "ruleName": "Optional Data -> String Conversion",
-      "ruleDescription": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
       "severity": "warning",
+      "ruleIdentifier": "optional_data_string_conversion",
+      "ruleDescription": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
       "location": {
         "line": 201,
-        "character": 62,
-        "file": "TaviUITests/TaviUITests.swift"
-      }
+        "file": "TaviUITests/TaviUITests.swift",
+        "character": 62
+      },
+      "reason": "Prefer failable `String(bytes:encoding:)` initializer when converting `Data` to `String`",
+      "ruleName": "Optional Data -> String Conversion"
     }
   },
   {
     "text": "    func testPairsAFreshPhoneFromAPairingCode() async throws {",
     "violation": {
-      "ruleIdentifier": "function_body_length",
-      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 64 lines",
-      "ruleName": "Function Body Length",
-      "ruleDescription": "Function bodies should not span too many lines",
       "severity": "warning",
+      "ruleIdentifier": "function_body_length",
+      "ruleDescription": "Function bodies should not span too many lines",
       "location": {
         "line": 386,
-        "character": 5,
-        "file": "TaviUITests/TaviUITests.swift"
-      }
+        "file": "TaviUITests/TaviUITests.swift",
+        "character": 5
+      },
+      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 64 lines",
+      "ruleName": "Function Body Length"
     }
   },
   {
     "text": "        var request = URLRequest(url: URL(string: \"\\(host)/api/agents\")!)",
     "violation": {
-      "ruleIdentifier": "force_unwrapping",
-      "reason": "Force unwrapping should be avoided",
-      "ruleName": "Force Unwrapping",
-      "ruleDescription": "Force unwrapping should be avoided",
       "severity": "warning",
+      "ruleIdentifier": "force_unwrapping",
+      "ruleDescription": "Force unwrapping should be avoided",
       "location": {
         "line": 597,
-        "character": 72,
-        "file": "TaviUITests/TaviUITests.swift"
-      }
+        "file": "TaviUITests/TaviUITests.swift",
+        "character": 72
+      },
+      "reason": "Force unwrapping should be avoided",
+      "ruleName": "Force Unwrapping"
     }
   },
   {
     "text": "    func testCreateAgentInAPickedProjectFolder() async throws {",
     "violation": {
-      "ruleIdentifier": "function_body_length",
-      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 67 lines",
-      "ruleName": "Function Body Length",
-      "ruleDescription": "Function bodies should not span too many lines",
       "severity": "warning",
+      "ruleIdentifier": "function_body_length",
+      "ruleDescription": "Function bodies should not span too many lines",
       "location": {
         "line": 670,
-        "character": 5,
-        "file": "TaviUITests/TaviUITests.swift"
-      }
+        "file": "TaviUITests/TaviUITests.swift",
+        "character": 5
+      },
+      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 67 lines",
+      "ruleName": "Function Body Length"
     }
   },
   {
     "text": "    func testCreateWorktreeFromPicker() async throws {",
     "violation": {
-      "ruleIdentifier": "function_body_length",
-      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 64 lines",
-      "ruleName": "Function Body Length",
-      "ruleDescription": "Function bodies should not span too many lines",
       "severity": "warning",
+      "ruleIdentifier": "function_body_length",
+      "ruleDescription": "Function bodies should not span too many lines",
       "location": {
         "line": 773,
-        "character": 5,
-        "file": "TaviUITests/TaviUITests.swift"
-      }
+        "file": "TaviUITests/TaviUITests.swift",
+        "character": 5
+      },
+      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 64 lines",
+      "ruleName": "Function Body Length"
     }
   },
   {
     "text": "    func testCreateTerminalFromPicker() async throws {",
     "violation": {
-      "ruleIdentifier": "function_body_length",
-      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 61 lines",
-      "ruleName": "Function Body Length",
-      "ruleDescription": "Function bodies should not span too many lines",
       "severity": "warning",
+      "ruleIdentifier": "function_body_length",
+      "ruleDescription": "Function bodies should not span too many lines",
       "location": {
         "line": 850,
-        "character": 5,
-        "file": "TaviUITests/TaviUITests.swift"
-      }
+        "file": "TaviUITests/TaviUITests.swift",
+        "character": 5
+      },
+      "reason": "Function body should span 60 lines or less excluding comments and whitespace: currently spans 61 lines",
+      "ruleName": "Function Body Length"
     }
   },
   {
     "text": "            struct Agent: Decodable {",
     "violation": {
-      "ruleIdentifier": "nesting",
-      "reason": "Types should be nested at most 1 level deep",
-      "ruleName": "Nesting",
-      "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
       "severity": "warning",
+      "ruleIdentifier": "nesting",
+      "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
       "location": {
         "line": 1397,
-        "character": 13,
-        "file": "TaviUITests/TaviUITests.swift"
-      }
+        "file": "TaviUITests/TaviUITests.swift",
+        "character": 13
+      },
+      "reason": "Types should be nested at most 1 level deep",
+      "ruleName": "Nesting"
     }
   },
   {
     "text": "            struct Host: Decodable { let name: String; let fingerprint: String }",
     "violation": {
-      "ruleIdentifier": "nesting",
-      "reason": "Types should be nested at most 1 level deep",
-      "ruleName": "Nesting",
-      "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
       "severity": "warning",
+      "ruleIdentifier": "nesting",
+      "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
       "location": {
         "line": 1426,
-        "character": 13,
-        "file": "TaviUITests/TaviUITests.swift"
-      }
+        "file": "TaviUITests/TaviUITests.swift",
+        "character": 13
+      },
+      "reason": "Types should be nested at most 1 level deep",
+      "ruleName": "Nesting"
     }
   },
   {
     "text": "            struct Device: Decodable { let id: String }",
     "violation": {
-      "ruleIdentifier": "nesting",
-      "reason": "Types should be nested at most 1 level deep",
-      "ruleName": "Nesting",
-      "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
       "severity": "warning",
+      "ruleIdentifier": "nesting",
+      "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
       "location": {
         "line": 1448,
-        "character": 13,
-        "file": "TaviUITests/TaviUITests.swift"
-      }
+        "file": "TaviUITests/TaviUITests.swift",
+        "character": 13
+      },
+      "reason": "Types should be nested at most 1 level deep",
+      "ruleName": "Nesting"
     }
   },
   {
     "text": "            struct Agent: Decodable { let id: String; let tabId: String }",
     "violation": {
-      "ruleIdentifier": "nesting",
-      "reason": "Types should be nested at most 1 level deep",
-      "ruleName": "Nesting",
-      "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
       "severity": "warning",
+      "ruleIdentifier": "nesting",
+      "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
       "location": {
         "line": 1478,
-        "character": 13,
-        "file": "TaviUITests/TaviUITests.swift"
-      }
+        "file": "TaviUITests/TaviUITests.swift",
+        "character": 13
+      },
+      "reason": "Types should be nested at most 1 level deep",
+      "ruleName": "Nesting"
     }
   },
   {
     "text": "        struct Worktree: Decodable { let path: String }",
     "violation": {
-      "ruleIdentifier": "nesting",
-      "reason": "Types should be nested at most 1 level deep",
-      "ruleName": "Nesting",
-      "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
       "severity": "warning",
+      "ruleIdentifier": "nesting",
+      "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
       "location": {
         "line": 1503,
-        "character": 9,
-        "file": "TaviUITests/TaviUITests.swift"
-      }
+        "file": "TaviUITests/TaviUITests.swift",
+        "character": 9
+      },
+      "reason": "Types should be nested at most 1 level deep",
+      "ruleName": "Nesting"
     }
   },
   {
     "text": "            if repo.worktrees.contains(where: { cwd == $0.path || cwd.hasPrefix($0.path + \"/\") }) { return repo.root }",
     "violation": {
-      "ruleIdentifier": "for_where",
-      "reason": "`where` clauses are preferred over a single `if` inside a `for`",
-      "ruleName": "Prefer For-Where",
-      "ruleDescription": "`where` clauses are preferred over a single `if` inside a `for`",
       "severity": "warning",
+      "ruleIdentifier": "for_where",
+      "ruleDescription": "`where` clauses are preferred over a single `if` inside a `for`",
       "location": {
         "line": 1531,
-        "character": 13,
-        "file": "TaviUITests/TaviUITests.swift"
-      }
+        "file": "TaviUITests/TaviUITests.swift",
+        "character": 13
+      },
+      "reason": "`where` clauses are preferred over a single `if` inside a `for`",
+      "ruleName": "Prefer For-Where"
     }
   }
 ]

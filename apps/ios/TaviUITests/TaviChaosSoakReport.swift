@@ -170,11 +170,25 @@ extension TaviChaosSoak {
     // `SOAK n` must keep advancing while the terminal is live: a screen that
     // stopped moving is a stream that stopped, whatever the counters say.
     private func assertOutputStaysFresh() {
+        let readies = collector.events
+            .filter { $0.source == "terminal" && $0.kind == "ready" }
+            .map { Double($0.at) }
+        var lastReady: Double?
         var lastNumber: Int?
         var lastChange = 0.0
         for sample in samples where sample.terminalIsLive && !isInsideAFault(sample.at) {
-            let number = Self.latestSoakNumber(in: sample.surface)
-            guard let number else { continue }
+            guard let ready = readies.last(where: { $0 <= sample.at }) else { continue }
+            // Each recovery restarts the clock: nothing the surface published
+            // before this attach says anything about how fresh it is now.
+            if ready != lastReady {
+                lastReady = ready
+                lastNumber = nil
+                lastChange = ready
+            }
+            // And the window opens at the recovery, not before it: the surface
+            // republishes asynchronously.
+            guard sample.at - ready >= ChaosBudget.freshness * 1_000 else { continue }
+            guard let number = Self.latestSoakNumber(in: sample.surface) else { continue }
             if number != lastNumber {
                 lastNumber = number
                 lastChange = sample.at
@@ -206,7 +220,7 @@ extension TaviChaosSoak {
         let cycles = collector.events.filter { $0.source == "terminal" && $0.kind == "cycling" }
         for cycle in cycles {
             guard let back = collector.first("terminal", "ready", after: Double(cycle.at)),
-                  Double(back.at - cycle.at) / 1_000 > 4 else { continue }
+                  Double(back.monotonic - cycle.monotonic) / 1_000 > 4 else { continue }
             let from = Double(cycle.at) - ChaosBudget.samplerAllowance * 1_000
             let to = Double(back.at) + ChaosBudget.samplerAllowance * 1_000
             // `terminal.keyboard` is also absent while a MARK is being typed,

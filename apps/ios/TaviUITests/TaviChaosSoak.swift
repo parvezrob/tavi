@@ -27,9 +27,18 @@ final class TaviChaosSoak: XCTestCase {
     var diagnosticsIdentifier = ""
     // Reported in the numbers: a home phase with no room left is not a zero.
     var homePhaseSkipped = false
-    // The faults a phase never got to fire, so a phase that started but ran
-    // out of budget says which ones are missing from the numbers.
-    var unfiredFaults: [String] = []
+    // Every fault this run got as far as firing, keyed by socket and name
+    // the way the numbers are — both rotations have a `terminate`.
+    var exercisedFaults: Set<String> = []
+
+    // A fault counts as missing only if it never ran at all: a rotation that
+    // has been round once is complete, however it ended.
+    var unfiredFaults: [String] {
+        let all = TerminalFault.allCases.map { "terminal.\($0.name)" }
+            + EventsFault.allCases.map { "events.\($0.name)" }
+        return all.filter { !exercisedFaults.contains($0) }
+    }
+
     // What the fixture could not read as a MARK: partial deliveries, which
     // the protocol permits after an abandoned send, reported as themselves.
     var junkLines: [String] = []
@@ -94,7 +103,6 @@ final class TaviChaosSoak: XCTestCase {
                 try await homePhase(app, chaos: chaos, until: homeDeadline)
             } else {
                 homePhaseSkipped = true
-                unfiredFaults.append(contentsOf: EventsFault.allCases.map(\.name))
                 XCTFail("terminal phase overran; home phase skipped")
             }
         } catch {
@@ -130,15 +138,15 @@ final class TaviChaosSoak: XCTestCase {
                   milliseconds() - healthy.at >= 10_000 else { continue }
             let fault = TerminalFault.allCases[index % TerminalFault.allCases.count]
             // An overrun stays one fault's worth: a fault is fired only when
-            // its own recovery still fits inside the phase.
-            guard deadline.timeIntervalSinceNow >= fault.needsSeconds else {
-                unfiredFaults.append(fault.name)
-                break
-            }
+            // its own recovery still fits inside the phase. A rotation that
+            // has been round once is complete, so this ends the phase rather
+            // than counting the next repetition as missing.
+            guard deadline.timeIntervalSinceNow >= fault.needsSeconds else { break }
             cycle.firedFault = true
             type(app, mark: nextMark(.beforeFault))
             try await Task.sleep(for: .seconds(1))
             index += 1
+            exercisedFaults.insert("terminal.\(fault.name)")
             try await fire(fault, app: app, chaos: chaos, paneId: paneId)
         }
         try await checkpoint(app, chaos: chaos, paneId: paneId)
@@ -251,8 +259,12 @@ final class TaviChaosSoak: XCTestCase {
         }
         // Five seconds from the moment the pane actually changed hands, not
         // from when this client dialled.
+        // The words the person sees, not merely some status element: the
+        // final-state bar in TerminalSessionView says exactly this.
         let sentence = app.descendants(matching: .any)["terminal.status"]
-        XCTAssertTrue(sentence.waitForExistence(timeout: 5), "The superseded sentence never appeared after the takeover.")
+        let saidSo = NSPredicate(format: "label CONTAINS %@", "Another connection took over")
+        let appeared = XCTNSPredicateExpectation(predicate: saidSo, object: sentence)
+        XCTAssertEqual(XCTWaiter().wait(for: [appeared], timeout: 5), .completed, "The superseded sentence never appeared after the takeover.")
         XCTAssertLessThanOrEqual(
             (milliseconds() - readyAt) / 1_000,
             5 + ChaosBudget.samplerAllowance,
@@ -328,9 +340,9 @@ final class TaviChaosSoak: XCTestCase {
             guard deadline.timeIntervalSinceNow >= fault.needsSeconds else { break }
             cycle.firedFault = true
             index += 1
+            exercisedFaults.insert("events.\(fault.name)")
             try await fire(fault, app: app, chaos: chaos)
         }
-        unfiredFaults.append(contentsOf: EventsFault.allCases.dropFirst(index).map(\.name))
     }
 
     private func fire(_ fault: EventsFault, app: XCUIApplication, chaos: ChaosEnvironment) async throws {
