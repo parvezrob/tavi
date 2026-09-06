@@ -244,7 +244,7 @@ final class HeldEventsSocket: HostEventsSocketing, @unchecked Sendable {
         self.script = script
     }
 
-    var lastActivity: Date { Date() }
+    var lastActivity: ContinuousClock.Instant { ContinuousClock().now }
 
     // Closing the socket the ordinary way is the last thing `streamOnce`
     // does, so this is a test's proof that a dial has fully unwound —

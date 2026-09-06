@@ -31,13 +31,13 @@ enum HostConnectionEvent {
 // it acts on (#86, #107). Tests shorten `pollInterval` only.
 struct HostWatchdogPolicy: Sendable, Equatable {
     let pollInterval: Duration
-    let pingAfterIdle: TimeInterval
-    let cycleAfterIdle: TimeInterval
+    let pingAfterIdle: Duration
+    let cycleAfterIdle: Duration
 
     static let live = HostWatchdogPolicy(
         pollInterval: .seconds(5),
-        pingAfterIdle: 30,
-        cycleAfterIdle: 45
+        pingAfterIdle: .seconds(30),
+        cycleAfterIdle: .seconds(45)
     )
 }
 
@@ -66,7 +66,7 @@ final class HostConnection {
     )
     private static let latencyInterval: Duration = .seconds(30)
     private static let supersededProbeAttempts = 3
-    private static let stableStreamInterval: TimeInterval = 30
+    private static let stableStreamInterval: Duration = .seconds(30)
 
     private(set) var isRunning = false
     // True after the first snapshot ever arrives; before that an empty list
@@ -98,6 +98,10 @@ final class HostConnection {
     private let makeSocket: @Sendable (URLRequest) -> any HostEventsSocketing
     private let watchdogPolicy: HostWatchdogPolicy
     private let reconnectPolicy: ReconnectPolicy
+    private let timing: ConnectionTiming
+    // The retry delay this link is sitting out, so a signal that the network
+    // is back can end it early instead of waiting the schedule out (#111).
+    private let retryWait: RetryWait
     private var onEvent: ((HostConnectionEvent) -> Void)?
     private var reconnectAttempt = 0
     private var streamTask: Task<Void, Never>?
@@ -118,7 +122,7 @@ final class HostConnection {
     private var firstFrameLatencyTask: Task<Void, Never>?
     private var reachabilityTask: Task<Void, Never>?
     private var consecutiveFailedDials = 0
-    private var streamConnectedAt: Date?
+    private var streamConnectedAt: ContinuousClock.Instant?
     // Two fences (#108). A measurement (round trip, path) belongs to the dial
     // that took it. A verdict about the computer (Offline, revoked) belongs
     // to the generation, which only stopping, reconfiguring or a snapshot
@@ -135,12 +139,15 @@ final class HostConnection {
         transport: @escaping HostClient.Transport = { try await HostSession.shared.data(for: $0) },
         makeSocket: @escaping @Sendable (URLRequest) -> any HostEventsSocketing = { NetworkWebSocketTask(request: $0) },
         watchdogPolicy: HostWatchdogPolicy = .live,
-        reconnectPolicy: ReconnectPolicy? = nil
+        reconnectPolicy: ReconnectPolicy? = nil,
+        timing: ConnectionTiming = .live
     ) {
         self.transport = transport
         self.makeSocket = makeSocket
         self.watchdogPolicy = watchdogPolicy
         self.reconnectPolicy = reconnectPolicy ?? Self.eventsReconnect
+        self.timing = timing
+        retryWait = RetryWait(timing: timing)
     }
 
     // Everything this link asks the host over HTTP goes through one client,
@@ -215,13 +222,19 @@ final class HostConnection {
                 guard let self else { return }
                 await self.streamOnce(handshake: handshake)
                 guard !Task.isCancelled else { return }
+                // The dial that just ended: a wake meant for it is honoured
+                // here, and one meant for an earlier dial is discarded.
+                let dial = self.epoch
                 self.reconnectAttempt += 1
-                try? await Task.sleep(for: self.reconnectPolicy.delay(forAttempt: self.reconnectAttempt))
+                await self.retryWait.sleep(
+                    self.reconnectPolicy.delay(forAttempt: self.reconnectAttempt),
+                    dial: dial
+                )
             }
         }
-        latencyTask = Task { [weak self] in
+        latencyTask = Task { [weak self, timing] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: Self.latencyInterval)
+                try? await timing.sleep(Self.latencyInterval)
                 guard !Task.isCancelled, let self else { return }
                 guard self.hasLoaded, !self.isStale else { continue }
                 let asked = self.epoch
@@ -234,6 +247,11 @@ final class HostConnection {
         }
     }
 
+    // P2 wires the path watch to this; nothing in production calls it yet.
+    func wakeRetry() {
+        retryWait.wake(dial: epoch)
+    }
+
     func stop() {
         // Invalidate before cancelling: a cancelled task still resumes and
         // runs its `defer`s (#108).
@@ -241,6 +259,7 @@ final class HostConnection {
         reachabilityGeneration += 1
         streamTask?.cancel()
         streamTask = nil
+        retryWait.cancel()
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
         cancelWatchdogPing()
@@ -315,11 +334,11 @@ final class HostConnection {
                 reachabilityTask?.cancel()
                 reachabilityTask = nil
                 onEvent?(.snapshot(agents: snapshot.agents, available: snapshot.available, reason: snapshot.reason))
-                if streamConnectedAt == nil { streamConnectedAt = Date() }
+                if streamConnectedAt == nil { streamConnectedAt = timing.now() }
                 // The backoff forgets only once the stream has held for a
                 // while; a link that works for one frame and dies stays on
                 // the slow end of the schedule (#86).
-                if let since = streamConnectedAt, Date().timeIntervalSince(since) >= Self.stableStreamInterval { reconnectAttempt = 0 }
+                if let since = streamConnectedAt, since.duration(to: timing.now()) >= Self.stableStreamInterval { reconnectAttempt = 0 }
                 if !measured {
                     measured = true
                     measureFirstFrameLatency(dial)
@@ -342,9 +361,10 @@ final class HostConnection {
     // going in case it is merely slow. The first frame cancels this.
     private func armConnectDeadline(_ dial: Int) {
         let deadline = reconnectPolicy.connectDeadline
+        let timing = timing
         connectDeadlineTask?.cancel()
         connectDeadlineTask = Task { [weak self] in
-            try? await Task.sleep(for: deadline)
+            try? await timing.sleep(deadline)
             guard !Task.isCancelled, let self else { return }
             let probe = await self.probeHostTwice(self.reachabilityGeneration)
             guard !Task.isCancelled, dial == self.epoch else { return }
@@ -414,12 +434,13 @@ final class HostConnection {
     // suspended send keep the loop from ever reaching the cycle check (#107).
     private func startWatchdog(for socket: any HostEventsSocketing) -> Task<Void, Never> {
         let policy = watchdogPolicy
+        let timing = timing
         return Task { [weak self, weak socket] in
             var challenged = false
             while !Task.isCancelled {
-                try? await Task.sleep(for: policy.pollInterval)
+                try? await timing.sleep(policy.pollInterval)
                 guard !Task.isCancelled, let self, let socket else { return }
-                let idle = Date().timeIntervalSince(socket.lastActivity)
+                let idle = socket.lastActivity.duration(to: timing.now())
                 if idle >= policy.cycleAfterIdle {
                     cancelWatchdogPing()
                     socket.cancel(with: .goingAway, reason: nil)
@@ -463,7 +484,7 @@ final class HostConnection {
     private func probeHostTwice(_ generation: Int) async -> HostProbe {
         let first = await probeHostChecked(generation)
         guard first == .unreachable, !Task.isCancelled, generation == reachabilityGeneration else { return first }
-        try? await Task.sleep(for: .seconds(1.5))
+        try? await timing.sleep(.seconds(1.5))
         guard !Task.isCancelled, generation == reachabilityGeneration else { return first }
         return await probeHostChecked(generation)
     }
@@ -499,7 +520,7 @@ final class HostConnection {
     // offline.
     private func probeHost(_ origin: Int) async -> HostProbe {
         guard let client, let request = client.request("GET", "/api/host", timeout: 5) else { return .unreachable }
-        let started = Date()
+        let started = timing.now()
         // A failure under cancellation is our doing, not the computer's (#108).
         guard case let .answered(status, data, _) = await client.send(request) else {
             return Task.isCancelled ? .superseded : .unreachable
@@ -511,7 +532,7 @@ final class HostConnection {
             let answered = ConnectionPath(path: answer.connection?.path, relay: answer.connection?.relay)
             if answered != path { path = answered }
         }
-        return .reachable(latencyMilliseconds: Int(Date().timeIntervalSince(started) * 1000))
+        return .reachable(latencyMilliseconds: Int(started.milliseconds(to: timing.now())))
     }
 
     // Single-flight: the connect deadline, the drop path and the latency poll
@@ -553,7 +574,7 @@ private struct AgentsSnapshotMessage: Decodable {
 // transport has for NetworkWebSocketTask (#70, #99).
 protocol HostEventsSocketing: AnyObject, Sendable {
     // When the last frame of any kind arrived — the watchdog's idle clock.
-    var lastActivity: Date { get }
+    var lastActivity: ContinuousClock.Instant { get }
 
     func resume()
     func receive() async throws -> URLSessionWebSocketTask.Message

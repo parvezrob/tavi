@@ -154,7 +154,7 @@ final class FakeEventsSocket: HostEventsSocketing, @unchecked Sendable {
         self.script = script
     }
 
-    var lastActivity: Date { Date() }
+    var lastActivity: ContinuousClock.Instant { ContinuousClock().now }
 
     func resume() {}
 

@@ -10,8 +10,8 @@ import Testing
 struct HostEventsWatchdogTests {
     private static let policy = HostWatchdogPolicy(
         pollInterval: .milliseconds(5),
-        pingAfterIdle: 30,
-        cycleAfterIdle: 45
+        pingAfterIdle: .seconds(30),
+        cycleAfterIdle: .seconds(45)
     )
 
     private func link(_ socket: WatchdogSocket) throws -> HostConnection {
@@ -146,10 +146,10 @@ final class WatchdogSocket: HostEventsSocketing, @unchecked Sendable {
         gates.forEach { $0.resume() }
     }
 
-    var lastActivity: Date {
+    var lastActivity: ContinuousClock.Instant {
         lock.withLock {
             pollCount += 1
-            return Date().addingTimeInterval(-idleSeconds)
+            return ContinuousClock().now.advanced(by: .seconds(-idleSeconds))
         }
     }
 

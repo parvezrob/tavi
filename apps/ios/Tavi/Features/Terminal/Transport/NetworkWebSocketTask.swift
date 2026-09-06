@@ -53,8 +53,8 @@ final class NetworkWebSocketTask: TerminalWebSocketTasking, @unchecked Sendable 
     private var cancelRequested = false
     // When the last frame of any kind (data, ping, pong, close) arrived —
     // the idle clock a caller's heartbeat runs on (#86).
-    private var lastActivityStorage = Date()
-    var lastActivity: Date { lock.withLock { lastActivityStorage } }
+    private var lastActivityStorage = ContinuousClock().now
+    var lastActivity: ContinuousClock.Instant { lock.withLock { lastActivityStorage } }
 
     init(request: URLRequest) {
         let url = request.url ?? URL(string: "wss://invalid.invalid")!
@@ -135,7 +135,7 @@ final class NetworkWebSocketTask: TerminalWebSocketTasking, @unchecked Sendable 
                     }
                     self.lock.withLock {
                         if self.pendingReceive === once { self.pendingReceive = nil }
-                        self.lastActivityStorage = Date()
+                        self.lastActivityStorage = ContinuousClock().now
                     }
                     if let error {
                         once.resume(throwing: self.fail(with: .connectionFailed(error.localizedDescription)))
