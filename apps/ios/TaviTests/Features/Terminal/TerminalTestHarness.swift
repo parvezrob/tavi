@@ -266,8 +266,8 @@ actor ManualTerminalClock {
     private var registrations: [Duration: Int] = [:]
     private let instant = ManualInstant()
 
-    nonisolated var timing: TerminalTiming {
-        TerminalTiming(
+    nonisolated var timing: ConnectionTiming {
+        ConnectionTiming(
             sleep: { duration in try await self.sleep(for: duration) },
             now: { [instant] in instant.now }
         )

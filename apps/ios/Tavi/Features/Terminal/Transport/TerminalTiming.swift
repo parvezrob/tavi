@@ -79,22 +79,3 @@ struct TerminalLatencyMetrics {
         }
     }
 }
-
-struct TerminalTiming: Sendable {
-    let sleep: @Sendable (Duration) async throws -> Void
-    // The controller's clock as well as its timer, so a test can age a
-    // connection rather than wait it out.
-    let now: @Sendable () -> ContinuousClock.Instant
-
-    init(
-        sleep: @escaping @Sendable (Duration) async throws -> Void,
-        now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock().now }
-    ) {
-        self.sleep = sleep
-        self.now = now
-    }
-
-    static let live = TerminalTiming { duration in
-        try await Task.sleep(for: duration)
-    }
-}

@@ -30,7 +30,7 @@ final class TerminalSessionController {
     private let outbound: TerminalOutbound
     private let pathObserver: any NetworkPathObserving
     private let reconnectPolicy: ReconnectPolicy
-    private let timing: TerminalTiming
+    private let timing: ConnectionTiming
 
     private var configuration: TerminalConnectionConfiguration?
     private var connectDeadlineTask: Task<Void, Never>?
@@ -53,7 +53,7 @@ final class TerminalSessionController {
         client: any TerminalTransporting = TerminalWebSocketClient(),
         reconnectPolicy: ReconnectPolicy = .terminalDefault,
         heartbeatPolicy: HeartbeatPolicy = .terminalDefault,
-        timing: TerminalTiming = .live,
+        timing: ConnectionTiming = .live,
         pathObserver: any NetworkPathObserving = NetworkPathObserver()
     ) {
         self.client = client

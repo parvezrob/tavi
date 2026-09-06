@@ -8,7 +8,7 @@ import Foundation
 @MainActor
 final class TerminalHeartbeat {
     private let policy: HeartbeatPolicy
-    private let timing: TerminalTiming
+    private let timing: ConnectionTiming
     private var send: (@MainActor (String, Int) -> Task<Void, Never>?)?
     private var isCurrent: (@MainActor (Int) -> Bool)?
     private var onSent: (@MainActor () -> Void)?
@@ -20,7 +20,7 @@ final class TerminalHeartbeat {
     private var outstandingPongID: String?
     private var outstandingSendID: String?
 
-    init(policy: HeartbeatPolicy, timing: TerminalTiming) {
+    init(policy: HeartbeatPolicy, timing: ConnectionTiming) {
         self.policy = policy
         self.timing = timing
     }
