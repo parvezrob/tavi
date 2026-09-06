@@ -65,7 +65,9 @@ export interface ChaosClock {
 export interface Chaos {
   registerEventsSocket(websocket: WebSocket, hooks: ChaosSocketHooks): void;
   registerTerminalSocket(websocket: WebSocket, paneId: string, hooks: ChaosTerminalHooks): void;
-  /** True when this socket may write; false while a blackhole holds it. */
+  // True when this socket may write; false while a blackhole holds it. Only
+  // the host's own frames pass through here — pongs are withheld by the read
+  // pause, since a paused receiver never parses the ping that would earn one.
   gate(websocket: WebSocket): boolean;
   /** Ends a revoked socket's application handling (see the method's comment). */
   revoke(websocket: WebSocket): void;

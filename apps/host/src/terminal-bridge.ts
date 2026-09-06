@@ -103,9 +103,8 @@ export function bridgeTerminalV2(
   }
   const active = attachment;
 
-  // Chaos only (#111): while a blackhole holds this socket every outbound
-  // write waits, and a close that fell inside the window goes out when it ends
-  // rather than being lost.
+  // Chaos only (#111): while a blackhole holds this socket every outbound write
+  // waits, and a close that fell inside the window goes out when it ends.
   let heldClose: { code: number; reason: string } | undefined;
   const passable = (): boolean => chaos === undefined || chaos.gate(websocket);
   const send = (message: ServerTerminalMessage): boolean => passable() && sendTerminal(websocket, message);
@@ -116,6 +115,12 @@ export function bridgeTerminalV2(
 
   let flushTimer: NodeJS.Timeout | undefined;
   let readyHold: ChaosTimerHandle | undefined;
+  // Nothing may precede `ready` on the wire. Chaos (#111) gives it two reasons
+  // to wait — a `slowReady` hold and a closed gate — so this stays true until
+  // `ready` has actually left, and `announce` runs whenever either clears: the
+  // last one to clear sends, with every byte the pty produced meanwhile. The
+  // claim below stands throughout, so a supersession still reaches this client.
+  let readyPending = true;
   const clearFlushTimer = () => {
     if (flushTimer) clearInterval(flushTimer);
     flushTimer = undefined;
@@ -126,9 +131,7 @@ export function bridgeTerminalV2(
     clearFlushTimer();
   };
   const flush = () => {
-    // Nothing may precede `ready` on the wire, so a `slowReady` hold stops the
-    // pty's own output as well as the first flush; both go out in `announce`.
-    if (readyHold || !passable()) return;
+    if (readyPending || !passable()) return;
     while (
       websocket.readyState === websocket.OPEN &&
       cursor < active.endOffset &&
@@ -192,22 +195,24 @@ export function bridgeTerminalV2(
   active.claim(client);
   active.noteReady(resumed, cursor);
   const announce = () => {
-    readyHold = undefined;
+    if (readyHold !== undefined || !passable()) return;
+    readyPending = false;
     send({ type: "ready", stream: active.stream, offset: cursor, resumed });
     flush();
   };
-  // Chaos `slowReady` (#111): the claim above already stands, so a supersession
-  // or a close during the hold still reaches this client and cancels it; what
-  // waits is everything the client would read — `ready` and every byte the pty
-  // produces meanwhile.
+  const holdExpired = () => {
+    readyHold = undefined;
+    announce();
+  };
   const holdMs = chaos?.consumeSlowReady(target.paneId);
-  if (chaos && holdMs !== undefined) readyHold = chaos.setTimeout(announce, holdMs);
+  if (chaos && holdMs !== undefined) readyHold = chaos.setTimeout(holdExpired, holdMs);
   else announce();
   chaos?.registerTerminalSocket(websocket, target.paneId, {
     attachment: () => (active.isDisposed ? undefined : active.counters()),
     detach: () => releaseClient(),
     resume: () => {
       if (heldClose) websocket.close(heldClose.code, heldClose.reason);
+      else if (readyPending) announce();
       else flush();
     },
   });

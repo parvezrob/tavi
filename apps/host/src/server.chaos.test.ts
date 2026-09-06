@@ -262,7 +262,9 @@ test("a blackholed terminal holds its flush and loses no input the phone sent", 
 
 // Bounded on purpose: without `revoke` this test would still pass, 30 s later,
 // on ws's close timeout — the deadline is what makes it a test.
-test("revoking a phone inside a blackhole drops its handling at once, not on ws's close timeout", { timeout: 5_000 }, async () => {
+test("revoking a phone inside a blackhole drops its handling at once, not on ws's close timeout", {
+  timeout: 5_000,
+}, async () => {
   const devices = new DeviceRegistry(mkdtempSync(path.join(tmpdir(), "tavi-chaos-revoke-")), undefined, () => {});
   const { device, credential } = devices.add("phone");
   const harness = chaosHarness();
@@ -368,6 +370,49 @@ test("thenSlowReadyMs holds ready and every byte behind it, then names the attac
     const events = await faultEvents(server);
     assert.equal(events[0]?.thenSlowReadyMs, 6_000);
     assert.ok((events[0]?.consumedByAttachAt as number) >= (events[0]?.at as number));
+    await second.close();
+  } finally {
+    await close(server);
+  }
+});
+
+test("a blackhole overlapping a slowReady hold still puts ready first when both end", async () => {
+  const clock = new ChaosTestClock();
+  const harness = chaosHarness(clock);
+  const server = await harness.startServer();
+
+  try {
+    const first = await harness.openSocket(server);
+    const ready = await first.nextControl();
+    const stream = ready.type === "ready" ? ready.stream : "";
+    const closed = once(first.websocket, "close");
+    await postFault(server, {
+      kind: "terminate",
+      socket: "terminal",
+      paneId: "fixture",
+      thenSlowReadyMs: 6_000,
+    });
+    await closed;
+
+    const second = await harness.openSocket(server, `stream=${stream}&resume=0`);
+    clock.advance(2_000);
+    assert.equal(
+      (await postFault(server, { kind: "blackhole", socket: "terminal", paneId: "fixture", ms: 30_000 })).status,
+      201,
+    );
+    harness.terminals[0]?.emitData("under both");
+
+    // The hold expires inside the blackhole: `ready` cannot go out here, and
+    // spending it on a closed gate would leave the phone reading output frames
+    // for a stream it was never told about.
+    clock.advance(4_500);
+    await settle();
+    assert.equal(second.pending, 0);
+
+    clock.advance(30_000);
+    const announced = await second.nextControl(3_000);
+    assert.equal(announced.type, "ready");
+    assert.deepEqual(await second.nextOutput(), { offset: 0, data: "under both" });
     await second.close();
   } finally {
     await close(server);
