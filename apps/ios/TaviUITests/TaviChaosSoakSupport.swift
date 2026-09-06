@@ -4,6 +4,76 @@ import XCTest
 // the history the phone cannot keep, and the second client that makes a
 // takeover a takeover.
 
+// How the run talks to the chaos host: one place that knows the routes, the
+// timeouts, and that a refusal is a failure of the run rather than a
+// tolerated outcome.
+@MainActor
+extension TaviChaosSoak {
+    @discardableResult
+    func request(
+        _ chaos: ChaosEnvironment,
+        _ name: String,
+        _ fault: FaultRequest,
+        scoredForRecovery: Bool = true
+    ) async throws -> Double {
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(chaos.host)/api/chaos/fault")))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        request.setValue("Bearer \(chaos.token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(fault)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        // A 404 means the fault had nothing to hit, which is a failure of the
+        // run rather than a tolerated outcome.
+        guard status == 201, let ack = try? JSONDecoder().decode(FaultAck.self, from: data) else {
+            XCTFail("The chaos host refused \(name): HTTP \(status) \(String(bytes: data.prefix(200), encoding: .utf8) ?? "")")
+            throw ChaosSoakFailure.faultRefused
+        }
+        fired.append(
+            FiredFault(
+                name: name,
+                id: ack.id,
+                at: ack.at,
+                socket: fault.socket,
+                thenSlowReadyMs: fault.thenSlowReadyMs,
+                scoredForRecovery: scoredForRecovery
+            )
+        )
+        return ack.at
+    }
+
+    func chaosFaults(_ chaos: ChaosEnvironment) async throws -> [ChaosFaultRecord] {
+        try await get(chaos, "/api/chaos/events", as: ChaosFaultList.self).events
+    }
+
+    func chaosAttachments(_ chaos: ChaosEnvironment) async throws -> [ChaosAttachment] {
+        try await get(chaos, "/api/chaos/attachments", as: ChaosAttachmentList.self).attachments
+    }
+
+    func get<T: Decodable>(_ chaos: ChaosEnvironment, _ path: String, as type: T.Type) async throws -> T {
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(chaos.host)\(path)")))
+        request.timeoutInterval = 10
+        request.setValue("Bearer \(chaos.token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            XCTFail("The chaos host did not answer \(path); was it started with TAVI_CHAOS=on?")
+            throw ChaosSoakFailure.routeUnavailable
+        }
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    // The runner's own record of the host being up. It is evidence about the
+    // runner's path to the host, and is reported as exactly that.
+    func poll(_ chaos: ChaosEnvironment) async -> HealthPoll {
+        guard let url = URL(string: "\(chaos.host)/api/health") else { return HealthPoll(at: milliseconds(), answered: false) }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 4
+        let answered = (try? await URLSession.shared.data(for: request)).map { ($0.1 as? HTTPURLResponse)?.statusCode != nil } ?? false
+        return HealthPoll(at: milliseconds(), answered: answered)
+    }
+}
+
 // Everything the run learns comes through the two elements the app publishes
 // under a scripted launch; both are bound by their exact identifier, pinned
 // once at smoke time.
@@ -78,8 +148,19 @@ final class RingCollector {
 
 // A second real `tavi.v2` client, which is what makes a takeover a takeover.
 // It only has to connect without resume parameters and keep draining.
-final class TakeoverClient: Sendable {
+final class TakeoverClient: @unchecked Sendable {
     private let task: URLSessionWebSocketTask
+    private let lock = NSLock()
+    private var ready: Double?
+    private var problem: String?
+
+    // When the host said `ready` to this client — the moment the phone's
+    // attachment was actually taken, which is what the superseded sentence
+    // is measured from.
+    var readyAt: Double? { lock.withLock { ready } }
+    // Anything that ended the drain: the host closing or failing this
+    // connection while it was supposed to be holding the pane.
+    var failure: String? { lock.withLock { problem } }
 
     init?(host: String, token: String, paneId: String) {
         guard let url = URL(string: "\(host)/api/agents/\(paneId)/terminal")?.wsScheme else { return nil }
@@ -98,9 +179,21 @@ final class TakeoverClient: Sendable {
 
     private func drain() {
         task.receive { [weak self] result in
-            guard case .success = result else { return }
-            self?.drain()
+            guard let self else { return }
+            switch result {
+            case let .success(message):
+                note(message)
+                drain()
+            case let .failure(error):
+                lock.withLock { if problem == nil { problem = "\(error)" } }
+            }
         }
+    }
+
+    // The v2 `ready` is a JSON text frame; nothing else here needs decoding.
+    private func note(_ message: URLSessionWebSocketTask.Message) {
+        guard case let .string(text) = message, text.contains("\"type\":\"ready\"") else { return }
+        lock.withLock { if ready == nil { ready = Date().timeIntervalSince1970 * 1_000 } }
     }
 }
 

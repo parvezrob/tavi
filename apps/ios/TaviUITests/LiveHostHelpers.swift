@@ -90,6 +90,18 @@ extension XCTestCase {
         return app
     }
 
+    // The home, with nothing persisted from an earlier run: for suites that
+    // have to see the home before they open anything (#111).
+    @MainActor
+    func launchHome(host: String, token: String) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchEnvironment["TAVI_DEV_RESET"] = "1"
+        app.launchEnvironment["TAVI_DEV_HOST"] = host
+        app.launchEnvironment["TAVI_DEV_TOKEN"] = token
+        app.launch()
+        return app
+    }
+
     // A connected terminal is silent (#54): no status bar, input chrome
     // present. A failed one collapses the chrome and shows its verdict.
     @MainActor

@@ -15,19 +15,26 @@ extension TaviChaosSoak {
 
         for fault in fired {
             let source = fault.socket == "terminal" ? "terminal" : "events"
+            let key = "\(source).\(fault.name)"
             guard let cycled = collector.first(source, "cycling", after: fault.at) else {
                 XCTFail("\(fault.name) on the \(fault.socket) socket produced no cycle at all.")
                 continue
             }
-            detection[fault.name, default: []].append((Double(cycled.at) - fault.at) / 1_000)
+            // Detection has a host timestamp on one side, so it is the only
+            // span measured in wall clock; everything else is the phone's own
+            // monotonic clock, which nothing can adjust under the run.
+            detection[key, default: []].append((Double(cycled.at) - fault.at) / 1_000)
             guard let back = collector.first(source, "ready", after: Double(cycled.at)) else {
                 XCTFail("\(fault.name) on the \(fault.socket) socket never came back.")
                 continue
             }
             attempts.append(back.attempt)
-            recovery[fault.name, default: []].append(Double(back.at - cycled.at) / 1_000)
+            recovery[key, default: []].append(Double(back.monotonic - cycled.monotonic) / 1_000)
             guard fault.scoredForRecovery else { continue }
             assertBudget(fault, cycled: cycled, back: back, records: records)
+        }
+        for name in unfiredFaults {
+            XCTFail("\(name) was never fired: the link never held still long enough for it.")
         }
 
         assertSampler()
@@ -39,7 +46,7 @@ extension TaviChaosSoak {
 
     private func assertBudget(_ fault: FiredFault, cycled: DiagnosticsEvent, back: DiagnosticsEvent, records: [ChaosFaultRecord]) {
         let attempt = max(1, back.attempt)
-        let seconds = Double(back.at - cycled.at) / 1_000
+        let seconds = Double(back.monotonic - cycled.monotonic) / 1_000
         let detection = (Double(cycled.at) - fault.at) / 1_000
         switch (fault.name, fault.socket) {
         case ("terminate", "terminal"), ("closeMidOutput1011", "terminal"), ("closeMidOutput1001", "terminal"):
@@ -94,8 +101,9 @@ extension TaviChaosSoak {
         XCTAssertEqual(line.terminal.offsetOverlaps, 0, "The output stream overlapped.")
         XCTAssertEqual(line.terminal.outputDiscarded, 0, "Output was discarded before a surface took it.")
         XCTAssertEqual(line.terminal.resumeMismatches, 0, "A resumed ready answered at another offset.")
+        unexpectedResumeMisses = line.terminal.resumeMisses - deliberateFreshAttaches
         XCTAssertEqual(
-            line.terminal.resumeMisses - deliberateFreshAttaches,
+            unexpectedResumeMisses,
             0,
             "The host restarted \(line.terminal.resumeMisses) attachments, of which only \(deliberateFreshAttaches) were asked for."
         )
@@ -150,12 +158,13 @@ extension TaviChaosSoak {
 
     // MARK: - What the sampler is for
 
-    // Three things only a screenshot-level observation can say, each with the
-    // sampler's own ±2 s allowance since it looks every two seconds.
+    // Two things only a screenshot-level observation can say, each with the
+    // sampler's own ±2 s allowance since it looks every two seconds. What the
+    // home said about Offline is judged by the plan's definition below, which
+    // correlates the verdict's own timestamp with the runner's polls.
     private func assertSampler() {
         assertOutputStaysFresh()
         assertRecoveriesAreVisible()
-        assertHomeNeverLiesAboutOffline()
     }
 
     // `SOAK n` must keep advancing while the terminal is live: a screen that
@@ -163,7 +172,7 @@ extension TaviChaosSoak {
     private func assertOutputStaysFresh() {
         var lastNumber: Int?
         var lastChange = 0.0
-        for sample in samples where sample.terminalIsLive {
+        for sample in samples where sample.terminalIsLive && !isInsideAFault(sample.at) {
             let number = Self.latestSoakNumber(in: sample.surface)
             guard let number else { continue }
             if number != lastNumber {
@@ -176,6 +185,18 @@ extension TaviChaosSoak {
                 XCTFail("The SOAK stream stopped advancing for \(stalled) s while the terminal was live.")
                 return
             }
+        }
+    }
+
+    // The screen legitimately holds still between a fault and the recovery
+    // that ends it: the phone is still live to look at while the heartbeat
+    // has not noticed yet.
+    private func isInsideAFault(_ at: Double) -> Bool {
+        fired.contains { fault in
+            guard at >= fault.at else { return false }
+            let source = fault.socket == "terminal" ? "terminal" : "events"
+            guard let back = collector.first(source, "ready", after: fault.at) else { return true }
+            return at <= Double(back.at)
         }
     }
 
@@ -192,19 +213,6 @@ extension TaviChaosSoak {
             // so the recovering label itself is the signal.
             let seen = samples.contains { $0.at >= from && $0.at <= to && $0.status != nil }
             XCTAssertTrue(seen, "A recovery lasting more than four seconds was never visible on the terminal screen.")
-        }
-    }
-
-    // The home's own health, beside the event log: the strip must never read
-    // Offline in a window where the runner's polls all answered.
-    private func assertHomeNeverLiesAboutOffline() {
-        for sample in samples where sample.health == "offline" {
-            let window = health.filter { abs($0.at - sample.at) <= ChaosBudget.healthWindow * 1_000 }
-            guard !window.isEmpty, window.allSatisfy(\.answered) else { continue }
-            // The contrast deliberately makes the host stop answering; a
-            // window where it answered throughout is the defect.
-            XCTFail("The home showed Offline while every one of the runner's health polls answered.")
-            return
         }
     }
 
@@ -286,7 +294,9 @@ extension TaviChaosSoak {
             "resume": [
                 "hits": terminal.filter { $0.kind == "ready" && $0.resumed == true }.count,
                 "deliberateFreshAttaches": deliberateFreshAttaches,
+                "unexpectedMisses": unexpectedResumeMisses,
             ],
+            "junkLines": junkLines,
             "cyclesByReason": Dictionary(grouping: collector.events.filter { $0.kind == "cycling" }, by: \.reason).mapValues(\.count),
             "offsets": [
                 "gaps": collector.events.filter { $0.kind == "offsetGap" }.count,

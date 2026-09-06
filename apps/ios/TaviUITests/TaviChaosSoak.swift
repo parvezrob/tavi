@@ -30,6 +30,11 @@ final class TaviChaosSoak: XCTestCase {
     // The faults a phase never got to fire, so a phase that started but ran
     // out of budget says which ones are missing from the numbers.
     var unfiredFaults: [String] = []
+    // What the fixture could not read as a MARK: partial deliveries, which
+    // the protocol permits after an abandoned send, reported as themselves.
+    var junkLines: [String] = []
+    // Resume misses the run did not ask for; the checkpoint fills it in.
+    var unexpectedResumeMisses = 0
     // One identifier per health state for the soak's computer, pinned at
     // smoke time; the state is part of the identifier the home publishes.
     var healthIdentifiers: [(identifier: String, state: String)] = []
@@ -67,12 +72,12 @@ final class TaviChaosSoak: XCTestCase {
         let chaos = try chaosEnvironment()
         self.chaos = chaos
         let paneId = try await createDisposableShell(host: chaos.host, token: chaos.token)
-        let app = launchIntoAgent(paneId, host: chaos.host, token: chaos.token)
-
-        // Smoke, before anything is armed: the element exists and its value
-        // decodes. Without it the run has no evidence and is not worth doing.
-        let smoke = try smokeDiagnostics(app)
-        collector.merge(smoke)
+        // The home first: the health element lives on its computer chips, and
+        // both elements are smoked before anything is armed. Without them the
+        // run has no evidence and is not worth doing.
+        let app = launchHome(host: chaos.host, token: chaos.token)
+        collector.merge(try smokeDiagnostics(app))
+        try openTerminal(app, paneId: paneId)
 
         let started = Date()
         let half = TimeInterval(chaos.minutes) * 60 / 2
@@ -101,7 +106,6 @@ final class TaviChaosSoak: XCTestCase {
     // MARK: - Terminal phase
 
     private func terminalPhase(_ app: XCUIApplication, chaos: ChaosEnvironment, paneId: String, until deadline: Date) async throws {
-        XCTAssertTrue(waitForLiveTerminal(app, timeout: 60), "The terminal never came up against the chaos host.")
         try installFixture(app, paneId: paneId)
 
         var index = 0
@@ -116,8 +120,14 @@ final class TaviChaosSoak: XCTestCase {
             if let live, live >= 10, !cycle.markedHealthy {
                 cycle.markedHealthy = true
                 type(app, mark: nextMark(.healthy))
+                continue
             }
-            guard let live, live >= ChaosBudget.liveBeforeFault, cycle.markedHealthy, !cycle.firedFault else { continue }
+            // The healthy MARK's window is only fault-free if the fault is at
+            // least ten seconds behind it, and the pre-fault MARK needs its
+            // own second before the socket goes.
+            guard let live, live >= ChaosBudget.liveBeforeFault, cycle.markedHealthy, !cycle.firedFault,
+                  let healthy = marks.last(where: { $0.window == .healthy }),
+                  milliseconds() - healthy.at >= 10_000 else { continue }
             let fault = TerminalFault.allCases[index % TerminalFault.allCases.count]
             // An overrun stays one fault's worth: a fault is fired only when
             // its own recovery still fits inside the phase.
@@ -127,6 +137,7 @@ final class TaviChaosSoak: XCTestCase {
             }
             cycle.firedFault = true
             type(app, mark: nextMark(.beforeFault))
+            try await Task.sleep(for: .seconds(1))
             index += 1
             try await fire(fault, app: app, chaos: chaos, paneId: paneId)
         }
@@ -139,22 +150,24 @@ final class TaviChaosSoak: XCTestCase {
     // anything else is reported as JUNK rather than silently swallowed.
     static func fixtureScript(paneId: String) -> String {
         let tally = tallyPath(paneId)
+        let junk = junkPath(paneId)
         return [
             "stty -echo",
             "( i=0; while :; do i=$((i+1)); echo \"SOAK $i\"; sleep 0.2; done ) &",
             "SOAK_PID=$!",
             ": > \(tally)",
+            ": > \(junk)",
             "while IFS= read -r line; do",
             "case \"$line\" in",
             "MARK-[0-9]*)",
             "if expr \"$line\" : '^MARK-[0-9][0-9]*$' >/dev/null; then",
             "printf '%s\\n' \"$line\" >> \(tally); printf 'ACK %s\\n' \"$line\"",
-            "else printf 'JUNK %s\\n' \"$line\"; fi",
+            "else printf 'JUNK %s\\n' \"$line\" | tee -a \(junk); fi",
             ";;",
             "STOP)",
             "kill $SOAK_PID 2>/dev/null; wait $SOAK_PID 2>/dev/null; printf 'END\\n'",
             ";;",
-            "*) printf 'JUNK %s\\n' \"$line\" ;;",
+            "*) printf 'JUNK %s\\n' \"$line\" | tee -a \(junk) ;;",
             "esac",
             "done",
         ].joined(separator: "\n")
@@ -173,7 +186,10 @@ final class TaviChaosSoak: XCTestCase {
             "cat > \(path) <<'TAVI_FIXTURE'",
             Self.fixtureScript(paneId: paneId),
             "TAVI_FIXTURE",
-            "sh -n \(path) && echo FIXTURE-OK || echo FIXTURE-BAD",
+            // Split so the shell prints a token the typed line never shows:
+            // the pane still echoes what is typed until the fixture is
+            // sourced, and `stty -echo` is inside it.
+            "sh -n \(path) && echo FIX''TURE-OK || echo FIX''TURE-BAD",
         ] as [String]).joined(separator: "\n")
         surface.typeText("\u{1B}[200~\(install)\u{1B}[201~\r")
         guard waitForTranscript(of: surface, timeout: 30, until: { $0.contains("FIXTURE-OK") }) else {
@@ -226,11 +242,26 @@ final class TaviChaosSoak: XCTestCase {
         let dialsBefore = try await readDiagnostics(app).terminal.dials
         let client = try XCTUnwrap(TakeoverClient(host: chaos.host, token: chaos.token, paneId: paneId))
         client.start()
+        let taken = Date().addingTimeInterval(20)
+        while client.readyAt == nil, Date() < taken { try await Task.sleep(for: .milliseconds(200)) }
+        guard let readyAt = client.readyAt else {
+            XCTFail("The second client never got ready; the host did not hand it the pane.")
+            client.stop()
+            return
+        }
+        // Five seconds from the moment the pane actually changed hands, not
+        // from when this client dialled.
         let sentence = app.descendants(matching: .any)["terminal.status"]
         XCTAssertTrue(sentence.waitForExistence(timeout: 5), "The superseded sentence never appeared after the takeover.")
+        XCTAssertLessThanOrEqual(
+            (milliseconds() - readyAt) / 1_000,
+            5 + ChaosBudget.samplerAllowance,
+            "The superseded sentence arrived more than five seconds after the second client was ready."
+        )
 
         // A superseded terminal does not reclaim: sixty seconds and one
-        // background/foreground must not add a single dial.
+        // background/foreground must not add a single dial, and the second
+        // client must still be draining at the end of them.
         try await Task.sleep(for: .seconds(30))
         XCUIDevice.shared.press(.home)
         try await Task.sleep(for: .seconds(2))
@@ -239,6 +270,7 @@ final class TaviChaosSoak: XCTestCase {
         let after = try await readDiagnostics(app)
         collector.merge(after)
         XCTAssertEqual(after.terminal.dials, dialsBefore, "A superseded terminal dialled again on its own.")
+        XCTAssertNil(client.failure, "The second client's connection ended during its sixty seconds: \(client.failure ?? "")")
         client.stop()
         try await reopenTerminal(app, paneId: paneId)
     }
@@ -271,12 +303,17 @@ final class TaviChaosSoak: XCTestCase {
         }
         assertIntegrity(line)
         assertMarks(paneId: paneId)
+        junkLines = (try? String(contentsOfFile: Self.junkPath(paneId), encoding: .utf8))?
+            .split(separator: "\n").map(String.init) ?? []
     }
 
     // MARK: - Home phase
 
     private func homePhase(_ app: XCUIApplication, chaos: ChaosEnvironment, until deadline: Date) async throws {
         closeTerminal(app)
+        // Back on the home: what this phase measures is that element, so it
+        // is checked before a fault is armed rather than after twenty faults.
+        XCTAssertNotNil(currentHealth(app), "The home stopped publishing its health element.")
         var index = 0
         var cycle = CycleState()
         while Date() < deadline, index < EventsFault.allCases.count {
@@ -320,17 +357,20 @@ final class TaviChaosSoak: XCTestCase {
     // Offline is the *correct* verdict, and proving the harness can see it is
     // what makes the false-Offline count above worth anything.
     private func runContrast(_ app: XCUIApplication, chaos: ChaosEnvironment) async throws {
-        let window = Double(ChaosBudget.hostPauseMs) / 1_000
+        // Long enough for the watchdog's 45–50 s, the retry behind it and a
+        // second frameless dial's handshake to all fall inside the window;
+        // seventy seconds put that second dial after the host answered again.
+        let window = Double(ChaosBudget.contrastMs) / 1_000
         let at = try await request(
             chaos,
             "hostPause",
-            .init(kind: "blackhole", socket: "events", ms: ChaosBudget.hostPauseMs),
+            .init(kind: "blackhole", socket: "events", ms: ChaosBudget.contrastMs),
             scoredForRecovery: false
         )
         _ = try await request(
             chaos,
             "hostPause",
-            .init(kind: "hostPause", socket: "events", ms: ChaosBudget.hostPauseMs),
+            .init(kind: "hostPause", socket: "events", ms: ChaosBudget.contrastMs),
             scoredForRecovery: false
         )
 
@@ -454,72 +494,6 @@ final class TaviChaosSoak: XCTestCase {
         app.buttons["terminal.dismissKeyboard"].tap()
     }
 
-    // MARK: - The chaos host
-
-    @discardableResult
-    private func request(
-        _ chaos: ChaosEnvironment,
-        _ name: String,
-        _ fault: FaultRequest,
-        scoredForRecovery: Bool = true
-    ) async throws -> Double {
-        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(chaos.host)/api/chaos/fault")))
-        request.httpMethod = "POST"
-        request.timeoutInterval = 10
-        request.setValue("Bearer \(chaos.token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(fault)
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-        // A 404 means the fault had nothing to hit, which is a failure of the
-        // run rather than a tolerated outcome.
-        guard status == 201, let ack = try? JSONDecoder().decode(FaultAck.self, from: data) else {
-            XCTFail("The chaos host refused \(name): HTTP \(status) \(String(bytes: data.prefix(200), encoding: .utf8) ?? "")")
-            throw ChaosSoakFailure.faultRefused
-        }
-        fired.append(
-            FiredFault(
-                name: name,
-                id: ack.id,
-                at: ack.at,
-                socket: fault.socket,
-                thenSlowReadyMs: fault.thenSlowReadyMs,
-                scoredForRecovery: scoredForRecovery
-            )
-        )
-        return ack.at
-    }
-
-    func chaosFaults(_ chaos: ChaosEnvironment) async throws -> [ChaosFaultRecord] {
-        try await get(chaos, "/api/chaos/events", as: ChaosFaultList.self).events
-    }
-
-    func chaosAttachments(_ chaos: ChaosEnvironment) async throws -> [ChaosAttachment] {
-        try await get(chaos, "/api/chaos/attachments", as: ChaosAttachmentList.self).attachments
-    }
-
-    private func get<T: Decodable>(_ chaos: ChaosEnvironment, _ path: String, as type: T.Type) async throws -> T {
-        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(chaos.host)\(path)")))
-        request.timeoutInterval = 10
-        request.setValue("Bearer \(chaos.token)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            XCTFail("The chaos host did not answer \(path); was it started with TAVI_CHAOS=on?")
-            throw ChaosSoakFailure.routeUnavailable
-        }
-        return try JSONDecoder().decode(T.self, from: data)
-    }
-
-    // The runner's own record of the host being up. It is evidence about the
-    // runner's path to the host, and is reported as exactly that.
-    private func poll(_ chaos: ChaosEnvironment) async -> HealthPoll {
-        guard let url = URL(string: "\(chaos.host)/api/health") else { return HealthPoll(at: milliseconds(), answered: false) }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 4
-        let answered = (try? await URLSession.shared.data(for: request)).map { ($0.1 as? HTTPURLResponse)?.statusCode != nil } ?? false
-        return HealthPoll(at: milliseconds(), answered: answered)
-    }
-
     // MARK: - Screens
 
     private func closeTerminal(_ app: XCUIApplication) {
@@ -528,12 +502,19 @@ final class TaviChaosSoak: XCTestCase {
         _ = app.descendants(matching: .any)["sessions.list"].waitForExistence(timeout: 10)
     }
 
+    private func openTerminal(_ app: XCUIApplication, paneId: String) throws {
+        let row = app.buttons["sessions.agent.\(paneId)"]
+        guard row.waitForExistence(timeout: 60) else {
+            XCTFail("The soak's pane never appeared on the home.")
+            throw ChaosSoakFailure.fixtureRejected
+        }
+        row.tap()
+        XCTAssertTrue(waitForLiveTerminal(app, timeout: 60), "The terminal never came up against the chaos host.")
+    }
+
     private func reopenTerminal(_ app: XCUIApplication, paneId: String) async throws {
         closeTerminal(app)
-        let row = app.buttons["sessions.agent.\(paneId)"]
-        XCTAssertTrue(row.waitForExistence(timeout: 30), "The soak's pane is not on the home to reopen.")
-        row.tap()
-        XCTAssertTrue(waitForLiveTerminal(app, timeout: 60), "The terminal did not come back after the takeover.")
+        try openTerminal(app, paneId: paneId)
     }
 
     // MARK: - Plumbing
@@ -554,6 +535,10 @@ final class TaviChaosSoak: XCTestCase {
     static func tallyPath(_ paneId: String) -> String { "/tmp/tavi-soak-\(paneId).tally" }
 
     static func fixturePath(_ paneId: String) -> String { "/tmp/tavi-soak-\(paneId).sh" }
+
+    // Everything the reader did not recognise, so a fragment an abandoned
+    // send left behind is reported rather than merely counted as a miss.
+    static func junkPath(_ paneId: String) -> String { "/tmp/tavi-soak-\(paneId).junk" }
 
     // Below this the home phase cannot fire its four faults and wait them
     // out, so it is not started at all.

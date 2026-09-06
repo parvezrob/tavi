@@ -26,9 +26,12 @@ enum ChaosBudget {
     static let slowReadyMs = 6_000
     // Past the 45–50 s watchdog boundary, so the cycle is unambiguous.
     static let eventsBlackholeMs = 70_000
+    // The contrast needs two frameless dials and two missed probes inside its
+    // window: the watchdog's 45–50 s, the retry behind it and the next dial's
+    // handshake do not fit in seventy. 120 s is the route's maximum.
+    static let contrastMs = 120_000
     static let eventsWatchdogCycle: Double = 50
     static let eventsLiveAgainAfterDial: Double = 4
-    static let hostPauseMs = 70_000
     // Tolerances for asynchronous publication, not budgets.
     static let healthWindow: Double = 5
     static let samplerAllowance: Double = 2
@@ -92,7 +95,12 @@ struct Distribution {
         count = sorted.count
         min = sorted.first ?? 0
         max = sorted.last ?? 0
-        median = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
+        // An even count has two middles; the median is between them.
+        median = sorted.isEmpty
+            ? 0
+            : (sorted.count.isMultiple(of: 2)
+                ? (sorted[sorted.count / 2 - 1] + sorted[sorted.count / 2]) / 2
+                : sorted[sorted.count / 2])
     }
 
     var asJSON: [String: Any] { ["n": count, "min": min, "median": median, "max": max] }
@@ -249,7 +257,7 @@ enum EventsFault: CaseIterable {
         switch self {
         case .terminate, .closeMidOutput1001: 60
         case .blackhole: 130
-        case .hostPauseContrast: 180
+        case .hostPauseContrast: 230
         }
     }
 
