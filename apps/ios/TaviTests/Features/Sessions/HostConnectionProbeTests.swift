@@ -77,7 +77,7 @@ struct HostConnectionProbeTests {
         let (connection, events) = try probeLink(sockets, host: host)
         defer { connection.stop(); host.releaseAll(); sockets.releaseHolds() }
 
-        try await waitUntil { connection.isStale && host.callsWaiting == 1 }
+        try await waitUntil { sockets.dials == 2 && host.callsWaiting == 1 }
         try probeReconfigure(connection, into: events)
         try await waitUntil { connection.health == .live }
 
@@ -102,7 +102,7 @@ struct HostConnectionProbeTests {
         let (connection, events) = try probeLink(sockets, host: host)
         defer { connection.stop(); host.releaseAll(); sockets.releaseHolds() }
 
-        try await waitUntil { connection.isStale && host.callsWaiting == 1 }
+        try await waitUntil { sockets.dials == 2 && host.callsWaiting == 1 }
         try probeReconfigure(connection, into: events)
         try await waitUntil { connection.health == .live }
 
