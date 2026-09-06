@@ -72,6 +72,9 @@ export function bridgeTerminalV2(
   let attachment = attachments.get(target.key);
   let cursor: number;
   let resumed = false;
+  // Ownership is per connection: a frame still in flight from a superseded
+  // socket would otherwise reach the attachment its successor now owns (#108).
+  let ownsAttachment = true;
 
   if (
     attachment &&
@@ -85,9 +88,12 @@ export function bridgeTerminalV2(
   } else {
     // A resume miss (no attachment, epoch mismatch, or the offset already
     // trimmed out of the ring) gets a fresh attach: herdr repaints the whole
-    // pane, so the client is complete again without replay.
-    attachment?.dispose();
-    attachment = attachments.create(target.key, target.spawn(), {
+    // pane, so the client is complete again without replay. The successor's
+    // pty is spawned first, because a spawn that throws must not leave the
+    // old client told it lost a terminal nobody took.
+    const terminal = target.spawn();
+    attachment?.supersede();
+    attachment = attachments.create(target.key, terminal, {
       detachedSize: target.detachedSize,
     });
     cursor = attachment.endOffset;
@@ -139,6 +145,7 @@ export function bridgeTerminalV2(
   const client: AttachmentClient = {
     onOutput: flush,
     onExit: (exit) => {
+      ownsAttachment = false;
       clearFlushTimer();
       sendTerminal(websocket, {
         type: "exit",
@@ -148,8 +155,13 @@ export function bridgeTerminalV2(
       websocket.close(1000, "terminal exited");
     },
     onSuperseded: () => {
+      ownsAttachment = false;
       clearFlushTimer();
-      sendTerminal(websocket, { type: "error", message: "Another connection took over this terminal." });
+      sendTerminal(websocket, {
+        type: "error",
+        message: "Another connection took over this terminal.",
+        code: "superseded",
+      });
       websocket.close(1000, "superseded");
     },
   };
@@ -159,6 +171,10 @@ export function bridgeTerminalV2(
   flush();
 
   websocket.on("message", (raw: RawData, isBinary: boolean) => {
+    // ws keeps delivering frames through the closing handshake, and on a
+    // resume hit the attachment is the successor's: a stale input or resize
+    // from this socket would land in their terminal.
+    if (!ownsAttachment) return;
     if (isBinary) {
       sendTerminal(websocket, { type: "error", message: "Binary terminal messages are unsupported." });
       websocket.close(1003, "text frames required");
@@ -194,6 +210,7 @@ export function bridgeTerminalV2(
   });
 
   const releaseClient = () => {
+    ownsAttachment = false;
     clearFlushTimer();
     active.release(client);
   };

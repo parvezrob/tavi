@@ -23,7 +23,9 @@
     { "type": "pong", "id": "5A13F176-0F83-4DF9-94BB-A63A678A1F2A" },
     { "type": "exit", "code": 0 },
     { "type": "exit", "code": 1, "signal": 15 },
-    { "type": "error", "message": "Invalid terminal message." }
+    { "type": "error", "message": "Invalid terminal message." },
+    { "type": "error", "message": "Another connection took over this terminal." },
+    { "type": "error", "message": "Another connection took over this terminal.", "code": "superseded" }
   ],
   "serverInvalid": [
     null,

@@ -115,10 +115,58 @@ test("v2 second connection supersedes the first on the same attachment", async (
     assert.equal(takeover.type, "ready");
     assert.equal(takeover.resumed, true);
 
-    await firstClosed;
+    // The ownership outcome the phone reads: the machine code and the
+    // sentence, then 1000 "superseded" — never a bare disconnect it would
+    // retry through, and readable even if that close never arrives.
+    assert.deepEqual(await first.nextControl(), {
+      type: "error",
+      message: "Another connection took over this terminal.",
+      code: "superseded",
+    });
+    assert.deepEqual(await closeOutcome(firstClosed), { code: 1000, reason: "superseded" });
     assert.equal(harness.spawnCount, 1);
 
     harness.terminals[0]?.emitData("to the new owner");
+    assert.equal((await second.nextOutput()).data, "to the new owner");
+    await second.close();
+  } finally {
+    await close(server);
+  }
+});
+
+test("v2 fresh replacement supersedes the old client and keeps the herdr pane attachable", async () => {
+  const harness = new TerminalHarness();
+  const server = await harness.startServer();
+
+  try {
+    const first = await harness.openSocket(server);
+    const ready = await first.nextControl();
+    assert.equal(ready.type, "ready");
+
+    // No resume parameters: the fresh-attach branch, where the old attachment
+    // used to be disposed while its socket stayed open and answering (#108).
+    const firstClosed = once(first.websocket, "close");
+    const second = await harness.openSocket(server);
+    const freshReady = await second.nextControl();
+    assert.equal(freshReady.type, "ready");
+    assert.equal(freshReady.resumed, false);
+    assert.notEqual(freshReady.stream, ready.stream);
+
+    assert.deepEqual(await first.nextControl(), {
+      type: "error",
+      message: "Another connection took over this terminal.",
+      code: "superseded",
+    });
+    assert.deepEqual(await closeOutcome(firstClosed), { code: 1000, reason: "superseded" });
+
+    // Only the losing client's temporary attach pty ends; the new client owns
+    // a second attach to the same durable pane and can drive it.
+    assert.equal(harness.spawnCount, 2);
+    await waitUntil(() => harness.terminals[0]?.killed === true);
+    assert.equal(harness.terminals[1]?.killed, false);
+    second.websocket.send(JSON.stringify({ type: "input", data: "still working\r" }));
+    await waitUntil(() => harness.terminals[1]?.writes.length === 1);
+    harness.terminals[1]?.emitData("to the new owner");
     assert.equal((await second.nextOutput()).data, "to the new owner");
     await second.close();
   } finally {
@@ -536,6 +584,11 @@ class V2Socket {
     if (!event) throw new Error("Terminal event queue is empty.");
     return event;
   }
+}
+
+async function closeOutcome(closed: Promise<unknown[]>): Promise<{ code: number; reason: string }> {
+  const [code, reason] = await closed;
+  return { code: code as number, reason: (reason as Buffer).toString() };
 }
 
 function close(server: Server): Promise<void> {

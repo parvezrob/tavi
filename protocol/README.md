@@ -363,7 +363,15 @@ Clients should offer the `tavi.v2` subprotocol; the server prefers it and falls 
 
 ### Persistent attachment
 
-The host keeps one PTY attachment per session that survives WebSocket drops. After the last client disconnects the attachment is retained for a bounded window (default 120 s) and its output accumulates in a ring buffer (default 1 MiB) tagged with absolute byte offsets. Each attachment has a random `stream` epoch token; offsets are meaningful only within one epoch. Only one client owns an attachment at a time — a new connection to the same session supersedes the previous one, which receives an `error` and close code `1000` (`superseded`).
+The host keeps one PTY attachment per session that survives WebSocket drops. After the last client disconnects the attachment is retained for a bounded window (default 120 s) and its output accumulates in a ring buffer (default 1 MiB) tagged with absolute byte offsets. Each attachment has a random `stream` epoch token; offsets are meaningful only within one epoch. Only one client owns a session attachment at a time. Both a compatible resume and a fresh replacement notify the losing client with the following error, followed by close code `1000` and reason `superseded`:
+
+```json
+{ "type": "error", "message": "Another connection took over this terminal.", "code": "superseded" }
+```
+
+The optional string `code` belongs to the `error` variant; `exit.code` remains numeric. A client stops input and automatic reclamation as soon as it receives this outcome, without waiting for the close, and requires an explicit user action to attach again. For older hosts it also recognizes the exact legacy takeover message without `code`, and close `1000` with reason `superseded`. Unknown error codes keep the ordinary error behavior. The host ignores further input, resize and ping messages from the losing connection; its delayed close cannot release the new owner.
+
+If replacement PTY creation throws, the incumbent remains attached and the new connection fails with `1011` (`terminal unavailable`). A successful fresh replacement disposes only the old temporary attach PTY, never the durable herdr pane. Host shutdown remains a retryable disconnect, not a takeover. Legacy and coded takeover messages are covered by the shared terminal message compatibility fixture.
 
 ### Ready and resume
 

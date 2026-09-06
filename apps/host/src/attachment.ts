@@ -182,6 +182,15 @@ export class TerminalAttachment {
     this.terminal.resize(cols, rows);
   }
 
+  // Disposing an attachment out from under its client is a takeover, not a
+  // drop: a client that is not told keeps a live-looking frozen terminal (#108).
+  supersede(): void {
+    const previous = this.client;
+    this.client = undefined;
+    this.dispose();
+    previous?.onSuperseded();
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -249,7 +258,7 @@ export class AttachmentStore {
     terminal: TerminalProcessLike,
     options: Pick<AttachmentOptions, "detachedSize"> = {},
   ): TerminalAttachment {
-    this.get(id)?.dispose();
+    this.get(id)?.supersede();
     const attachment = new TerminalAttachment(terminal, {
       ...this.options,
       ...options,

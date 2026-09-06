@@ -270,6 +270,66 @@ test("terminal exit notifies the client and removes the attachment from the stor
   assert.ok(!process.killed);
 });
 
+test("supersede tells the client it lost the terminal, exactly once", () => {
+  const store = new AttachmentStore({ retentionMs: 60_000 });
+  const process = new FakeProcess();
+  const attachment = store.create("fixture", process);
+  const client = makeClient();
+  attachment.claim(client);
+
+  attachment.supersede();
+
+  assert.equal(client.superseded, 1);
+  assert.deepEqual(client.exits, []);
+  assert.ok(attachment.isDisposed);
+  assert.ok(process.killed);
+  assert.equal(store.get("fixture"), undefined);
+
+  attachment.supersede();
+  assert.equal(client.superseded, 1);
+});
+
+test("supersede after an exit leaves the exit as the client's only outcome", () => {
+  const process = new FakeProcess();
+  const attachment = new TerminalAttachment(process, { retentionMs: 60_000 });
+  const client = makeClient();
+  attachment.claim(client);
+
+  process.emitExit(0);
+  attachment.supersede();
+
+  assert.deepEqual(client.exits, [{ code: 0 }]);
+  assert.equal(client.superseded, 0);
+});
+
+test("store create supersedes the client of the attachment it replaces", () => {
+  const store = new AttachmentStore({ retentionMs: 60_000 });
+  const first = new FakeProcess();
+  const original = store.create("fixture", first);
+  const loser = makeClient();
+  original.claim(loser);
+
+  const second = new FakeProcess();
+  const replacement = store.create("fixture", second);
+  const winner = makeClient();
+  replacement.claim(winner);
+
+  assert.equal(loser.superseded, 1);
+  assert.ok(original.isDisposed);
+  assert.ok(first.killed);
+
+  // The loser's socket closes late, against either attachment: neither
+  // release may take the terminal from the client that now holds it.
+  original.release(loser);
+  replacement.release(loser);
+  second.emitData("still theirs");
+  assert.equal(winner.outputs, 1);
+  assert.equal(winner.superseded, 0);
+  assert.ok(!replacement.isDisposed);
+
+  store.disposeAll();
+});
+
 test("store create replaces an existing attachment", () => {
   const store = new AttachmentStore({ retentionMs: 60_000 });
   const first = new FakeProcess();
