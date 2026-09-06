@@ -10,7 +10,7 @@
 
 **Package order (locked):** P0 behaviour-preserving prerequisites (`NetworkPathWatch`, `ConnectionTiming` injected into `HostConnection`, honest `WatchdogSocket`, shared live helpers) → P1 chaos host (`TAVI_CHAOS=on`, runner-driven faults over `/api/chaos/*`) + `RecoveryLog` model with bounded counters + `TaviChaosSoak` (two phases, tally file, offset contiguity, false-Offline correlation) → **baseline numbers on #111** → P2 events heartbeat (15 s ping / two misses) + payload-correlated 2 s handover checks + first-frame deadline + liveness-based reset → P3 Connection log UI → P4 `HostReachability` / `TerminalGridSync` carve-outs → P5 owner-run phone experiments and the §7.13 release check. Each package: Opus implementer in a worktree, two cold Opus verifiers, gates, **Astra code review before the PR**, fast-forward merge.
 
-**Left open:** the narrow confirmation seat on v5 (`scratchpad/r5.md`) had not returned at lock; whatever it says is an implementation note. Ship 0.1.18 + USB install + cellular check remain owner-run, in parallel.
+**Left open:** none on the plan — the fifth seat read v4 through a scripting slip and confirmed the same four items; v5 folds them, verified by hand against its list. Lesson: write the artifact, `head -1` it, then launch the seat. Ship 0.1.18 + USB install + cellular check remain owner-run, in parallel.
 
 ## 2026-09-06 (afternoon) — #109 + #110 reviewed, tightened, merged: the terminal recovers again
 

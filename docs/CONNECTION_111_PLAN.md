@@ -6,10 +6,11 @@
 > `protocol/README.md` and `docs/DEVELOPMENT.md`, and this file is deleted (its final state rotates to
 > `docs/history/`). Review record: two GPT-6 Astra seats per round through `.claude/skills/second-opinion`
 > (round 1 fresh + domain; round 2 fold-audit + fresh; round 3 fold-audit + fresh; round 4 two fold-audits →
-> one LOCKABLE, one with four concrete leftovers folded into v5; a narrow confirmation seat on v5 was still
-> running at lock time — its notes, if any, go into the P1/P2 briefs as implementation notes, not plan changes).
+> one LOCKABLE, one with four concrete leftovers folded into v5; a narrow fifth seat then confirmed the four
+> leftovers against the code — it read v4 by a scripting slip and marked them MISSED; v5 below is the version
+> that folds them, checked line by line against that seat's list; no further round per the owner's lock).
 
-# #111 plan — Connection 10/10 (v4 after rounds 1–3 of cold GPT-6 seats, 2026-09-06)
+# #111 plan — Connection 10/10 (v5 after rounds 1–4 of cold GPT-6 seats, 2026-09-06)
 
 Issue: https://github.com/parvezrob/tavi/issues/111 (body pasted at the end). Base: `main` at `9976289`.
 Governs: `AGENTS.md` (sub-agent loop; fault-injection rule; never overlay shared docs; verification ladder;
@@ -42,6 +43,17 @@ offset), the complete history lives in the test collector; the matched handover 
 challenge; the wake credit is consumed or discarded at the next dial; the shortened heartbeat deadline is
 absolute across send→pong; blackhole budget allows a round mid-send (30 s); host heartbeat tests inject
 send completion; unused repeating chaos profiles cut; P5's release-time expectation removed.
+
+v4 → v5 (round 4: two fold-audit seats; one LOCKABLE, one with four concrete leftovers, confirmed by a
+narrow fifth seat that read v4): MARK syntax is validated exactly and a lone `⏎` precedes every healthy MARK
+so a partial fragment lands as `JUNK`, never glued to the next marker; the tally is read from the fixture's
+file on the Mac, not the screen; a phone probe disagreement (unreachable while the runner is reachable and the
+path satisfied) **fails** the false-Offline assertion instead of being excluded, and a window without path
+evidence is an incomplete measurement; the liveness reset counts **delivered frames only** (a receive error
+stamps `lastActivity` before throwing today, so a new `lastFrameAt` is the input); `hostPause` **withholds
+responses** (connections hang, upgrades are never answered) instead of answering 503, which the probe
+classifies as reachable; the terminal blackhole window is 30 s so no round's deadline can land after the
+unpause; the handover challenge keeps its send and deadline owned until completion or socket cancellation.
 
 ## What is true today (verified against the code; corrections from rounds 1–2 folded)
 
@@ -87,8 +99,8 @@ send completion; unused repeating chaos profiles cut; P5's release-time expectat
   `isEphemeral` (`package-root.ts`) = an `_npx` run. The preview door binds `TAVI_PREVIEW_PORT` (8788).
 - **Transport** (`NetworkWebSocketTask.swift`): `autoReplyPing = true`; the iOS 26 SDK header
   (`ws_options.h` › `nw_ws_options_set_auto_reply_ping`) says pings are still delivered to receive requests;
-  `lastActivity` (a `Date`) is stamped for every delivered frame incl. `.ping`/`.pong`; pong payloads are
-  dropped. `TerminalTiming.now` is a `ContinuousClock.Instant`.
+  `lastActivity` (a `Date`) is stamped in the receive completion **before** the error check, so a receive
+  error or close also advances it; pong payloads are dropped. `TerminalTiming.now` is a `ContinuousClock.Instant`.
 - **Live tests**: `TAVI_DEV_HOST` must be `https://….ts.net[:port]` (port kept); helpers are `private` in
   `TaviUITests.swift`; `TaviMemoryChecks` has a private `LiveEnvironment`; background/foreground restarts
   every events link (`SessionsView` scene handling).
@@ -202,11 +214,15 @@ Gate: `check.sh` green, recovery suites unchanged in count and intent, no new pu
   - **Terminal phase** (first half): disposable shell; `launchIntoAgent`; fixture typed once (a short `sh` script pasted as one bracketed paste, `stty -echo` first):
     a background stream `( i=0; while :; do i=$((i+1)); echo "SOAK $i"; sleep 0.2; done ) &`, and a
     foreground reader that **counts per MARK** and understands one control word: `case "$line" in
-    MARK-*) append "$line" to a tally file; printf 'ACK %s\n' "$line";; STOP) kill the stream, wait,
-    printf 'TALLY\n'; sort tally | uniq -c; printf 'END\n';; *) printf 'JUNK %s\n' "$line";; esac`.
-    A typed `MARK-k⏎` is evidence of execution only as `ACK MARK-k`; the **`TALLY` block printed at
-    `STOP` is the authoritative per-MARK execution count** (a partial fragment shows as `JUNK`, never as a
-    MARK); screen sampling is for freshness only, since ACKs can scroll away during a recovery. Faults in rotation: `terminate`, `blackhole 20 s`,
+    MARK-[0-9]*) [then the exact syntax `^MARK-[0-9]+$` is checked with `expr` — POSIX `case` patterns
+    are globs, so the pattern alone is not the check] append "$line" to the tally file
+    `/tmp/tavi-soak-<pane>.tally`; printf 'ACK %s\n' "$line";; STOP) kill the stream, wait, printf
+    'END\n';; *) printf 'JUNK %s\n' "$line";; esac`. The runner types a lone `⏎` **before every healthy
+    MARK**, so a fragment left by an abandoned send (`MARK-1` without its newline) is delimited and lands as
+    `JUNK MARK-1`, never as `MARK-1MARK-2`. A typed `MARK-k⏎` is evidence of execution only as `ACK MARK-k`;
+    the **tally file, read by the runner from the Mac's disk after `END`, is the authoritative per-MARK
+    execution count** (runner and chaos host share the machine; the screen shows only `END`, so nothing
+    scrolls away); screen sampling is for freshness only. Faults in rotation: `terminate`, `blackhole 30 s`,
     `terminate + slowReady 6 s`, `closeMidOutput 1011`, `closeMidOutput 1001`, then takeover once
     (isolated), then repeat. A `MARK` is typed (a) once per fault-free window ≥ 10 s after recovery and
     ≥ 10 s before the next fault, and (b) once deliberately 1 s before each fault. Sampler (best effort,
@@ -226,13 +242,14 @@ Gate: `check.sh` green, recovery suites unchanged in count and intent, no new pu
     - `terminate` / `closeMidOutput` (terminal): live again ≤ **4.5 s** when `A == 1` (0.25 s + 4 s dial),
       generally ≤ `delay(A) + 12 s`; a dial that misses its 12 s deadline is a finding, not tolerance.
       `closeMidOutput` → `ready.resumed == true`.
-    - `blackhole 20 s` (terminal): the heartbeat detects ≤ 25 s after the start (a round may be awaiting
-      its send completion for up to 5 s when the pause begins, then ≤ 10 s to the next beat + 5 s send
-      bound + 5 s pong bound); live ≤ **30 s** after the start with `A == 1` (fresh TCP connection, the
-      pause does not touch it); detection and recovery reported separately.
+    - `blackhole 30 s` (terminal; longer than the worst detection so no round's deadline can fall after the
+      unpause and be satisfied by a late pong): the heartbeat detects ≤ 25 s after the start (a round may be
+      awaiting its send completion for up to 5 s when the pause begins, then ≤ 10 s to the next beat + 5 s
+      send bound + 5 s pong bound); live ≤ **30 s** after the start with `A == 1` (the redial is a fresh TCP
+      connection the pause does not touch); detection and recovery reported separately.
     - `terminate + slowReady 6 s`: one cycle (the terminate's), **no additional deadline-induced cycle**;
       report `upgrade + lookup + 6 s` against the 12 s deadline.
-    - **Input**: from the `TALLY` block — every `MARK-k` executed **at most once**; a `MARK` typed in a
+    - **Input**: from the tally file — every `MARK-k` executed **at most once**; a `MARK` typed in a
       fault-free window executed **exactly once**; a `MARK` typed 1 s before a fault executed at most once
       and its outcome is reported (protocol/README.md permits an abandoned send; `JUNK` lines are reported
       as partial deliveries); after every recovery the next fault-free `MARK` is acked (forward progress).
@@ -243,12 +260,15 @@ Gate: `check.sh` green, recovery suites unchanged in count and intent, no new pu
       with `attachments.endOffset` for the live stream (equal, and no host output after `END`). `SOAK` advances within 3 s of every sample after each recovery (freshness, async
       publication allowed).
     - **Home**: a **false Offline** = an `offlineEntered` event whose timestamp falls inside a window where
-      the runner's `/api/health` polls (±5 s) all answered **and** the phone's path was satisfied **and**
-      the phone's own `probe` events in that window did not all say unreachable (two unreachable phone
-      probes with the runner reachable is a phone-side probe defect, reported as such, not a false Offline
-      by definition); count must be 0. The soak also runs one deliberate contrast: `blackhole` on the events
-      socket **plus** the chaos host paused entirely (`POST /api/chaos/fault {kind: "hostPause", ms}`
-      makes every route answer 503 for the window) → Offline **is** expected; the harness proves it can see
+      the runner's `/api/health` polls (±5 s) all answered **and** the phone's path was satisfied; count
+      must be 0. The phone's own `probe` events in that window are reported beside it: two unreachable phone
+      probes while the runner was reachable on a satisfied path **is** a false Offline (that disagreement is
+      the defect being hunted, so it fails), and a window with no path evidence is an **incomplete
+      measurement**, reported as such, never as zero. The soak also runs one deliberate contrast: `blackhole`
+      on the events socket **plus** `POST /api/chaos/fault {kind: "hostPause", ms}`, which makes the chaos
+      host **withhold every response** for the window (HTTP requests hang until the client's timeout,
+      upgrades are never answered; an answered status, even 503, is classified reachable by the phone) →
+      Offline **is** expected after two frameless dials and two missed probes; the harness proves it can see
       both outcomes. `blackhole 70 s` → cycled by the watchdog ≤ 50 s idle (P1) / ≤ 40 s (P2), then
       `Reconnecting`, then live ≤ `delay(A) + 4 s` (P1 reports `A`; after P2's time-based reset `A == 1`
       → ≤ **6 s**). `terminate` (events) → live ≤ `delay(A) + 4 s`.
@@ -295,11 +315,13 @@ decoder's contract (a text frame must carry `type`, `available`, `agents`).
 - `HostWatchdogPolicy.live` → `pingAfterIdle 20`, `cycleAfterIdle 35` (effective 20–25 / 35–40 s with the
   5 s poll, documented). A 0.1.17 host answers the phone's ping with `ws`'s auto pong; no wire change.
 - **Liveness-based backoff reset**: a stream resets `reconnectAttempt` **when it ends** if it showed
-  liveness across the stable interval — `socket.lastActivity − streamConnectedAt ≥ 30 s` at the drop (any
-  frame counts, including the server's pings; a socket that received one snapshot and then nothing until the
-  watchdog cycled it does **not** qualify). Today only a snapshot arriving after 30 s resets it, so a quiet
-  evening redials at the 10 s cap. Test: repeated single-snapshot blackholes keep the attempt climbing.
-  PRD §7.13 wording updated.
+  liveness across the stable interval — `socket.lastFrameAt − streamConnectedAt ≥ 30 s` at the drop, where
+  `lastFrameAt` (new on `HostEventsSocketing`, stamped by `NetworkWebSocketTask` **only for delivered
+  frames**: text, binary, ping, pong — never for an error or close completion, which today advance
+  `lastActivity` before throwing) is the input; the server's pings count, a socket that received one snapshot
+  and then nothing until it failed does **not** qualify. Today only a snapshot arriving after 30 s resets it,
+  so a quiet evening redials at the 10 s cap. Tests: repeated single-snapshot blackholes keep the attempt
+  climbing; a snapshot at 0 s and a receive error at 31 s does not reset. PRD §7.13 wording updated.
 - **First-frame deadline**: each dial has an absolute **15 s** budget to deliver its first agents snapshot;
   control frames do not extend it (`connectDeadlineTask` already fires at 5 s to probe — this is a second,
   later arm of the same task that cycles the socket with reason `first-frame-deadline` and records it).
@@ -309,7 +331,8 @@ decoder's contract (a text frame must carry `type`, `available`, `agents`).
   and delivers `.pong` payloads through `onPong: (Data) -> Void` (set by the link; payload stays out of any
   log). The link **latches** `challengeAnswered = true` when a pong's payload equals the outstanding
   challenge's — a later unrelated pong cannot overwrite the evidence (test: matching pong then an unrelated
-  pong before the deadline → satisfied).
+  pong before the deadline → satisfied). The challenge's send stays **owned** (its task and the deadline)
+  until the send completes or the socket is cancelled; a pong arriving does not release a still-pending send.
 - `NetworkPathWatch` injected (`Scripted` in tests). `.changed` with an **established dial** (≥ 1 frame
   received on this dial; a dial in progress keeps its budget untouched) → one **handover challenge** in its
   **own slot** (`handoverChallenge`, independent of `watchdogPing`, so a stalled watchdog send cannot
@@ -334,9 +357,10 @@ decoder's contract (a text frame must carry `type`, `available`, `agents`).
   watchdog pong arriving after the challenge started (payload mismatch → still cycles at 2 s); a server
   ping advancing `lastActivity` does not satisfy a challenge; `.restored` wakes the sleeping retry without
   resetting the attempt and cycles a retained socket; `.lost` + two unreachable probes → not Offline;
-  Offline then `.lost` → still Offline; `.lost` + 401 → revoked; a stream live for 30 s that drops resets the
-  attempt, one live 29 s does not, one with a snapshot at 0 s and silence until a cycle at 40 s does not;
-  first-frame deadline with pings only.
+  Offline then `.lost` → still Offline; `.lost` + 401 → revoked; a stream with frames spanning 30 s that drops
+  resets the attempt, one spanning 29 s does not, one with a snapshot at 0 s and silence until a cycle at
+  40 s does not, one with a snapshot at 0 s and a receive error at 31 s does not; first-frame deadline with
+  pings only.
 **Phone — terminal**
 - `HeartbeatPolicy.handover = 2 s` — one deadline from the path change covering send + pong for the
   challenge round. `start(generation:, immediately: true)` **does not restart** an outstanding round: if a
