@@ -127,14 +127,19 @@ extension TaviChaosSoak {
 // The complete history the phone cannot keep: every ring event this run ever
 // saw, merged by the monotonic timestamp the phone stamped it with.
 final class RingCollector {
-    private(set) var events: [DiagnosticsEvent] = []
+    // Sorted by the phone's monotonic stamp, ties broken by the order the ring
+    // handed them over — so two events the phone stamped in the same
+    // millisecond still stand in the order they happened.
+    private var entries: [(seq: Int, event: DiagnosticsEvent)] = []
     private var seen: Set<String> = []
 
+    var events: [DiagnosticsEvent] { entries.map(\.event) }
+
     func merge(_ line: DiagnosticsLine) {
-        for event in line.ring where seen.insert("\(event.source)|\(event.monotonic)|\(event.kind)|\(event.reason)").inserted {
-            events.append(event)
+        for event in line.ring where seen.insert(Self.key(event)).inserted {
+            entries.append((entries.count, event))
         }
-        events.sort { $0.monotonic < $1.monotonic }
+        entries.sort { ($0.event.monotonic, $0.seq) < ($1.event.monotonic, $1.seq) }
     }
 
     // Anchored on a host timestamp — a fault's `at`. Both sides export whole
@@ -144,11 +149,16 @@ final class RingCollector {
         events.first { $0.source == source && $0.kind == kind && Double($0.at) >= anchor }
     }
 
-    // Anchored on another of the phone's own events, so the phone's monotonic
-    // stamps order them: no two events of one source share an instant, so this
-    // is a strict ordering even written as `>=`.
+    // Anchored on another of the phone's own events: strictly the events that
+    // stand after it in the merged order, never the anchor itself and never a
+    // same-millisecond predecessor.
     func first(_ source: String, _ kind: String, after event: DiagnosticsEvent) -> DiagnosticsEvent? {
-        events.first { $0.source == source && $0.kind == kind && $0.monotonic >= event.monotonic }
+        guard let index = entries.firstIndex(where: { Self.key($0.event) == Self.key(event) }) else { return nil }
+        return entries[(index + 1)...].first { $0.event.source == source && $0.event.kind == kind }?.event
+    }
+
+    private static func key(_ event: DiagnosticsEvent) -> String {
+        "\(event.source)|\(event.monotonic)|\(event.kind)|\(event.reason)"
     }
 
     func all(_ source: String, _ kind: String, from: Double, to: Double) -> [DiagnosticsEvent] {
