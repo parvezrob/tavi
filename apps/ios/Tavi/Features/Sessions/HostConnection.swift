@@ -65,7 +65,6 @@ final class HostConnection {
         connectDeadline: .seconds(5)
     )
     private static let latencyInterval: Duration = .seconds(30)
-    private static let supersededProbeAttempts = 3
     private static let stableStreamInterval: Duration = .seconds(30)
 
     private(set) var isRunning = false
@@ -102,6 +101,9 @@ final class HostConnection {
     // The retry delay this link is sitting out, so a signal that the network
     // is back can end it early instead of waiting the schedule out (#111).
     private let retryWait: RetryWait
+    // "Does this computer answer at all?" — the same question the deadline,
+    // the drop path and the latency poll all ask (#101).
+    private let reachability: HostReachability
     private var onEvent: ((HostConnectionEvent) -> Void)?
     private var reconnectAttempt = 0
     private var streamTask: Task<Void, Never>?
@@ -113,9 +115,6 @@ final class HostConnection {
     // Network.framework, not URLSession: see NetworkWebSocketTask (#70).
     private var socket: (any HostEventsSocketing)?
     private var latencyTask: Task<Void, Never>?
-    // One probe in flight however many askers (#86); keyed by the epoch that
-    // asked it.
-    private var probeInFlight: (origin: Int, task: Task<HostProbe, Never>)?
     // Unstructured on purpose, since the redial must never wait for a probe;
     // the link owns each by name and `stop()` ends them all (#108).
     private var connectDeadlineTask: Task<Void, Never>?
@@ -148,6 +147,16 @@ final class HostConnection {
         self.reconnectPolicy = reconnectPolicy ?? Self.eventsReconnect
         self.timing = timing
         retryWait = RetryWait(timing: timing)
+        reachability = HostReachability(timing: timing)
+        reachability.install(
+            client: { [weak self] in self?.client },
+            epoch: { [weak self] in self?.epoch ?? 0 },
+            generation: { [weak self] in self?.reachabilityGeneration ?? 0 },
+            onPath: { [weak self] answered in
+                guard let self, answered != path else { return }
+                path = answered
+            }
+        )
     }
 
     // Everything this link asks the host over HTTP goes through one client,
@@ -240,7 +249,7 @@ final class HostConnection {
                 let asked = self.epoch
                 // A link that moved on mid-probe loses this one number, not
                 // the poll (#108).
-                if case let .reachable(latency) = await self.probeHostShared(), asked == self.epoch {
+                if case let .reachable(latency) = await self.reachability.ask(), asked == self.epoch {
                     self.latencyMilliseconds = latency
                 }
             }
@@ -273,8 +282,7 @@ final class HostConnection {
     }
 
     private func cancelProbes() {
-        probeInFlight?.task.cancel()
-        probeInFlight = nil
+        reachability.cancel()
         connectDeadlineTask?.cancel()
         connectDeadlineTask = nil
         firstFrameLatencyTask?.cancel()
@@ -365,7 +373,7 @@ final class HostConnection {
         connectDeadlineTask = Task { [weak self, timing] in
             try? await timing.sleep(deadline)
             guard !Task.isCancelled, let self else { return }
-            let probe = await self.probeHostTwice(self.reachabilityGeneration)
+            let probe = await self.reachability.askTwice(self.reachabilityGeneration)
             guard !Task.isCancelled, dial == self.epoch else { return }
             // Earned, not guessed (#86): the first dial that fails is
             // "Connecting…" or "Reconnecting"; Offline waits for the next.
@@ -386,7 +394,7 @@ final class HostConnection {
     private func measureFirstFrameLatency(_ dial: Int) {
         firstFrameLatencyTask?.cancel()
         firstFrameLatencyTask = Task { [weak self] in
-            guard let self, case let .reachable(latency) = await self.probeHostShared() else { return }
+            guard let self, case let .reachable(latency) = await self.reachability.ask() else { return }
             guard dial == self.epoch else { return }
             self.latencyMilliseconds = latency
         }
@@ -405,7 +413,7 @@ final class HostConnection {
         let generation = reachabilityGeneration
         reachabilityTask = Task { [weak self] in
             guard let self else { return }
-            let probe = await self.probeHostTwice(generation)
+            let probe = await self.reachability.askTwice(generation)
             defer { if generation == self.reachabilityGeneration { self.reachabilityTask = nil } }
             guard generation == self.reachabilityGeneration else { return }
             switch probe {
@@ -473,91 +481,6 @@ final class HostConnection {
         watchdogPing?.cancel()
         watchdogPing = nil
         watchdogPingGeneration += 1
-    }
-
-    // Offline is said only after two misses a moment apart: one slow round
-    // trip on a jittery WiFi hop must not flip a live computer to "isn't
-    // answering" (owner-felt, 2026-09-02). A computer that has since spoken,
-    // or a link stopped or pointed elsewhere, ends the question early.
-    private func probeHostTwice(_ generation: Int) async -> HostProbe {
-        let first = await probeHostChecked(generation)
-        guard first == .unreachable, !Task.isCancelled, generation == reachabilityGeneration else { return first }
-        try? await timing.sleep(.seconds(1.5))
-        guard !Task.isCancelled, generation == reachabilityGeneration else { return first }
-        return await probeHostChecked(generation)
-    }
-
-    // A request the link itself cancelled says nothing about the computer,
-    // so it is re-asked in the flight that displaced it rather than counted
-    // as a miss: one timeout plus one cancelled request used to earn Offline
-    // (#108). Bounded; a link that keeps displacing them verifies next drop.
-    private func probeHostChecked(_ generation: Int) async -> HostProbe {
-        for _ in 0..<Self.supersededProbeAttempts {
-            let probe = await probeHostShared()
-            guard probe == .superseded, !Task.isCancelled, generation == reachabilityGeneration else { return probe }
-        }
-        return .superseded
-    }
-
-    private enum HostProbe: Equatable {
-        // A definite 401: the credential is dead.
-        case rejected
-        // The host answered (any other status), in this many milliseconds.
-        case reachable(latencyMilliseconds: Int)
-        // No answer at the connection level: asleep, gone, or we are offline.
-        case unreachable
-        // The link abandoned the request before the computer could answer.
-        case superseded
-    }
-
-    // Bounded tightly: this runs on every stream drop, including the
-    // ordinary background→foreground cycle, and with the default 60 s
-    // timeout a half-dead connection after resume held the whole reconnect
-    // for a minute (owner-reported). Anything but a definite 401 keeps the
-    // stream retrying; only a connection-level failure marks the host
-    // offline.
-    private func probeHost(_ origin: Int) async -> HostProbe {
-        guard let client, let request = client.request("GET", "/api/host", timeout: 5) else { return .unreachable }
-        let started = timing.now()
-        // A failure under cancellation is our doing, not the computer's (#108).
-        guard case let .answered(status, data, _) = await client.send(request) else {
-            return Task.isCancelled ? .superseded : .unreachable
-        }
-        if status == 401 { return .rejected }
-        // An answer the link has already overtaken must not write the path (#108).
-        if status == 200, origin == epoch,
-           let answer = try? JSONDecoder().decode(HostAnswer.self, from: data) {
-            let answered = ConnectionPath(path: answer.connection?.path, relay: answer.connection?.relay)
-            if answered != path { path = answered }
-        }
-        return .reachable(latencyMilliseconds: Int(started.milliseconds(to: timing.now())))
-    }
-
-    // Single-flight: the connect deadline, the drop path and the latency poll
-    // all ask the same question; on a bad link they used to ask it four times
-    // at once (#86). An asker in a newer epoch displaces an older question
-    // rather than reading its answer as its own (#108).
-    private func probeHostShared() async -> HostProbe {
-        let origin = epoch
-        if let inFlight = probeInFlight {
-            if inFlight.origin == origin { return await inFlight.task.value }
-            inFlight.task.cancel()
-        }
-        let task = Task { [weak self] in
-            await self?.probeHost(origin) ?? .unreachable
-        }
-        probeInFlight = (origin, task)
-        defer { if probeInFlight?.task == task { probeInFlight = nil } }
-        return await task.value
-    }
-
-    private struct HostAnswer: Decodable {
-        struct Connection: Decodable {
-            let path: String
-            let relay: String?
-        }
-
-        let connection: Connection?
     }
 }
 
