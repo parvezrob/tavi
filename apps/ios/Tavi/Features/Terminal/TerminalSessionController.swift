@@ -11,7 +11,6 @@ final class TerminalSessionController {
     private(set) var errorMessage: String?
     var firstPaintMilliseconds: Double? { metrics.firstPaintMilliseconds }
     var inputToOutputMilliseconds: Double? { metrics.inputToOutputMilliseconds }
-    private(set) var latestGridSize: TerminalGridSize?
     // One deliberate attach; the view keys the renderer to it, so Jump-to
     // gets a clean surface and an ordinary reconnect keeps the one on screen.
     private(set) var sessionID = 0
@@ -27,6 +26,7 @@ final class TerminalSessionController {
     private let client: any TerminalTransporting
     private let heartbeat: TerminalHeartbeat
     private let mentioned = MentionedPorts()
+    private let grid = TerminalGridSync()
     private let outbound: TerminalOutbound
     private let pathWatch: NetworkPathWatch
     private let reconnectPolicy: ReconnectPolicy
@@ -38,7 +38,6 @@ final class TerminalSessionController {
     private var disconnectTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
     private var isSceneActive = true
-    private var lastSentGrid: TerminalGridSize?
     @ObservationIgnored private var metrics = TerminalLatencyMetrics()
     // When the current connection last said ready; nil while it is not up.
     private var readyAt: ContinuousClock.Instant?
@@ -60,6 +59,7 @@ final class TerminalSessionController {
         pathWatch = NetworkPathWatch(observer: pathObserver)
         self.reconnectPolicy = reconnectPolicy
         self.timing = timing
+        grid.install(outbound: outbound) { [weak self] in self?.connectionGeneration ?? 0 }
         outbound.installGenerationCheck { [weak self] generation in
             self?.isCurrentConnection(generation) ?? false
         }
@@ -184,20 +184,16 @@ final class TerminalSessionController {
         mentioned.update(from: value)
     }
 
-    func terminalGridDidChange(_ grid: TerminalGridSize) {
-        guard grid != latestGridSize else { return }
-        latestGridSize = grid
-        guard connectionState.canSubmitInput else {
-            Self.logger.info("grid change \(grid.columns)x\(grid.rows) deferred: cannot submit input in \(String(describing: self.connectionState))")
-            return
-        }
-        Self.logger.info("grid change \(grid.columns)x\(grid.rows) queued for send")
-        outbound.send(.resize(columns: grid.columns, rows: grid.rows), generation: connectionGeneration)
+    func terminalGridDidChange(_ size: TerminalGridSize) {
+        grid.gridDidChange(
+            to: size,
+            canSend: connectionState.canSubmitInput,
+            whileIn: String(describing: connectionState)
+        )
     }
 
     func terminalRendererDidAttach() {
-        guard connectionState.canSubmitInput, let latestGridSize else { return }
-        outbound.send(.resize(columns: latestGridSize.columns, rows: latestGridSize.rows), generation: connectionGeneration)
+        grid.sendLatest(canSend: connectionState.canSubmitInput)
     }
 
     func rendererDidFail(_ message: String) {
@@ -303,15 +299,13 @@ final class TerminalSessionController {
             reconnectTask?.cancel()
             reconnectTask = nil
             errorMessage = nil
-            lastSentGrid = nil
+            grid.forgetWhatWasSent()
             resumePoint = stream.map { TerminalResumePoint(stream: $0, offset: offset) }
             readyAt = timing.now()
             let elapsed = metrics.connectionStartedAt.map { $0.milliseconds(to: timing.now()) } ?? 0
             Self.logger.info("ready: generation=\(self.connectionGeneration) attempt=\(self.reconnectAttempt) resumed=\(resumed) afterMs=\(Int(elapsed))")
             transition(.ready)
-            if let grid = latestGridSize {
-                outbound.send(.resize(columns: grid.columns, rows: grid.rows), generation: connectionGeneration)
-            }
+            grid.sendLatest()
             heartbeat.start(generation: connectionGeneration)
         case let .output(text):
             metrics.outputArrived(at: timing.now())
@@ -489,7 +483,7 @@ final class TerminalSessionController {
         switch outcome {
         case let .sent(message):
             guard case let .resize(columns, rows) = message else { return }
-            lastSentGrid = TerminalGridSize(columns: columns, rows: rows)
+            grid.didSend(columns: columns, rows: rows)
             Self.logger.info("resize \(columns)x\(rows) sent to host")
         case let .failed(error, inputWasSubmitted):
             if error == .oversizedFrame {
@@ -529,7 +523,7 @@ final class TerminalSessionController {
         reconnectTask = nil
         readyAt = nil
         metrics.inputAbandoned()
-        lastSentGrid = nil
+        grid.forgetWhatWasSent()
     }
 
     private func isCurrentConnection(_ generation: Int) -> Bool {
@@ -545,16 +539,8 @@ final class TerminalSessionController {
         }
     }
 
-    // The host's grid must converge on the latest rendered grid even when a
-    // resize send is lost or deferred: checked after the outbound queue
-    // drains and on every heartbeat.
     private func reconcileGridIfNeeded() {
-        guard connectionState.canSubmitInput,
-              outbound.isIdle,
-              let latestGridSize,
-              latestGridSize != lastSentGrid else { return }
-        Self.logger.info("reconciling grid to \(latestGridSize.columns)x\(latestGridSize.rows)")
-        outbound.send(.resize(columns: latestGridSize.columns, rows: latestGridSize.rows), generation: connectionGeneration)
+        grid.reconcileIfNeeded(canSend: connectionState.canSubmitInput, isIdle: outbound.isIdle)
     }
 
     private func failPermanently(_ error: TerminalTransportError) {
