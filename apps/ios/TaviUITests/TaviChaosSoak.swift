@@ -127,7 +127,7 @@ final class TaviChaosSoak: XCTestCase {
             // One MARK into every fault-free window, one a second before the fault that ends it.
             if let live, live >= 10, !cycle.markedHealthy {
                 cycle.markedHealthy = true
-                try await scrollIntoHistoryAndBack(app)
+                try await scrollIntoHistoryAndBack(app, chaos: chaos)
                 type(app, mark: nextMark(.healthy))
                 continue
             }
@@ -189,8 +189,8 @@ final class TaviChaosSoak: XCTestCase {
         // decoded into a file on the host, checked by `sh -n`, and only then
         // sourced. A bracketed paste is not an option — XCUITest's `typeText`
         // never delivers the ESC that opens one (the first live run typed
-        // `[200~cat`, which zsh rejected as a glob) — and one line has no
-        // half-typed state a reconnect could leave behind.
+        // `[200~cat`, which zsh rejected as a glob) — so the fixture travels
+        // the one way `typeText` carries it whole.
         // A syntax error is named by the shell that would have run it, in
         // the first seconds rather than at minute three.
         let path = Self.fixturePath(paneId)
@@ -468,14 +468,14 @@ final class TaviChaosSoak: XCTestCase {
 
     // One turn of the sampler: the counters, the screen, and the runner's own
     // record of the host being up. Best effort; the budgets come from events.
-    private func tick(_ app: XCUIApplication, chaos: ChaosEnvironment?) async throws {
+    func tick(_ app: XCUIApplication, chaos: ChaosEnvironment?, scrolling: Bool = false) async throws {
         collector.merge(try await readDiagnostics(app))
-        samples.append(sample(app))
+        samples.append(sample(app, scrolling: scrolling))
         if let chaos { health.append(await poll(chaos)) }
         try await Task.sleep(for: .seconds(sampleInterval))
     }
 
-    private func sample(_ app: XCUIApplication) -> Sample {
+    private func sample(_ app: XCUIApplication, scrolling: Bool) -> Sample {
         let status = app.descendants(matching: .any)["terminal.status"]
         let keyboard = app.buttons["terminal.keyboard"]
         // The home phase has no surface; reading `value` on an element that
@@ -486,7 +486,8 @@ final class TaviChaosSoak: XCTestCase {
             terminalIsLive: keyboard.exists && !status.exists,
             status: status.exists ? status.label : nil,
             surface: surface.exists ? (surface.value as? String) ?? "" : "",
-            health: currentHealth(app)
+            health: currentHealth(app),
+            scrolling: scrolling
         )
     }
 

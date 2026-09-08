@@ -77,6 +77,9 @@ struct Sample {
     let status: String?
     let surface: String
     let health: String?
+    // Taken while the run itself had scrolled into history: the surface is
+    // legitimately still, so freshness is not judged on it; the status is.
+    var scrolling = false
 }
 
 struct HealthPoll {

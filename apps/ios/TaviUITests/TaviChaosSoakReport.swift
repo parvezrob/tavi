@@ -176,7 +176,7 @@ extension TaviChaosSoak {
         var lastReady: Double?
         var lastNumber: Int?
         var lastChange = 0.0
-        for sample in samples where sample.terminalIsLive && !isInsideAFault(sample.at) {
+        for sample in samples where sample.terminalIsLive && !sample.scrolling && !isInsideAFault(sample.at) {
             guard let ready = readies.last(where: { $0 <= sample.at }) else { continue }
             // Each recovery restarts the clock: nothing the surface published
             // before this attach says anything about how fresh it is now.

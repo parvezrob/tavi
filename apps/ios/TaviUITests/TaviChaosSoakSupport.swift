@@ -130,18 +130,23 @@ extension TaviChaosSoak {
     // history, herdr freezes the frame — scrollback working, not a broken
     // stream — so the flick back is confirmed the way
     // `testTouchScrollLeavesStreamingHealthy` confirms it: once the flick's
-    // momentum has died down, two spaced spontaneous updates.
-    func scrollIntoHistoryAndBack(_ app: XCUIApplication) async throws {
+    // momentum has died down, two spaced spontaneous updates. Every wait
+    // here is a sampler tick, so a recovery during the scroll is still seen
+    // on screen; its samples are marked and freshness skips them.
+    func scrollIntoHistoryAndBack(_ app: XCUIApplication, chaos: ChaosEnvironment) async throws {
         let surface = app.descendants(matching: .any)["terminal.surface"]
+        let shown = { (surface.value as? String) ?? "" }
         surface.swipeDown()
-        try await Task.sleep(for: .seconds(2))
+        try await tick(app, chaos: chaos, scrolling: true)
         for _ in 0..<5 {
             surface.swipeUp()
-            try await Task.sleep(for: .seconds(2.5))
-            let parked = (surface.value as? String) ?? ""
-            guard waitForTranscript(of: surface, timeout: 2, until: { $0 != parked }) else { continue }
-            let changedOnce = (surface.value as? String) ?? ""
-            if waitForTranscript(of: surface, timeout: 2, until: { $0 != changedOnce }) { return }
+            try await tick(app, chaos: chaos, scrolling: true)
+            let parked = shown()
+            try await tick(app, chaos: chaos, scrolling: true)
+            let changedOnce = shown()
+            guard changedOnce != parked else { continue }
+            try await tick(app, chaos: chaos, scrolling: true)
+            if shown() != changedOnce { return }
         }
         XCTFail("Flicking back after a scroll never returned the viewport to the live tail.")
     }
