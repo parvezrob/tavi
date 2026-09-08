@@ -273,6 +273,37 @@ struct TerminalRendererOwnershipTests {
         }
     }
 
+    // A session that is already paused has nothing left to invalidate.
+    // Pausing it again used to bump the generation anyway, which is how one
+    // view-layer event could cost the connection more than one dial (#111).
+    @Test
+    func pausingAnAlreadyPausedSessionCostsNothing() async throws {
+        let transport = RecoveryTransport()
+        let clock = ManualTerminalClock()
+        let controller = startedController(transport, clock)
+        let renderer = SyntheticRenderer()
+        renderer.install(into: controller.bridge)
+
+        try await withCleanup(controller, transport) {
+            try await waitUntilConnected(transport, controller)
+            renderer.remove(from: controller.bridge)
+            try await waitFor { controller.connectionState == .suspended }
+            let generation = controller.connectionGeneration
+
+            controller.sceneWillResignActive()
+            renderer.remove(from: controller.bridge)
+            await settle()
+            #expect(controller.connectionGeneration == generation)
+
+            // And the resume that follows is still exactly one dial.
+            controller.sceneDidBecomeActive()
+            let replacement = SyntheticRenderer()
+            replacement.install(into: controller.bridge)
+            try await waitFor { await transport.connectCount == 2 }
+            #expect(controller.connectionGeneration == generation + 1)
+        }
+    }
+
     // What SessionsView's Jump-to does to the one controller it keeps.
     private func switchPane(
         _ controller: TerminalSessionController,

@@ -110,6 +110,8 @@ struct TerminalSessionView: View {
             #endif
             AgentTerminalView(
                 bridge: controller.bridge,
+                surfaces: controller.surfaces,
+                sessionID: controller.sessionID,
                 isActive: scenePhase == .active,
                 onGridSizeChange: controller.terminalGridDidChange,
                 onRendererReady: controller.terminalRendererDidAttach,

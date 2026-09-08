@@ -22,6 +22,9 @@ final class TerminalSessionController {
     var mentionedPorts: [Int] { mentioned.ports }
 
     let bridge = TerminalIOBridge()
+    // The renderer's identity for this pane, stable across the container
+    // rebuilds SwiftUI makes on its own (#111).
+    @ObservationIgnored let surfaces: TerminalSurfaceOwner
 
     private let client: any TerminalTransporting
     let heartbeat: TerminalHeartbeat
@@ -63,6 +66,7 @@ final class TerminalSessionController {
         pathObserver: any NetworkPathObserving = NetworkPathObserver()
     ) {
         self.client = client
+        surfaces = TerminalSurfaceOwner(bridge: bridge)
         heartbeat = TerminalHeartbeat(policy: heartbeatPolicy, timing: timing)
         outbound = TerminalOutbound(client: client)
         pathWatch = NetworkPathWatch(observer: pathObserver)
@@ -375,7 +379,9 @@ final class TerminalSessionController {
     }
 
     private func pauseSession() {
-        guard configuration != nil else { return }
+        // Pausing an already paused session would cost another generation
+        // and orphan the dial the resume is about to make (#111).
+        guard configuration != nil, connectionState != .suspended else { return }
         shouldReconnect = false
         invalidateConnectionTasks()
         scheduleDisconnect()

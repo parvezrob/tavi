@@ -2,6 +2,10 @@ import SwiftUI
 
 struct AgentTerminalView: UIViewRepresentable {
     let bridge: TerminalIOBridge
+    // The surface that belongs to this pane, kept across the container
+    // rebuilds SwiftUI makes on its own (#111).
+    let surfaces: TerminalSurfaceOwner
+    let sessionID: Int
     let isActive: Bool
     let onGridSizeChange: @MainActor (TerminalGridSize) -> Void
     let onRendererReady: @MainActor () -> Void
@@ -10,22 +14,31 @@ struct AgentTerminalView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> TerminalContainerView {
         let container = TerminalContainerView()
+        container.surfaces = surfaces
+        if let terminal = surfaces.reusableSurface(for: sessionID) {
+            // The same pane's own surface, moved into the container SwiftUI
+            // has just built. The bridge is told nothing, because from the
+            // session's side nothing happened.
+            bind(terminal)
+            container.install(terminal)
+            surfaces.setActive(isActive)
+            return container
+        }
         do {
             let runtime = try GhosttyRuntime.shared.get()
             let terminal = try GhosttyTerminalSurfaceView(
                 runtime: runtime,
                 fontSize: TerminalFontPreference.current(),
-                onInput: owned(container) { data in bridge.receiveTerminalInput(data) },
-                onFailure: owned(container, onRendererFailure)
+                onInput: owned { data in bridge.receiveTerminalInput(data) },
+                onFailure: owned(onRendererFailure)
             )
-            terminal.onGridSizeChange = owned(container, onGridSizeChange)
-            terminal.onTranscript = onTranscript.map { owned(container, $0) }
+            bind(terminal)
             terminal.recordsViewport = true
             terminal.onFontSizeCommit = { size in
                 TerminalFontPreference.save(size)
             }
             container.install(terminal)
-            container.rendererToken = bridge.installTerminal(
+            let token = bridge.installTerminal(
                 outputConsumer: { [weak terminal] data in
                     // A surface that has gone accepts nothing (#108).
                     terminal?.receive(data) ?? false
@@ -37,12 +50,8 @@ struct AgentTerminalView: UIViewRepresentable {
                     terminal?.dismissKeyboard()
                 }
             )
-            container.bridgeCleanup = { [weak bridge, weak container] in
-                guard let token = container?.rendererToken else { return }
-                bridge?.removeTerminal(token)
-            }
-            terminal.setActive(isActive)
-            container.isActive = isActive
+            surfaces.adopt(terminal, token: token, sessionID: sessionID)
+            surfaces.setActive(isActive)
             onRendererReady()
         } catch {
             onRendererFailure("The terminal renderer could not start.")
@@ -51,38 +60,37 @@ struct AgentTerminalView: UIViewRepresentable {
     }
 
     func updateUIView(_ container: TerminalContainerView, context: Context) {
-        container.terminal?.onGridSizeChange = owned(container, onGridSizeChange)
-        // setActive re-focuses, re-checks occlusion and draws synchronously
-        // on the main thread, so only a real change is worth it.
-        guard container.isActive != isActive else { return }
-        container.isActive = isActive
-        container.terminal?.setActive(isActive)
+        container.terminal?.onGridSizeChange = owned(onGridSizeChange)
+        surfaces.setActive(isActive)
     }
 
     static func dismantleUIView(_ container: TerminalContainerView, coordinator: Void) {
-        // Cleanup first: the bridge must end this surface's epoch before
-        // shutdown() drops what the pump still holds.
-        container.bridgeCleanup?()
-        container.terminal?.shutdown()
-        container.terminal?.removeFromSuperview()
+        // The surface stays: whether this was a rebuild or the screen leaving
+        // is decided a turn later, by whether anything adopted it.
+        if let terminal = container.terminal, terminal.superview === container {
+            terminal.removeFromSuperview()
+        }
         container.terminal = nil
+        container.surfaces?.containerWentAway()
+    }
+
+    private func bind(_ terminal: GhosttyTerminalSurfaceView) {
+        terminal.onGridSizeChange = owned(onGridSizeChange)
+        terminal.onTranscript = onTranscript.map { owned($0) }
     }
 
     // A surface outlives its replacement's install and its session's end,
     // and can still finish work it began (a grid publication, a batched
     // keystroke). None of it belongs to whatever is installed now (#108).
     private func owned<Value>(
-        _ container: TerminalContainerView,
         _ body: @escaping @MainActor (Value) -> Void
     ) -> @MainActor (Value) -> Void {
-        bridge.whileCurrentRenderer(token: { [weak container] in container?.rendererToken }, body)
+        bridge.whileCurrentRenderer(token: { [weak surfaces] in surfaces?.token }, body)
     }
 
     @MainActor
     final class TerminalContainerView: UIView {
-        fileprivate var bridgeCleanup: (() -> Void)?
-        fileprivate var isActive: Bool?
-        fileprivate var rendererToken: TerminalIOBridge.RendererToken?
+        fileprivate var surfaces: TerminalSurfaceOwner?
         fileprivate var terminal: GhosttyTerminalSurfaceView?
 
         func install(_ terminal: GhosttyTerminalSurfaceView) {
