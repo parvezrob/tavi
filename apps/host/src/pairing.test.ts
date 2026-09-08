@@ -104,7 +104,7 @@ function countingRegistry(
   );
 }
 
-test("150 credential rechecks in a minute stat the file every time and read it three times (#68)", () => {
+test("150 credential rechecks in a minute stat the file every time and read it five times (#68)", () => {
   let tick = 0;
   const counts = { reads: 0, stats: 0 };
   const registry = countingRegistry(scratch(), () => tick, counts);
@@ -113,16 +113,18 @@ test("150 credential rechecks in a minute stat the file every time and read it t
   counts.stats = 0;
 
   // Five phones holding a socket open, each re-checking on the host's 2 s
-  // clock. Nothing moves the file, so the only reads are the 30 s floor at
-  // 30 s and 60 s and the last-seen write the minute mark earns.
+  // clock. Nothing moves the file, so all five reads are structural: the
+  // first check after `add` dropped the cache, the 30 s floor at 30 s and at
+  // 60 s, and the last-seen write the minute mark earns — its own re-read,
+  // then one more because writing drops the cache again.
   for (tick = 0; tick <= 60_000; tick += 2_000) {
     for (let socket = 0; socket < 5; socket += 1) assert.ok(registry.authorize(credential));
   }
-  assert.equal(counts.reads, 3, `the device list was read ${counts.reads} times in a minute of rechecks`);
+  assert.equal(counts.reads, 5, `the device list was read ${counts.reads} times in a minute of rechecks`);
   assert.ok(counts.stats >= 150, `only ${counts.stats} stats for 155 rechecks — a check that skips the file is stale`);
 });
 
-test("a revoke this host makes is dead at the next recheck without re-reading the file (#68)", () => {
+test("a revoke this host makes is dead at the very next recheck (#68)", () => {
   let tick = 0;
   const counts = { reads: 0, stats: 0 };
   const registry = countingRegistry(scratch(), () => tick, counts);
@@ -134,8 +136,38 @@ test("a revoke this host makes is dead at the next recheck without re-reading th
   counts.reads = 0;
   tick = 4_000;
   assert.equal(registry.authorize(credential), undefined);
-  // The host wrote the file, so it already knows what is in it.
-  assert.equal(counts.reads, 0, "this host's own write should not need reading back");
+  // Exactly one: writing drops the cache rather than replacing it, so the
+  // check after a write pays a read and every check after that does not.
+  assert.equal(counts.reads, 1, "one re-read after a write, then memory again");
+  tick = 6_000;
+  assert.equal(registry.authorize(credential), undefined);
+  assert.equal(counts.reads, 1);
+});
+
+test("a foreign write landing in the window of this host's own write is not hidden by it (#68)", () => {
+  const stateDir = scratch();
+  let tick = 0;
+  // A signature that never changes: the worst case, and the one that makes
+  // caching a just-written list indistinguishable from caching a stale one.
+  const blind = new DeviceRegistry(
+    stateDir,
+    () => new Date(tick),
+    () => {},
+    readStateFile,
+    () => "unchanging",
+  );
+  const { device, credential } = blind.add("first");
+
+  // Another process rewrites the file in the same window this host wrote it.
+  const other = new DeviceRegistry(
+    stateDir,
+    () => new Date(tick),
+    () => {},
+  );
+  assert.equal(other.revoke(device.id), true);
+
+  tick = 1;
+  assert.equal(blind.authorize(credential), undefined, "the write must not have cached this host's own list over it");
 });
 
 test("a revoke another process made cuts every live socket off within one 2 s recheck (#68)", () => {

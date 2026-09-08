@@ -243,9 +243,11 @@ export class DeviceRegistry {
   private save(devices: StoredDevice[]): void {
     try {
       writeStateFile(this.file, { version: DEVICES_SCHEMA_VERSION, devices });
-      // What this host just wrote is the truth; the signature is read back
-      // afterwards so the next check recognises this write as its own.
-      this.cache = { devices, readAtMs: this.now().getTime(), signature: this.stat(this.file) };
+      // Dropped, not replaced. A signature taken after the write cannot tell
+      // this host's write from a foreign one that landed in the same window,
+      // and caching the list under it would hide that foreign write for a
+      // whole re-read interval. The next check pays one read instead.
+      this.cache = undefined;
     } catch (error) {
       this.report(`Tavi could not save the paired devices (${this.file}): ${describe(error)}.`);
       throw error;

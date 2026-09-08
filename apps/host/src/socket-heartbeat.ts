@@ -51,12 +51,12 @@ export function keepAlive(websocket: WebSocket, options: KeepAliveOptions = {}):
       return;
     }
     // A blackholed socket is not asked and not counted: chaos is measuring the
-    // phone's recovery, not the host's patience with a fault it injected. The
-    // ping already outstanding when the window opened is forgiven with it —
-    // the peer was never given a chance to answer that one either.
+    // phone's recovery, not the host's patience with a fault it injected. Only
+    // the ping outstanding when the window opened is forgiven — the peer was
+    // never given a chance to answer that one. Misses already counted stand,
+    // or a fault on alternate ticks would keep a dead socket alive for ever.
     if (options.gate?.() === false) {
       unanswered = false;
-      misses = 0;
       arm();
       return;
     }

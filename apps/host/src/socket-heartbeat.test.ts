@@ -76,7 +76,9 @@ class FakeSocket extends EventEmitter {
   }
 }
 
-test("the events socket is pinged every 15 s and terminated after two unanswered pings", async () => {
+test("the events socket is pinged every 15 s and terminated after two unanswered pings", {
+  timeout: 15_000,
+}, async () => {
   const clock = new ChaosTestClock();
   const harness = chaosHarness(clock);
   const server = await harness.startServer();
@@ -111,7 +113,7 @@ test("the events socket is pinged every 15 s and terminated after two unanswered
   }
 });
 
-test("a pong resets the count, and one arriving at 44 s keeps the socket", async () => {
+test("a pong resets the count, and one arriving at 44 s keeps the socket", { timeout: 15_000 }, async () => {
   const clock = new ChaosTestClock();
   const harness = chaosHarness(clock);
   const server = await harness.startServer();
@@ -154,7 +156,9 @@ test("a pong resets the count, and one arriving at 44 s keeps the socket", async
   }
 });
 
-test("a blackholed events socket is neither pinged nor counted, and counting resumes after the window", async () => {
+test("a blackholed events socket is neither pinged nor counted, and counting resumes after the window", {
+  timeout: 15_000,
+}, async () => {
   const clock = new ChaosTestClock();
   const harness = chaosHarness(clock);
   const server = await harness.startServer();
@@ -264,7 +268,9 @@ test("ws hands the ping completion the host relies on a real post-close error, a
   }
 });
 
-test("a ping already outstanding when a blackhole opens is not a miss once the window ends", async () => {
+test("a ping already outstanding when a blackhole opens is not a miss once the window ends", {
+  timeout: 15_000,
+}, async () => {
   const clock = new ChaosTestClock();
   const harness = chaosHarness(clock);
   const server = await harness.startServer();
@@ -297,6 +303,47 @@ test("a ping already outstanding when a blackhole opens is not a miss once the w
     assert.equal(websocket.readyState, WebSocket.OPEN, "the pre-blackhole ping must not have counted");
     clock.advance(INTERVAL);
     assert.equal((await closed)[0], 1006);
+  } finally {
+    await close(server);
+  }
+});
+
+test("a miss counted before a blackhole still counts after it: one more is enough to terminate", {
+  timeout: 15_000,
+}, async () => {
+  const clock = new ChaosTestClock();
+  const harness = chaosHarness(clock);
+  const server = await harness.startServer();
+
+  try {
+    const websocket = openEvents(server);
+    let pings = 0;
+    websocket.on("ping", () => {
+      pings += 1;
+    });
+    await once(websocket, "open");
+
+    // Ping, then a real miss: this socket is already one away from gone.
+    clock.advance(INTERVAL);
+    await waitUntil(() => pings === 1);
+    clock.advance(INTERVAL);
+    await waitUntil(() => pings === 2);
+
+    // A fault on alternate ticks is what the soak does. If a gated tick wiped
+    // the miss as well as the outstanding ping, every other tick would reset
+    // the count and a dead socket would never be terminated at all.
+    await blackholeEvents(server, INTERVAL + 1_000);
+    clock.advance(INTERVAL);
+    await settle();
+    assert.equal(pings, 2, "nothing is sent while the gate is shut");
+
+    const closed = once(websocket, "close");
+    clock.advance(INTERVAL);
+    await waitUntil(() => pings === 3);
+    await settle();
+    assert.equal(websocket.readyState, WebSocket.OPEN, "the forgiven ping is only the one the peer never saw");
+    clock.advance(INTERVAL);
+    assert.equal((await closed)[0], 1006, "the miss from before the window was still on the count");
   } finally {
     await close(server);
   }
