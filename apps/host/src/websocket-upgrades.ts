@@ -117,9 +117,7 @@ export async function upgradeTerminal(
 // Snapshot-based push: the phone always receives the full agent list, so a
 // missed frame can never leave a stale agent on screen.
 function serveAgentEvents(websocket: WebSocket, agentEvents?: AgentEventSource, chaos?: Chaos): void {
-  keepAlive(websocket, {
-    ...(chaos ? { clock: chaos, gate: (socket: WebSocket) => chaos.gate(socket) } : {}),
-  });
+  keepAlive(websocket, { ...(chaos ? { clock: chaos, gate: () => chaos.gate(websocket) } : {}) });
   // Chaos only (#111): a blackholed socket keeps the *latest* frame it skipped
   // and sends that one when the window ends — a snapshot is the whole list, so
   // replaying the older ones would only paint stale state.
@@ -148,8 +146,9 @@ function serveAgentEvents(websocket: WebSocket, agentEvents?: AgentEventSource, 
     return;
   }
 
-  // The frame arrives already serialized: one envelope per snapshot, shared by
-  // every phone, instead of one JSON.stringify per socket (#68 finding 2).
+  // The frame arrives already serialized: its publisher built one envelope and
+  // every phone here is handed that same text, instead of one JSON.stringify
+  // per open socket (#68 finding 2).
   unsubscribe = agentEvents.subscribe((_snapshot, frame) => send(frame));
   if (!agentEvents.latest) {
     send(agentsFrame({ available: false, reason: "Waiting for the first Herdr snapshot.", agents: [] }));

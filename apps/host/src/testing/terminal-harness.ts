@@ -8,6 +8,7 @@ import path from "node:path";
 import type { IPty } from "node-pty";
 import WebSocket from "ws";
 import { AgentKindDetector } from "../agent-kinds.js";
+import { agentsFrame, type AgentEventSource, type AgentsListener, type HerdrAgentsSnapshot } from "../herdr-events.js";
 import type { HerdrAgentSource } from "../herdr-types.js";
 import { EVENTS_PROTOCOL, OUTPUT_FRAME_HEADER_BYTES, OUTPUT_FRAME_TYPE, TERMINAL_PROTOCOL_V2 } from "../protocol.js";
 import { ProjectHistory } from "../projects.js";
@@ -103,6 +104,34 @@ function fixtureHerdr(): HerdrAgentSource {
     promptAgent: async () => ({ submitted: true as const }),
     createTab: async () => ({ created: true as const, paneId: "wB:p9", tabId: "wB:t9" }),
   };
+}
+
+// An events feed a test publishes into by hand. It builds the wire frame the
+// way the real feed does, so a suite never re-states the envelope's shape.
+export class FakeAgentEvents implements AgentEventSource {
+  latest: HerdrAgentsSnapshot | undefined;
+  private readonly listeners = new Set<AgentsListener>();
+
+  start(): void {}
+  stop(): void {}
+
+  subscribe(listener: AgentsListener): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  get subscriberCount(): number {
+    return this.listeners.size;
+  }
+
+  publish(snapshot: { available: boolean; reason?: string; agents: unknown[] }): void {
+    const published = snapshot as HerdrAgentsSnapshot;
+    this.latest = published;
+    const frame = agentsFrame(published);
+    for (const listener of [...this.listeners]) listener(published, frame);
+  }
 }
 
 export class TerminalHarness {

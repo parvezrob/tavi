@@ -237,8 +237,11 @@ export class AttentiveAgentEvents implements AgentEventSource {
     this.inner.stop();
   }
 
-  // One inner subscription for every phone, not one each: the merge and the
-  // envelope that follows it are done once per snapshot (#68 finding 2).
+  // One inner subscription for every phone, not one each: this wrapper merges
+  // and serializes once per snapshot it publishes, never once per socket
+  // (#68 finding 2). The feed underneath serializes its own pre-merge frame
+  // for change detection, so a snapshot costs two envelopes in production —
+  // two publishers, not two phones.
   subscribe(listener: AgentsListener): () => void {
     // Attach before the listener joins, so the inner feed's replay lands on
     // nobody and every subscriber is replayed the same way, right below.
@@ -267,6 +270,7 @@ export class AttentiveAgentEvents implements AgentEventSource {
   }
 
   private fanOut(snapshot: HerdrAgentsSnapshot): void {
+    if (this.listeners.size === 0) return;
     const frame = agentsFrame(snapshot);
     for (const listener of [...this.listeners]) listener(snapshot, frame);
   }

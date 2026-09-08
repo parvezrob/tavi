@@ -10,6 +10,7 @@ import {
   close,
   closeOutcome,
   harnessConfig as config,
+  FakeAgentEvents,
   TerminalHarness,
   waitUntil,
 } from "./testing/terminal-harness.js";
@@ -330,20 +331,8 @@ test("herdr agents are attachable terminal targets with honest failure modes", a
 
 test("events endpoint pushes agent snapshots and degrades honestly when unconfigured", async () => {
   const harness = new TerminalHarness();
-  let publish: ((snapshot: { available: boolean; reason?: string; agents: unknown[] }) => void) | undefined;
-  harness.agentEvents = {
-    latest: undefined,
-    start() {},
-    stop() {},
-    subscribe(listener) {
-      // The frame is the wire text the host now sends verbatim, so the fake
-      // produces it exactly as the feed does.
-      publish = (snapshot) => listener(snapshot as never, JSON.stringify({ type: "agents", ...snapshot }));
-      return () => {
-        publish = undefined;
-      };
-    },
-  };
+  const agentEvents = new FakeAgentEvents();
+  harness.agentEvents = agentEvents;
   const server = await harness.startServer();
 
   try {
@@ -358,7 +347,7 @@ test("events endpoint pushes agent snapshots and degrades honestly when unconfig
     await waitUntil(() => messages.length === 1);
     assert.equal(messages[0]?.available, false);
 
-    publish?.({
+    agentEvents.publish({
       available: true,
       agents: [{ id: "wB:p1", agent: "claude", status: "blocked" }],
     });
@@ -369,7 +358,7 @@ test("events endpoint pushes agent snapshots and degrades honestly when unconfig
 
     websocket.close();
     await once(websocket, "close");
-    await waitUntil(() => publish === undefined);
+    await waitUntil(() => agentEvents.subscriberCount === 0);
   } finally {
     await close(server);
   }

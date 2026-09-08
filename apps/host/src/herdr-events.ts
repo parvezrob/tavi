@@ -37,8 +37,8 @@ export interface HerdrAgentsSnapshot {
 }
 
 // The listener is handed the snapshot *and* the exact text every phone gets:
-// the `{type:"agents", …}` envelope is serialized once per snapshot, not once
-// per open socket (#68 finding 2).
+// the `{type:"agents", …}` envelope is serialized once per publisher, never
+// once per open socket (#68 finding 2).
 export type AgentsListener = (snapshot: HerdrAgentsSnapshot, frame: string) => void;
 
 export interface AgentEventSource {
@@ -335,7 +335,7 @@ export class HerdrEventFeed implements AgentEventSource {
   private publish(snapshot: HerdrAgentsSnapshot): void {
     this.lastSnapshot = snapshot;
     // The envelope is both the change detector and the wire text, so a
-    // snapshot costs one JSON.stringify however many phones are listening.
+    // snapshot costs this feed one JSON.stringify however many phones listen.
     const frame = agentsFrame(snapshot);
     if (frame === this.lastPublished) return;
     this.lastPublished = frame;

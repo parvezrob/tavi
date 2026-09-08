@@ -25,18 +25,20 @@ const LAST_SEEN_WRITE_INTERVAL_MILLISECONDS = 60_000;
 // Every open WebSocket re-checks its credential every 2 s (#46). Reading,
 // parsing and hashing devices.json for each of those was the whole idle cost
 // of a paired phone (#68 finding 1) — the expensive part was the read, not
-// how often it was asked for. So the list is answered from memory, one
-// `statSync` says whether the file moved, and only a moved file is read again.
-// The stat is throttled to less than one recheck interval, so N phones
-// sharing a 2 s recheck cost one stat between them and no recheck is ever
-// more than its own interval behind the file: `tavi devices revoke` in
-// another process still cuts a live phone off within 2 s.
-const DEVICE_STAT_INTERVAL_MILLISECONDS = 1_000;
+// asking whether one was needed. So every check still stats the file (a few
+// microseconds) and only a file that changed is read, parsed and hashed
+// again: `tavi devices revoke` in another process cuts a live phone off
+// within the same 2 s it always did.
+//
+// mtime alone is not a change signal — two writes inside one filesystem tick
+// share it — so size and inode ride along, and the list is re-read anyway
+// this often, which bounds any signal all three could still miss.
+const DEVICE_REREAD_INTERVAL_MILLISECONDS = 30_000;
 
 interface DeviceCache {
   devices: StoredDevice[];
-  statedAtMs: number;
-  modifiedAtMs: number;
+  readAtMs: number;
+  signature: string;
 }
 
 export interface PairedDevice {
@@ -77,6 +79,17 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// What "the same file, unchanged" means. Empty when it is not there at all —
+// a state that must never compare equal to a file that is.
+function fileSignature(file: string): string {
+  try {
+    const status = statSync(file);
+    return `${status.mtimeMs}:${status.size}:${status.ino}`;
+  } catch {
+    return "";
+  }
+}
+
 // The persisted set of phones allowed in, and the host's identity key.
 export class DeviceRegistry {
   private lastSeenWrittenAt = new Map<string, number>();
@@ -86,8 +99,9 @@ export class DeviceRegistry {
     private readonly stateDir: string,
     private readonly now: () => Date = () => new Date(),
     private readonly report: (message: string) => void = (message) => log.error("pairing", message),
-    // The disk read, injectable only so a test can count it.
+    // The two disk touches, injectable only so a test can count them apart.
     private readonly read: (file: string) => StateFileRead = readStateFile,
+    private readonly stat: (file: string) => string = fileSignature,
   ) {}
 
   identity(): HostIdentity {
@@ -119,7 +133,7 @@ export class DeviceRegistry {
     const devices = this.load();
     const match = devices.find((device) => equalHashes(device.credentialHash, hash));
     if (!match) return undefined;
-    this.touch(match, devices);
+    this.touch(match.id);
     const { credentialHash: _hash, ...device } = match;
     return device;
   }
@@ -127,7 +141,7 @@ export class DeviceRegistry {
   // Mints and stores a credential for a newly paired phone. The credential
   // is returned exactly once; only its hash is kept.
   add(name: string): { device: PairedDevice; credential: string } {
-    const devices = this.load();
+    const devices = this.reload();
     const credential = randomBytes(32).toString("base64url");
     const stored: StoredDevice = {
       id: randomBytes(6).toString("hex"),
@@ -143,19 +157,24 @@ export class DeviceRegistry {
   // Revoke by id or (unique) name. Returns false if nothing matched, so the
   // CLI can say so instead of pretending.
   revoke(idOrName: string): boolean {
-    const devices = this.load();
+    const devices = this.reload();
     const kept = devices.filter((device) => device.id !== idOrName && device.name !== idOrName);
     if (kept.length === devices.length) return false;
     this.save(kept);
     return true;
   }
 
-  private touch(match: StoredDevice, devices: StoredDevice[]): void {
+  private touch(id: string): void {
     const nowMs = this.now().getTime();
-    const last = this.lastSeenWrittenAt.get(match.id) ?? 0;
+    const last = this.lastSeenWrittenAt.get(id) ?? 0;
     if (nowMs - last < LAST_SEEN_WRITE_INTERVAL_MILLISECONDS) return;
-    this.lastSeenWrittenAt.set(match.id, nowMs);
-    match.lastSeenAt = new Date(nowMs).toISOString();
+    this.lastSeenWrittenAt.set(id, nowMs);
+    const devices = this.reload();
+    const fresh = devices.find((device) => device.id === id);
+    // Gone from the file since the check above: a last-seen stamp must never
+    // be what puts a revoked phone back.
+    if (!fresh) return;
+    fresh.lastSeenAt = new Date(nowMs).toISOString();
     this.save(devices);
   }
 
@@ -163,46 +182,47 @@ export class DeviceRegistry {
     return path.join(this.stateDir, DEVICES_FILE_NAME);
   }
 
-  // The paired list as this host last saw it. The file's mtime is what says
-  // whether anything outside this process changed it; only a moved file is
-  // read and parsed again.
+  // The paired list, from memory when the file is provably the one already
+  // read and that read is recent, from disk otherwise. Every *read* path may
+  // come through here; no *write* path may — see `reload`.
   private load(): StoredDevice[] {
     const cached = this.cache;
     const nowMs = this.now().getTime();
-    if (cached && nowMs - cached.statedAtMs < DEVICE_STAT_INTERVAL_MILLISECONDS) return cached.devices;
-    const modifiedAtMs = this.modifiedAtMs();
-    if (cached && modifiedAtMs === cached.modifiedAtMs) {
-      cached.statedAtMs = nowMs;
+    const signature = this.stat(this.file);
+    if (cached && cached.signature === signature && nowMs - cached.readAtMs < DEVICE_REREAD_INTERVAL_MILLISECONDS) {
       return cached.devices;
     }
-    const devices = this.readDevices();
-    this.cache = { devices, statedAtMs: nowMs, modifiedAtMs };
-    return devices;
+    return this.reload(nowMs, signature);
   }
 
-  // 0 when the file is gone or unreadable: a state that must not look like an
-  // unchanged file, and one the read below reports on properly.
-  private modifiedAtMs(): number {
-    try {
-      return statSync(this.file).mtimeMs;
-    } catch {
-      return 0;
-    }
-  }
-
-  private readDevices(): StoredDevice[] {
+  // The list as the file has it, cache or no cache. Every mutation starts
+  // here: merging onto a cached list would write back a device another
+  // process revoked, resurrecting a credential permanently. Writes are rare,
+  // so the read they cost was never what #68 was about.
+  //
+  // The signature is taken before the read, so a write landing between the
+  // two is cached under the older signature and re-read on the next call —
+  // never the other way round.
+  private reload(nowMs = this.now().getTime(), signature = this.stat(this.file)): StoredDevice[] {
     const read = this.read(this.file);
-    if (read.status === "missing") return [];
     if (read.status === "unreadable") {
       // Failing closed here would lock every phone out because of a disk
       // hiccup; failing open would let anyone in. Neither: no devices
       // authorize until the file is readable again, and the log says why.
+      // Not cached either — one transient EIO must not lock every phone out
+      // until something else happens to change the file.
       this.report(
         `Tavi could not read the paired devices (${this.file}): ${read.reason}. No paired phone can connect until this is fixed.`,
       );
       return [];
     }
-    const stored = read.value as { version?: unknown; devices?: unknown };
+    const devices = read.status === "missing" ? [] : this.parse(read.value);
+    this.cache = { devices, readAtMs: nowMs, signature };
+    return devices;
+  }
+
+  private parse(value: unknown): StoredDevice[] {
+    const stored = value as { version?: unknown; devices?: unknown };
     if (stored?.version !== DEVICES_SCHEMA_VERSION || !Array.isArray(stored.devices)) {
       this.report(
         `Ignoring a paired-devices list written by another version (${this.file}): expected version ${DEVICES_SCHEMA_VERSION}.`,
@@ -223,9 +243,9 @@ export class DeviceRegistry {
   private save(devices: StoredDevice[]): void {
     try {
       writeStateFile(this.file, { version: DEVICES_SCHEMA_VERSION, devices });
-      // What this host just wrote is the truth, so a revoke here reaches the
-      // next recheck without even a stat.
-      this.cache = { devices, statedAtMs: this.now().getTime(), modifiedAtMs: this.modifiedAtMs() };
+      // What this host just wrote is the truth; the signature is read back
+      // afterwards so the next check recognises this write as its own.
+      this.cache = { devices, readAtMs: this.now().getTime(), signature: this.stat(this.file) };
     } catch (error) {
       this.report(`Tavi could not save the paired devices (${this.file}): ${describe(error)}.`);
       throw error;

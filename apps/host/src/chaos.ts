@@ -260,8 +260,10 @@ class ChaosHost implements Chaos {
   }
 }
 
-// The host's own clock: unref'd so a pending window never holds the process open.
-const REAL_CLOCK: ChaosClock = {
+// The host's own clock: unref'd so a pending window never holds the process
+// open. Exported because the events heartbeat measures its interval on the
+// same one, and a second copy would be a second thing to get wrong.
+export const REAL_CLOCK: ChaosClock = {
   now: () => Date.now(),
   setTimeout: (run, ms) => {
     const timer = setTimeout(run, ms);

@@ -16,6 +16,7 @@ import {
   close,
   closeOutcome,
   harnessConfig as config,
+  FakeAgentEvents,
   TerminalHarness,
   waitUntil,
 } from "./testing/terminal-harness.js";
@@ -177,20 +178,8 @@ test("closeMidOutput arrives as an orderly close with the code the runner asked 
 test("a blackholed events socket keeps TCP up, answers no ping, and sends one retained snapshot", async () => {
   const clock = new ChaosTestClock();
   const harness = chaosHarness(clock);
-  let publish: ((snapshot: { available: boolean; agents: unknown[] }) => void) | undefined;
-  harness.agentEvents = {
-    latest: undefined,
-    start() {},
-    stop() {},
-    subscribe(listener) {
-      // The frame is the wire text the host now sends verbatim, so the fake
-      // produces it exactly as the feed does.
-      publish = (snapshot) => listener(snapshot as never, JSON.stringify({ type: "agents", ...snapshot }));
-      return () => {
-        publish = undefined;
-      };
-    },
-  };
+  const agentEvents = new FakeAgentEvents();
+  harness.agentEvents = agentEvents;
   const server = await harness.startServer();
 
   try {
@@ -205,8 +194,8 @@ test("a blackholed events socket keeps TCP up, answers no ping, and sends one re
     // 30 s: the window the soak's terminal rotation uses.
     assert.equal((await postFault(server, { kind: "blackhole", socket: "events", ms: 30_000 })).status, 201);
     websocket.ping();
-    publish?.({ available: true, agents: [{ id: "wB:p1" }] });
-    publish?.({ available: true, agents: [{ id: "wB:p1" }, { id: "wB:p2" }] });
+    agentEvents.publish({ available: true, agents: [{ id: "wB:p1" }] });
+    agentEvents.publish({ available: true, agents: [{ id: "wB:p1" }, { id: "wB:p2" }] });
     await settle();
 
     // TCP is up — the phone's socket never errors — but nothing comes back.
@@ -497,20 +486,8 @@ test("hostPause withholds every answer for the window, then the host answers aga
 
 test("a fault reaches only the socket it names", async () => {
   const harness = chaosHarness();
-  let publish: ((snapshot: { available: boolean; agents: unknown[] }) => void) | undefined;
-  harness.agentEvents = {
-    latest: undefined,
-    start() {},
-    stop() {},
-    subscribe(listener) {
-      // The frame is the wire text the host now sends verbatim, so the fake
-      // produces it exactly as the feed does.
-      publish = (snapshot) => listener(snapshot as never, JSON.stringify({ type: "agents", ...snapshot }));
-      return () => {
-        publish = undefined;
-      };
-    },
-  };
+  const agentEvents = new FakeAgentEvents();
+  harness.agentEvents = agentEvents;
   const server = await harness.startServer();
 
   try {
@@ -523,7 +500,7 @@ test("a fault reaches only the socket it names", async () => {
     const terminalClosed = once(terminal.websocket, "close");
     await postFault(server, { kind: "terminate", socket: "terminal", paneId: "fixture" });
     await terminalClosed;
-    publish?.({ available: true, agents: [] });
+    agentEvents.publish({ available: true, agents: [] });
     await waitUntil(() => frames.length === 2);
     assert.equal(events.readyState, WebSocket.OPEN);
 

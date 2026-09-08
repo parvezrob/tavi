@@ -1,5 +1,5 @@
 import type { WebSocket } from "ws";
-import type { ChaosTimerHandle } from "./chaos.js";
+import { type ChaosClock, type ChaosTimerHandle, REAL_CLOCK } from "./chaos.js";
 
 // Server-side liveness for the events socket (#111, #68 finding 8). A phone
 // whose network vanished with TCP still up answers nothing and reports
@@ -17,29 +17,16 @@ const MISSES_BEFORE_TERMINATE = 2;
 export interface KeepAliveOptions {
   intervalMs?: number;
   /** The same clock chaos measures its windows on, so a test never waits 45 s. */
-  clock?: { setTimeout(run: () => void, ms: number): ChaosTimerHandle };
+  clock?: Pick<ChaosClock, "setTimeout">;
   /** False while a blackhole holds this socket: it is neither pinged nor counted. */
-  gate?: (websocket: WebSocket) => boolean;
+  gate?: () => boolean;
   /** How a ping leaves. Injectable so a send that never completes is testable. */
   send?: (websocket: WebSocket, done: () => void) => void;
 }
 
-const REAL_TIMERS = {
-  setTimeout: (run: () => void, ms: number): ChaosTimerHandle => {
-    const timer = setTimeout(run, ms);
-    timer.unref?.();
-    return { cancel: () => clearTimeout(timer) };
-  },
-};
-
-/**
- * Pings `websocket` every interval and terminates it after two unanswered
- * pings. Returns the stop the caller can use; `close` and `error` already
- * stop it themselves.
- */
-export function keepAlive(websocket: WebSocket, options: KeepAliveOptions = {}): () => void {
+export function keepAlive(websocket: WebSocket, options: KeepAliveOptions = {}): void {
   const intervalMs = options.intervalMs ?? EVENTS_PING_INTERVAL_MILLISECONDS;
-  const clock = options.clock ?? REAL_TIMERS;
+  const clock = options.clock ?? REAL_CLOCK;
   const send = options.send ?? ((socket, done) => socket.ping(undefined, undefined, done));
   let timer: ChaosTimerHandle | undefined;
   let unanswered = false;
@@ -64,8 +51,12 @@ export function keepAlive(websocket: WebSocket, options: KeepAliveOptions = {}):
       return;
     }
     // A blackholed socket is not asked and not counted: chaos is measuring the
-    // phone's recovery, not the host's patience with a fault it injected.
-    if (options.gate?.(websocket) === false) {
+    // phone's recovery, not the host's patience with a fault it injected. The
+    // ping already outstanding when the window opened is forgiven with it —
+    // the peer was never given a chance to answer that one either.
+    if (options.gate?.() === false) {
+      unanswered = false;
+      misses = 0;
       arm();
       return;
     }
@@ -80,7 +71,7 @@ export function keepAlive(websocket: WebSocket, options: KeepAliveOptions = {}):
     unanswered = true;
     // The completion is a seam and nothing waits on it: a send that never
     // returns must not stop the next tick from counting this ping as missed,
-    // and one that completes after the close must not throw.
+    // and ws hands one that outlives the close an error nobody needs to hear.
     send(websocket, () => undefined);
     arm();
   }
@@ -92,5 +83,4 @@ export function keepAlive(websocket: WebSocket, options: KeepAliveOptions = {}):
   websocket.once("close", stop);
   websocket.once("error", stop);
   arm();
-  return stop;
 }
