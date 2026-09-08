@@ -75,10 +75,13 @@ test("last-seen is recorded but not on every request", () => {
 test("an unreadable device list lets nobody in and says why", () => {
   const stateDir = scratch();
   const reported: string[] = [];
-  const registry = new DeviceRegistry(stateDir, undefined, (message) => reported.push(message));
+  let tick = 0;
+  const registry = new DeviceRegistry(stateDir, () => new Date(tick), (message) => reported.push(message));
   const { credential } = registry.add("phone");
 
   writeFileSync(path.join(stateDir, "devices.json"), "{ nope");
+  // An edit no host process made is seen at the next disk window (#68 finding 1).
+  tick = 30_000;
   assert.equal(registry.authorize(credential), undefined);
   assert.match(reported.at(-1) ?? "", /could not read the paired devices/);
 });

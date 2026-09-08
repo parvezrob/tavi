@@ -1,7 +1,8 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { statSync } from "node:fs";
 import path from "node:path";
 import { log } from "./log.js";
-import { readStateFile, writeStateFile } from "./state-file.js";
+import { readStateFile, type StateFileRead, writeStateFile } from "./state-file.js";
 
 // Pairing (#45) and per-device credentials (#46). A phone never sees the
 // host's shared token: `tavi pair` mints a single-use, short-lived secret,
@@ -21,6 +22,18 @@ const MAX_PENDING_SECRETS = 5;
 // Last-seen is informational; writing it on every request would turn each
 // API call into a disk write.
 const LAST_SEEN_WRITE_INTERVAL_MILLISECONDS = 60_000;
+// Every open WebSocket re-checks its credential every 2 s (#46). Reading and
+// parsing devices.json for each of those was the whole idle cost of a paired
+// phone (#68 finding 1): the list is answered from memory, and the disk is
+// consulted at most this often — a write this host made replaces the memory
+// copy outright, so only another process's edit waits for the window.
+const DEVICE_CACHE_INTERVAL_MILLISECONDS = 30_000;
+
+interface DeviceCache {
+  devices: StoredDevice[];
+  checkedAtMs: number;
+  modifiedAtMs: number;
+}
 
 export interface PairedDevice {
   id: string;
@@ -63,11 +76,14 @@ function describe(error: unknown): string {
 // The persisted set of phones allowed in, and the host's identity key.
 export class DeviceRegistry {
   private lastSeenWrittenAt = new Map<string, number>();
+  private cache: DeviceCache | undefined;
 
   constructor(
     private readonly stateDir: string,
     private readonly now: () => Date = () => new Date(),
     private readonly report: (message: string) => void = (message) => log.error("pairing", message),
+    // The disk read, injectable only so a test can count it.
+    private readonly read: (file: string) => StateFileRead = readStateFile,
   ) {}
 
   identity(): HostIdentity {
@@ -143,8 +159,35 @@ export class DeviceRegistry {
     return path.join(this.stateDir, DEVICES_FILE_NAME);
   }
 
+  // The paired list as this host last saw it. Between windows the answer is
+  // the one in memory; at a window the file's mtime says whether anything
+  // outside this process changed it, and only then is it parsed again.
   private load(): StoredDevice[] {
-    const read = readStateFile(this.file);
+    const cached = this.cache;
+    const nowMs = this.now().getTime();
+    if (cached && nowMs - cached.checkedAtMs < DEVICE_CACHE_INTERVAL_MILLISECONDS) return cached.devices;
+    const modifiedAtMs = this.modifiedAtMs();
+    if (cached && modifiedAtMs === cached.modifiedAtMs) {
+      cached.checkedAtMs = nowMs;
+      return cached.devices;
+    }
+    const devices = this.readDevices();
+    this.cache = { devices, checkedAtMs: nowMs, modifiedAtMs };
+    return devices;
+  }
+
+  // 0 when the file is gone or unreadable: a state that must not look like an
+  // unchanged file, and one the read below reports on properly.
+  private modifiedAtMs(): number {
+    try {
+      return statSync(this.file).mtimeMs;
+    } catch {
+      return 0;
+    }
+  }
+
+  private readDevices(): StoredDevice[] {
+    const read = this.read(this.file);
     if (read.status === "missing") return [];
     if (read.status === "unreadable") {
       // Failing closed here would lock every phone out because of a disk
@@ -176,6 +219,9 @@ export class DeviceRegistry {
   private save(devices: StoredDevice[]): void {
     try {
       writeStateFile(this.file, { version: DEVICES_SCHEMA_VERSION, devices });
+      // What this host just wrote is the truth, so a revoke here reaches the
+      // next 2 s recheck rather than waiting for the disk window.
+      this.cache = { devices, checkedAtMs: this.now().getTime(), modifiedAtMs: this.modifiedAtMs() };
     } catch (error) {
       this.report(`Tavi could not save the paired devices (${this.file}): ${describe(error)}.`);
       throw error;
