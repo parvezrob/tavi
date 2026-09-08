@@ -466,9 +466,12 @@ final class TerminalSessionController {
         errorMessage = "The host stopped responding. Reconnecting."
         // Named before the cycle it causes, so the log says the handover was
         // what this connection failed rather than an ordinary quiet host.
+        // The events link records the same miss under the same case.
         switch reason {
-        case .handoverPongMissing, .handoverSendStalled:
-            record(.handoverFailed, reason: .terminal(reason))
+        case .handoverPongMissing:
+            record(.handoverFailed, reason: .handover(.pongMissing))
+        case .handoverSendStalled:
+            record(.handoverFailed, reason: .handover(.sendStalled))
         default:
             break
         }

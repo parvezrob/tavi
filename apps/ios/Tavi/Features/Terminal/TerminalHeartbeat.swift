@@ -36,9 +36,6 @@ final class TerminalHeartbeat {
     private var sendBound: Task<Void, Never>?
     private var pongBound: Task<Void, Never>?
     private var round: Round?
-    // Handed to the next round the loop opens: an ask that found no round in
-    // flight is answered by a new one on the handover deadline.
-    private var nextRoundIsHandover = false
 
     init(policy: HeartbeatPolicy, timing: ConnectionTiming) {
         self.policy = policy
@@ -66,22 +63,21 @@ final class TerminalHeartbeat {
             return
         }
         stop()
-        nextRoundIsHandover = immediately
-        var skipFirstWait = immediately
+        // An ask that found no round in flight is answered by one opened
+        // now, on the handover deadline. Only the loop's first turn.
+        var opensHandoverRound = immediately
         loop = Task { [weak self] in
             while !Task.isCancelled {
                 do {
                     guard let self else { return }
-                    if skipFirstWait {
-                        skipFirstWait = false
-                    } else {
-                        try await timing.sleep(policy.interval)
-                    }
+                    if !opensHandoverRound { try await timing.sleep(policy.interval) }
                 } catch {
                     return
                 }
                 guard let self, isCurrent?(generation) == true else { return }
-                await beat(generation: generation)
+                let isHandover = opensHandoverRound
+                opensHandoverRound = false
+                await beat(generation: generation, isHandover: isHandover)
                 guard isCurrent?(generation) == true else { return }
             }
         }
@@ -97,7 +93,6 @@ final class TerminalHeartbeat {
         pongBound?.cancel()
         pongBound = nil
         round = nil
-        nextRoundIsHandover = false
     }
 
     // A reply releases the pong bound only: it says nothing about our own
@@ -106,7 +101,6 @@ final class TerminalHeartbeat {
     //
     // True when it answered a round a path change had claimed — the handover
     // check the controller records (#111 P2).
-    @discardableResult
     func pongReceived(_ identifier: String) -> Bool {
         guard var round, round.identifier == identifier, round.isPongOutstanding else { return false }
         round.isPongOutstanding = false
@@ -151,29 +145,32 @@ final class TerminalHeartbeat {
         }
     }
 
-    private func beat(generation: Int) async {
+    private func beat(generation: Int, isHandover: Bool) async {
         guard !Task.isCancelled else { return }
         let identifier = UUID().uuidString
-        let isHandover = nextRoundIsHandover
-        nextRoundIsHandover = false
         let budget = isHandover ? policy.handover : policy.sendTimeout
         round = Round(
             identifier: identifier,
             deadline: timing.now().advanced(by: budget),
             isHandover: isHandover
         )
-        sendBound = bound(generation, budget, isHandover ? .handoverSendStalled : .heartbeatSendStalled) {
+        let ownBound = bound(generation, budget, isHandover ? .handoverSendStalled : .heartbeatSendStalled) {
             $0.round?.identifier == identifier && $0.round?.isSendOutstanding == true
         }
+        sendBound = ownBound
         await send?(identifier, generation)?.value
-        sendBound?.cancel()
-        // A path change restarts the heartbeat under the same generation, so
-        // `isCurrent` — whose check includes this task's cancellation — is
-        // what stops a superseded round before it writes the live round's
-        // handles.
+        // This beat's own bound and nothing shared: a send released long
+        // after `stop()` and a new `start()` — a hung one let go once the
+        // connection was already replaced — would otherwise cancel the live
+        // round's send bound and leave it with no bound at all (#107).
+        ownBound.cancel()
         guard isCurrent?(generation) == true, round?.identifier == identifier,
               round?.isSendOutstanding == true else { return }
+        // Past the guard this beat owns the live round, so the handle is its
+        // own bound unless a path change re-armed it; releasing the round's
+        // send half disarms whichever one is standing.
         round?.isSendOutstanding = false
+        sendBound?.cancel()
         sendBound = nil
         onSent?()
         guard round?.isPongOutstanding == true else {
@@ -182,13 +179,17 @@ final class TerminalHeartbeat {
         }
         armPongBound(generation: generation, identifier: identifier)
         // A path change can replace that bound with a shorter one, so the
-        // round is over only once the bound still standing has finished.
+        // round is over only once the bound still standing has finished —
+        // and only while the round waited on is still this beat's.
         while let standing = pongBound {
             await standing.value
+            guard round?.identifier == identifier else { break }
             guard pongBound == standing else { continue }
             pongBound = nil
             break
         }
+        // Only ever this beat's round: by here the handle may belong to the
+        // round that replaced it.
         if round?.identifier == identifier { round = nil }
     }
 
@@ -210,8 +211,9 @@ final class TerminalHeartbeat {
         }
     }
 
-    // A deadline already behind us is not a wait: it is a miss on the next
-    // turn of the loop.
+    // A path change, or a send completing, can land after the deadline
+    // instant but before the bound task that owns it has run: that is a
+    // miss now, not a negative wait for the injected clock to model.
     private func remaining(to deadline: ContinuousClock.Instant) -> Duration {
         let remaining = timing.now().duration(to: deadline)
         return remaining > .zero ? remaining : .zero

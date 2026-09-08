@@ -11,6 +11,9 @@ struct TerminalHeartbeatTests {
     private static let interval = Duration.seconds(10)
     private static let answerBound = Duration.seconds(6)
     private static let sendBound = Duration.seconds(2)
+    // Distinct from all three above, so `timesScheduled` can tell a send
+    // budget re-armed at the round's own deadline from a fresh handover one.
+    private static let handoverBound = Duration.seconds(4)
     // One second of retry delay, less up to 20 % of jitter.
     private static let retryDelay = Duration.milliseconds(800)...Duration.seconds(1)
 
@@ -30,7 +33,8 @@ struct TerminalHeartbeatTests {
             heartbeatPolicy: HeartbeatPolicy(
                 interval: Self.interval,
                 timeout: Self.answerBound,
-                sendTimeout: Self.sendBound
+                sendTimeout: Self.sendBound,
+                handover: Self.handoverBound
             ),
             timing: clock.timing,
             pathObserver: paths
@@ -197,6 +201,9 @@ struct TerminalHeartbeatTests {
             await transport.releaseSend()
             await settle()
             #expect(await clock.timesScheduled(Self.answerBound) == 0)
+            // Its own two seconds, re-armed: never the four a round opened
+            // by the change would have had.
+            #expect(await clock.timesScheduled(Self.handoverBound) == 0)
             #expect(await transport.pingIdentifiers.count == 1)
             #expect(controller.connectionState == .connected)
         }

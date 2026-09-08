@@ -93,7 +93,9 @@ struct TerminalHandoverTests {
             try await waitFor { controller.connectionState == .reconnecting(attempt: 1) }
 
             let failure = try #require(recovery.ring.first { $0.kind == .handoverFailed })
-            #expect(failure.reason == .terminal(.handoverSendStalled))
+            #expect(failure.reason == .handover(.sendStalled))
+            // The cycle itself keeps the terminal's own token; only the
+            // handover verdict is named the way both P2 links name it.
             #expect(recovery.ring.last?.kind == .cycling)
             #expect(recovery.ring.last?.reason == .terminal(.handoverSendStalled))
         }
@@ -188,7 +190,7 @@ struct TerminalHandoverTests {
             try await clock.resumeAll(for: .seconds(1))
             try await waitFor { controller.connectionState == .reconnecting(attempt: 1) }
             let failure = try #require(recovery.ring.first { $0.kind == .handoverFailed })
-            #expect(failure.reason == .terminal(.handoverPongMissing))
+            #expect(failure.reason == .handover(.pongMissing))
         }
     }
 
@@ -239,12 +241,19 @@ struct TerminalHandoverTests {
             paths.emit(Self.cellular)
             try await waitFor { await clock.timesScheduled(Self.handover) == 2 }
 
+            let identifier = try #require(await transport.pingIdentifiers.last)
             clock.advance(by: .milliseconds(2_100))
             try await clock.resumeAll(for: Self.handover)
             try await waitFor { controller.connectionState == .reconnecting(attempt: 1) }
 
             let failure = try #require(recovery.ring.first { $0.kind == .handoverFailed })
-            #expect(failure.reason == .terminal(.handoverPongMissing))
+            #expect(failure.reason == .handover(.pongMissing))
+
+            // The answer turns up 2.1 s after the change, on a connection
+            // that has already been written off. It is nobody's.
+            await transport.emit(.message(.pong(identifier: identifier)))
+            await settle()
+            #expect(controller.connectionState == .reconnecting(attempt: 1))
             #expect(recovery.ring.contains { $0.kind == .handoverChecked } == false)
         }
     }
@@ -301,6 +310,86 @@ struct TerminalHandoverTests {
             try await clock.resumeAll(for: Self.interval)
             try await waitFor { await transport.pingIdentifiers.count == 2 }
             try await waitFor { await clock.hasWaiter(for: Self.answerBound) }
+        }
+    }
+
+    // MARK: - A stale beat
+
+    // A hung send released long after its connection was replaced: the beat
+    // it belonged to resumes on the live round's actor and must touch none
+    // of it. Cancelling the *property* there took the replacement's send
+    // bound with it, and a replacement whose own send then stalled had
+    // nothing left to notice it — Connected, accepting keystrokes, forever.
+    @Test
+    func aSendReleasedAfterItsConnectionWasReplacedTouchesNoLiveBound() async throws {
+        let transport = RecoveryTransport(hangsSends: true)
+        let clock = ManualTerminalClock()
+        let paths = ScriptedPathObserver()
+        let controller = makeController(transport, clock, paths: paths)
+
+        try await withCleanup(controller, transport) {
+            try await beginRoundWithASuspendedSend(controller, transport, clock, paths)
+
+            // That whole connection goes away and is dialled again; the
+            // first round's send is still suspended in the old transport.
+            await transport.emit(.disconnected)
+            try await waitFor { controller.connectionState == .reconnecting(attempt: 1) }
+            try await waitFor { await clock.hasWaiter(within: TerminalTestDefaults.retryDelay) }
+            try await clock.resumeAll(within: TerminalTestDefaults.retryDelay)
+            try await waitUntilListening(transport, after: 1)
+            await transport.emit(.message(.ready(stream: "epoch-a", offset: 0, resumed: true)))
+            try await waitFor { controller.connectionState == .connected }
+
+            // The replacement opens a round of its own, and its send hangs too.
+            try await waitFor { await clock.hasWaiter(for: Self.interval) }
+            try await clock.resumeAll(for: Self.interval)
+            try await waitFor { await clock.timesScheduled(Self.sendBound) == 2 }
+
+            // Now the first connection's send finally returns.
+            await transport.releaseSend()
+            await settle()
+
+            // The replacement's bound is untouched, and still fires on time.
+            #expect(await clock.hasWaiter(for: Self.sendBound))
+            #expect(controller.connectionState == .connected)
+            try await clock.resumeAll(for: Self.sendBound)
+            try await waitFor { controller.connectionState == .reconnecting(attempt: 2) }
+        }
+    }
+
+    // MARK: - A network that came back
+
+    // `restored` on a socket that is still Connected is the same question as
+    // `changed` — the link moved while this connection was up — so it gets
+    // the same 2 s check rather than a tear-down.
+    @Test
+    func aRestoredPathOnAConnectedSocketIsAlsoAHandoverCheck() async throws {
+        let transport = RecoveryTransport()
+        let clock = ManualTerminalClock()
+        let paths = ScriptedPathObserver()
+        let recovery = RecoveryLog(pathObserver: ScriptedPathObserver())
+        let controller = makeController(transport, clock, paths: paths, recovery: recovery)
+
+        try await withCleanup(controller, transport) {
+            try await connect(controller, transport, paths)
+
+            // The link goes away and the terminal cycles; the dial that
+            // replaces it succeeds while the monitor still says nothing.
+            paths.emit(NetworkPathSnapshot(isSatisfied: false, interfaceIdentity: "none"))
+            try await waitFor { await clock.hasWaiter(within: TerminalTestDefaults.retryDelay) }
+            try await clock.resumeAll(within: TerminalTestDefaults.retryDelay)
+            try await waitUntilListening(transport, after: 1)
+            await transport.emit(.message(.ready(stream: "epoch-a", offset: 0, resumed: true)))
+            try await waitFor { controller.connectionState == .connected }
+
+            paths.emit(Self.wifi)
+            try await waitFor { await clock.timesScheduled(Self.handover) == 2 }
+            #expect(await transport.connectCount == 2)
+
+            let identifier = try #require(await transport.pingIdentifiers.last)
+            await transport.emit(.message(.pong(identifier: identifier)))
+            try await waitFor { recovery.ring.contains { $0.kind == .handoverChecked } }
+            #expect(controller.connectionState == .connected)
         }
     }
 }
