@@ -27,24 +27,11 @@ enum HostConnectionEvent {
     case revoked(reason: String)
 }
 
-// How often the events watchdog looks at its socket, and the two idle marks
-// it acts on (#86, #107). Tests cross the same marks on a manual clock.
-struct HostWatchdogPolicy: Sendable, Equatable {
-    let pollInterval: Duration
-    let pingAfterIdle: Duration
-    let cycleAfterIdle: Duration
-
-    static let live = HostWatchdogPolicy(
-        pollInterval: .seconds(5),
-        pingAfterIdle: .seconds(30),
-        cycleAfterIdle: .seconds(45)
-    )
-}
-
 // The events stream for one paired computer (#50): the socket, the
 // reconnect schedule, and the reachability probe behind the home's
 // connection header. What the host says about agents goes to the
-// directory; what the link is doing is this type's own truth.
+// directory; what the link is doing is this type's own truth. The dial
+// itself and the deadlines that cut it are in HostConnectionDeadlines.
 @MainActor
 @Observable
 final class HostConnection {
@@ -65,7 +52,6 @@ final class HostConnection {
         connectDeadline: .seconds(5)
     )
     private static let latencyInterval: Duration = .seconds(30)
-    private static let stableStreamInterval: Duration = .seconds(30)
 
     private(set) var isRunning = false
     // True after the first snapshot ever arrives; before that an empty list
@@ -94,20 +80,20 @@ final class HostConnection {
     private var host: HostEndpoint?
     private var credential = ""
     private let transport: HostClient.Transport
-    private let makeSocket: @Sendable (URLRequest) -> any HostEventsSocketing
-    private let watchdogPolicy: HostWatchdogPolicy
-    private let reconnectPolicy: ReconnectPolicy
-    private let timing: ConnectionTiming
+    let makeSocket: @Sendable (URLRequest) -> any HostEventsSocketing
+    let watchdogPolicy: HostWatchdogPolicy
+    let reconnectPolicy: ReconnectPolicy
+    let timing: ConnectionTiming
     // The retry delay this link is sitting out, so a signal that the network
     // is back can end it early instead of waiting the schedule out (#111).
     private let retryWait: RetryWait
     // "Does this computer answer at all?" — the same question the deadline,
     // the drop path and the latency poll all ask (#101, #111).
-    private let reachability: HostReachability
+    let reachability: HostReachability
     private var onEvent: ((HostConnectionEvent) -> Void)?
     // Where this link's recoveries are recorded (#111); nil records nothing.
-    private var recovery: RecoveryLog?
-    private var reconnectAttempt = 0
+    var recovery: RecoveryLog?
+    var reconnectAttempt = 0
     private var streamTask: Task<Void, Never>?
     // The live events socket. `stop()` must close it itself: cancelling the
     // task alone leaves `receive()` waiting for the host's next frame, and a
@@ -115,27 +101,27 @@ final class HostConnection {
     // buffers then live on (measured 2026-09-02: 242 directories after 200
     // home → terminal → home trips, ~140 KB and one host stream each).
     // Network.framework, not URLSession: see NetworkWebSocketTask (#70).
-    private var socket: (any HostEventsSocketing)?
+    var socket: (any HostEventsSocketing)?
     private var latencyTask: Task<Void, Never>?
     // Unstructured on purpose, since the redial must never wait for a probe;
     // the link owns each by name and `stop()` ends them all (#108).
-    private var connectDeadlineTask: Task<Void, Never>?
+    var connectDeadlineTask: Task<Void, Never>?
     private var firstFrameLatencyTask: Task<Void, Never>?
     private var reachabilityTask: Task<Void, Never>?
-    private var consecutiveFailedDials = 0
-    private var streamConnectedAt: ContinuousClock.Instant?
+    var consecutiveFailedDials = 0
+    var streamConnectedAt: ContinuousClock.Instant?
     // Two fences (#108). A measurement (round trip, path) belongs to the dial
     // that took it. A verdict about the computer (Offline, revoked) belongs
     // to the generation, which only stopping, reconfiguring or a snapshot
     // moves, so failed redials cannot starve it.
-    private var epoch = 0
-    private var reachabilityGeneration = 0
+    var epoch = 0
+    var reachabilityGeneration = 0
     // The dial the watchdog cycled, so its cause is not overwritten by the
     // cancelled socket the catch then sees (#111).
-    private var watchdogCycledDial: Int?
+    var watchdogCycledDial: Int?
     // The watchdog's one outstanding challenge to a quiet socket (#107).
-    private var watchdogPing: Task<Void, Never>?
-    private var watchdogPingGeneration = 0
+    var watchdogPing: Task<Void, Never>?
+    var watchdogPingGeneration = 0
 
     // Tests hand in their own transport, socket and schedule so no unit test
     // opens a real socket or waits out a real redial (#99).
@@ -305,152 +291,56 @@ final class HostConnection {
         reachabilityTask = nil
     }
 
-    private func streamOnce(handshake: URLRequest) async {
-        // This dial's place in the link's history; everything below judges
-        // the socket it opens.
-        epoch += 1
-        let dial = epoch
-        // This dial's own numbers, so every record it makes is about itself.
-        let attempt = reconnectAttempt
-        let dialledAt = timing.now()
-        recovery?.tally(.dial, source: .events)
-        let socket = makeSocket(handshake)
-        self.socket = socket
-        socket.resume()
-        defer {
-            socket.cancel(with: .normalClosure, reason: nil)
-            if self.socket === socket { self.socket = nil }
+    // What one text frame does to the link, and whether it was the agents
+    // snapshot this dial was waiting for. Out of line because `streamOnce`
+    // is at its complexity bound, and here rather than beside the dial
+    // because this is the only part of a dial that writes what the home
+    // reads.
+    func apply(_ text: String, dial: Int, attempt: Int, isFirst: Bool, dialledAt: ContinuousClock.Instant) throws -> Bool {
+        let snapshot = try JSONDecoder().decode(AgentsSnapshotMessage.self, from: Data(text.utf8))
+        guard snapshot.type == "agents" else { return false }
+        recordSnapshot(afterDrop: isStale || isOffline, dial: dial, attempt: attempt)
+        hasLoaded = true
+        isStale = false
+        setOffline(false, dial: dial)
+        isRevoked = false
+        // A frame is the answer any verification was waiting for (#108).
+        reachabilityGeneration += 1
+        reachabilityTask?.cancel()
+        reachabilityTask = nil
+        onEvent?(.snapshot(agents: snapshot.agents, available: snapshot.available, reason: snapshot.reason))
+        if streamConnectedAt == nil { streamConnectedAt = timing.now() }
+        // The backoff forgets only once the stream has held for a while; a
+        // link that works for one frame and dies stays on the slow end of
+        // the schedule (#86).
+        if let since = streamConnectedAt, since.duration(to: timing.now()) >= Self.stableStreamInterval {
+            reconnectAttempt = 0
         }
-
-        armConnectDeadline(dial)
-        defer { cancelConnectDeadline(dial) }
-
-        let watchdog = startWatchdog(for: socket, dial: dial, attempt: attempt, since: dialledAt)
-        defer {
-            watchdog.cancel()
-            // Only this dial's challenge: the `self.socket` defer above runs
-            // after this one, so the identity check still holds here.
-            if self.socket === socket { cancelWatchdogPing() }
-        }
-
-        var measured = false
-        defer {
-            // A dial that never produced a frame counts against the computer;
-            // one that did resets the count. A cancelled dial still runs this,
-            // by which time another computer may be in place.
-            if dial == epoch {
-                if measured { consecutiveFailedDials = 0 } else { consecutiveFailedDials += 1 }
-                streamConnectedAt = nil
-            }
-        }
-        do {
-            while !Task.isCancelled {
-                let frame = try await socket.receive()
-                guard dial == epoch else { return }
-                cancelConnectDeadline(dial)
-                guard case let .string(text) = frame else { continue }
-                let snapshot = try JSONDecoder().decode(AgentsSnapshotMessage.self, from: Data(text.utf8))
-                guard snapshot.type == "agents" else { continue }
-                recordSnapshot(afterDrop: isStale || isOffline, dial: dial, attempt: attempt)
-                hasLoaded = true
-                isStale = false
-                setOffline(false, dial: dial)
-                isRevoked = false
-                // A frame is the answer any verification was waiting for (#108).
-                reachabilityGeneration += 1
-                reachabilityTask?.cancel()
-                reachabilityTask = nil
-                onEvent?(.snapshot(agents: snapshot.agents, available: snapshot.available, reason: snapshot.reason))
-                if streamConnectedAt == nil { streamConnectedAt = timing.now() }
-                // The backoff forgets only once the stream has held for a
-                // while; a link that works for one frame and dies stays on
-                // the slow end of the schedule (#86).
-                if let since = streamConnectedAt, since.duration(to: timing.now()) >= Self.stableStreamInterval { reconnectAttempt = 0 }
-                if !measured {
-                    measured = true
-                    recordFirstFrame(dial: dial, attempt: attempt, since: dialledAt)
-                    measureFirstFrameLatency(dial)
-                }
-            }
-        } catch {
-            guard !Task.isCancelled, dial == epoch else { return }
-            let failure = SocketFailure(error)
-            Self.logger.info("events stream ended: reason=\(failure.tag.rawValue, privacy: .public) code=\(failure.code) priorFailedDials=\(self.consecutiveFailedDials)")
-            // Before the `defer` closes the socket: the cause is this stream's (#111).
-            recordStreamEnd(failure, dial: dial, attempt: attempt, since: dialledAt)
-            // Keep the last known agents on screen, explicitly stale —
-            // dropping them here made "Needs you" blink away on every
-            // network blip while the agent was still waiting.
-            isStale = true
-            verifyReachability(dial)
-        }
+        guard isFirst else { return true }
+        recordFirstFrame(dial: dial, attempt: attempt, since: dialledAt)
+        measureFirstFrameLatency(dial)
+        return true
     }
 
-    // A snapshot is worth recording only when it ended a drop. Both of these
-    // are out of line because `streamOnce` is at its length and complexity
-    // bounds, not because either is worth a name of its own.
-    private func recordSnapshot(afterDrop: Bool, dial: Int, attempt: Int) {
-        guard afterDrop else { return }
-        recovery?.record(.snapshotAfterDrop, source: .events, generation: dial, attempt: attempt)
-    }
-
-    // The first frame of a dial is what proves the stream.
-    private func recordFirstFrame(dial: Int, attempt: Int, since: ContinuousClock.Instant) {
-        let elapsed = Int(since.milliseconds(to: timing.now()))
-        recovery?.record(.ready, source: .events, generation: dial, attempt: attempt, elapsedMilliseconds: elapsed)
-    }
-
-    // The cause belongs to the watchdog, not to the cancel it performs: the
-    // catch below sees only a cancelled socket, a beat later (#111).
-    private func recordWatchdogCycle(dial: Int, attempt: Int, since: ContinuousClock.Instant) {
-        watchdogCycledDial = dial
-        let lasted = Int(since.milliseconds(to: timing.now()))
-        recovery?.record(.cycling, source: .events, reason: .watchdog, generation: dial, attempt: attempt, elapsedMilliseconds: lasted)
-    }
-
-    // A stream end is both what happened and why the link cycles — unless the
-    // watchdog already said why, in which case this is only what.
-    private func recordStreamEnd(_ failure: SocketFailure, dial: Int, attempt: Int, since: ContinuousClock.Instant) {
-        let cause = RecoveryLog.Reason.socket(failure.tag, code: failure.code)
-        let lasted = Int(since.milliseconds(to: timing.now()))
-        recovery?.record(.streamEnded, source: .events, reason: cause, generation: dial, attempt: attempt, elapsedMilliseconds: lasted)
-        guard watchdogCycledDial != dial else { return }
-        recovery?.record(.cycling, source: .events, reason: cause, generation: dial, attempt: attempt, elapsedMilliseconds: lasted)
-    }
-
-    // Bounded "Connecting…": if nothing has arrived by the deadline, ask the
-    // host directly; no answer is Offline, said now, while the attempt keeps
-    // going in case it is merely slow. The first frame cancels this.
-    private func armConnectDeadline(_ dial: Int) {
-        let deadline = reconnectPolicy.connectDeadline
-        connectDeadlineTask?.cancel()
-        connectDeadlineTask = Task { [weak self, timing] in
-            try? await timing.sleep(deadline)
-            guard !Task.isCancelled, let self else { return }
-            let probe = await self.reachability.askTwice(self.reachabilityGeneration)
-            guard !Task.isCancelled, dial == self.epoch else { return }
-            // Earned, not guessed (#86): the first dial that fails is
-            // "Connecting…" or "Reconnecting"; Offline waits for the next.
-            if probe == .unreachable, self.consecutiveFailedDials >= 1 { self.setOffline(true, dial: dial) }
-        }
+    // The end of a dial: what happened, and then the last known agents kept
+    // on screen explicitly stale — dropping them here made "Needs you" blink
+    // away on every network blip while the agent was still waiting.
+    func noteStreamEnded(_ error: Error, dial: Int, attempt: Int, since: ContinuousClock.Instant) {
+        let failure = SocketFailure(error)
+        Self.logger.info("events stream ended: reason=\(failure.tag.rawValue, privacy: .public) code=\(failure.code) priorFailedDials=\(self.consecutiveFailedDials)")
+        recordStreamEnd(failure, dial: dial, attempt: attempt, since: since)
+        isStale = true
+        verifyReachability(dial)
     }
 
     // Offline is a verdict about the computer: earned and cleared once each,
     // so the log's two counts stay paired (#111). The guard is the one
     // non-observational effect P1 has on this type: a redundant `isOffline =
     // false` no longer wakes every view observing it.
-    private func setOffline(_ value: Bool, dial: Int) {
+    func setOffline(_ value: Bool, dial: Int) {
         guard isOffline != value else { return }
         isOffline = value
         recovery?.record(value ? .offlineEntered : .offlineCleared, source: .events, generation: dial)
-    }
-
-    // Only this dial's: a stream unwinding late must not cancel the
-    // replacement's.
-    private func cancelConnectDeadline(_ dial: Int) {
-        guard dial == epoch else { return }
-        connectDeadlineTask?.cancel()
-        connectDeadlineTask = nil
     }
 
     // The first snapshot proves the stream; the round trip is measured
@@ -472,7 +362,7 @@ final class HostConnection {
     // generation, not per dial: on a black-holing computer each question
     // waits out its 5 s timeout while redials arrive every 8–10 s, so a
     // restart per dial meant the pair never finished (#108).
-    private func verifyReachability(_ dial: Int) {
+    func verifyReachability(_ dial: Int) {
         guard reachabilityTask == nil else { return }
         let generation = reachabilityGeneration
         reachabilityTask = Task { [weak self] in
@@ -498,59 +388,5 @@ final class HostConnection {
             case .superseded: break
             }
         }
-    }
-
-    // Snapshots arrive on change only, so a dead socket looks exactly like a
-    // quiet evening: ping after `pingAfterIdle`, cycle at `cycleAfterIdle`
-    // (#86). The ping is never awaited here: awaiting it inline let a
-    // suspended send keep the loop from ever reaching the cycle check (#107).
-    private func startWatchdog(
-        for socket: any HostEventsSocketing,
-        dial: Int,
-        attempt: Int,
-        since: ContinuousClock.Instant
-    ) -> Task<Void, Never> {
-        let policy = watchdogPolicy
-        return Task { [weak self, weak socket, timing] in
-            var challenged = false
-            while !Task.isCancelled {
-                try? await timing.sleep(policy.pollInterval)
-                guard !Task.isCancelled, let self, let socket else { return }
-                let idle = socket.lastActivity.duration(to: timing.now())
-                if idle >= policy.cycleAfterIdle {
-                    cancelWatchdogPing()
-                    recordWatchdogCycle(dial: dial, attempt: attempt, since: since)
-                    socket.cancel(with: .goingAway, reason: nil)
-                    return
-                }
-                guard idle >= policy.pingAfterIdle else {
-                    challenged = false
-                    continue
-                }
-                guard !challenged else { continue }
-                challenged = true
-                challengeQuietSocket(socket)
-            }
-        }
-    }
-
-    // One challenge in flight per link until the send actually finishes: a
-    // send that ignores cancellation must not be multiplied by the next
-    // quiet period. Cancelling the socket releases the real one (#107).
-    private func challengeQuietSocket(_ socket: any HostEventsSocketing) {
-        guard watchdogPing == nil else { return }
-        watchdogPingGeneration += 1
-        let generation = watchdogPingGeneration
-        watchdogPing = Task { [weak self, weak socket] in
-            try? await socket?.ping()
-            guard let self, watchdogPingGeneration == generation else { return }
-            watchdogPing = nil
-        }
-    }
-
-    private func cancelWatchdogPing() {
-        watchdogPing?.cancel()
-        watchdogPing = nil
-        watchdogPingGeneration += 1
     }
 }
