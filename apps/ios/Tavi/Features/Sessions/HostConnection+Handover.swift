@@ -8,6 +8,10 @@ struct HandoverChallenge {
     let payload: Data
     let dial: Int
     let startedAt: ContinuousClock.Instant
+    // The one absolute budget, fixed at the path change: the bound task fires
+    // at it, and a pong read after it is late whether or not that task has
+    // run yet (#111).
+    let expiresAt: ContinuousClock.Instant
     var answered = false
     var sendCompleted = false
 }
@@ -45,26 +49,35 @@ extension HostConnection {
     }
 
     // Coalesced: while a challenge is outstanding further path changes are
-    // ignored, so the earliest deadline is the one that decides. A dial that
-    // has not delivered a frame yet is not established and keeps its own
-    // budget untouched.
+    // ignored, so the earliest deadline is the one that decides. A send still
+    // in flight refuses one too — one challenge owns one send, and a second
+    // ping on a socket whose first never returned would say nothing new. A
+    // dial that has not delivered a frame yet is not established and keeps
+    // its own budget untouched.
     func challengeHandover() {
-        guard handover == nil, streamConnectedAt != nil, let socket else { return }
+        guard handover == nil, handoverSend == nil, streamConnectedAt != nil, let socket else { return }
         let dial = epoch
         let payload = Self.challengePayload()
-        handover = HandoverChallenge(payload: payload, dial: dial, startedAt: timing.now())
+        let startedAt = timing.now()
+        handover = HandoverChallenge(
+            payload: payload,
+            dial: dial,
+            startedAt: startedAt,
+            expiresAt: startedAt.advanced(by: Self.handoverDeadline)
+        )
         // Owned, not awaited: a send that never returns is what
         // `handover-send-stalled` names, and awaiting it here would hide the
-        // deadline behind it (#107's defect). Cancelling the socket is what
-        // releases a real one; any send still here belongs to a challenge
-        // already judged, and our claim on it ends now, so one challenge
-        // owns one send.
-        handoverSend?.cancel()
-        handoverSend = Task { [weak self, weak socket] in
+        // deadline behind it (#107's defect). It stays owned past its own
+        // challenge — cancelling the socket is what releases a real one — so
+        // the slot carries the payload it belongs to and only that send frees
+        // it.
+        let send = Task { [weak self, weak socket] in
             try? await socket?.ping(payload: payload)
-            guard let self, handover?.payload == payload else { return }
-            handover?.sendCompleted = true
+            guard let self else { return }
+            if handover?.payload == payload { handover?.sendCompleted = true }
+            if handoverSend?.payload == payload { handoverSend = nil }
         }
+        handoverSend = (payload, send)
         handoverDeadline = Task { [weak self, timing] in
             try? await timing.sleep(Self.handoverDeadline)
             guard !Task.isCancelled, let self else { return }
@@ -76,6 +89,12 @@ extension HostConnection {
     // recorded; one that was not says which half failed and cycles, because
     // a socket that cannot answer on the new interface is dead however
     // quietly it failed.
+    //
+    // `dial == epoch` is defence in depth and nothing in this package can
+    // reach it: three owners cancel this task before it could run late — the
+    // dial's own defer, `stop()`, and the task's cancellation, which the
+    // sleep above returns from. It stays so that a future caller arming a
+    // bound without one of those owners still cannot cycle a replacement.
     private func judgeHandover(dial: Int, payload: Data) {
         guard let challenge = handover, challenge.payload == payload, dial == epoch else { return }
         clearHandover()
@@ -93,12 +112,16 @@ extension HostConnection {
         cycleSocket(socket, reason: .handover(miss), dial: dial, attempt: reconnectAttempt, since: challenge.startedAt)
     }
 
-    // A pong answers this challenge only if it carries its payload: a late
-    // pong from an earlier watchdog ping says nothing about the new
-    // interface. Latched, so nothing arriving after it can unsay it.
+    // A pong answers this challenge only if it carries its payload and
+    // arrives inside the budget: a late pong from an earlier watchdog ping
+    // says nothing about the new interface, and a pong past the deadline
+    // instant is a miss whether or not the bound task has run yet — the
+    // budget is the clock's, not the task scheduler's. Latched, so nothing
+    // arriving after a good one can unsay it.
     func pongArrived(_ payload: Data, dial: Int) {
         guard var challenge = handover, challenge.dial == dial, dial == epoch else { return }
         guard challenge.payload == payload, !challenge.answered else { return }
+        guard timing.now() < challenge.expiresAt else { return }
         challenge.answered = true
         handover = challenge
         recovery?.record(
@@ -110,16 +133,20 @@ extension HostConnection {
         )
     }
 
-    // The challenge is over; the send it started is released by the socket.
+    // The challenge is judged; the send it started outlives it, owned until
+    // it returns or the socket is cancelled.
     func clearHandover() {
         handover = nil
         handoverDeadline?.cancel()
         handoverDeadline = nil
     }
 
+    // The socket is going: everything the challenge holds goes with it, the
+    // send included — this is the one thing that ends a send that ignores
+    // cancellation, and it is why a stalled one cannot block the next dial.
     func cancelHandover() {
         clearHandover()
-        handoverSend?.cancel()
+        handoverSend?.task.cancel()
         handoverSend = nil
     }
 }

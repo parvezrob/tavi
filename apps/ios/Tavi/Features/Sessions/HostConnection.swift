@@ -124,7 +124,7 @@ final class HostConnection {
     // never suppress it (#111): the challenge, the send it owns until that
     // send returns or the socket is cancelled, and the deadline judging both.
     var handover: HandoverChallenge?
-    var handoverSend: Task<Void, Never>?
+    var handoverSend: (payload: Data, task: Task<Void, Never>)?
     var handoverDeadline: Task<Void, Never>?
     // What no socket reports: the phone's own network moving.
     private let pathWatch: NetworkPathWatch
@@ -282,6 +282,7 @@ final class HostConnection {
         retryWait.cancel()
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
+        streamConnectedAt = nil
         cancelWatchdogPing()
         cancelHandover()
         pathWatch.stop()
@@ -300,10 +301,10 @@ final class HostConnection {
         if hasLoaded { isStale = true }
     }
 
-    // What one text frame does to the link, and whether it was the agents
-    // snapshot this dial was waiting for (`measured`). Out of line because
-    // `streamOnce` is at its complexity bound; here rather than beside the
-    // dial because it is the only part of one that writes what the home reads.
+    // The one place a dial's answer becomes what the home reads: the
+    // published state, the directory's snapshot, and `measured` — set here
+    // and nowhere else, since the first agents frame is what a dial's
+    // deadline, its latency measurement and its failed-dial count all key on.
     func apply(_ text: String, dial: Int, attempt: Int, measured: inout Bool, dialledAt: ContinuousClock.Instant) throws {
         let snapshot = try JSONDecoder().decode(AgentsSnapshotMessage.self, from: Data(text.utf8))
         guard snapshot.type == "agents" else { return }

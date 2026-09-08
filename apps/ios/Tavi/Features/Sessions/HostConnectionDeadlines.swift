@@ -19,10 +19,11 @@ struct HostWatchdogPolicy: Sendable, Equatable {
     )
 }
 
-// One dial of the events stream, and every clock that can end it: the connect
-// deadline, the watchdog, and what each of them tells the log. Carved out of
-// `HostConnection` unchanged (#111 P2): the link owns its published state and
-// its schedule, this owns the dial and the deadlines that cut it.
+// One dial of the events stream and every clock that can end it: the connect
+// deadline and its first-frame arm, the watchdog, and what each tells the log.
+// The invariant they share is the dial number: a clock may only cut the dial
+// it was armed for (`dial == epoch`), and the dial cancels every clock it
+// armed as it unwinds, so nothing here can reach a replacement (#111 P2).
 extension HostConnection {
     static let logger = Logger(subsystem: "com.farfield.tavi", category: "agents.directory")
     static let stableStreamInterval: Duration = .seconds(30)
@@ -35,6 +36,10 @@ extension HostConnection {
         // the socket it opens.
         epoch += 1
         let dial = epoch
+        // Established is a fact about this dial: a stop and a restart must
+        // not let a replacement inherit the last dial's liveness and be
+        // judged as though its socket were up (#111).
+        streamConnectedAt = nil
         // This dial's own numbers, so every record it makes is about itself.
         let attempt = reconnectAttempt
         let dialledAt = timing.now()

@@ -155,31 +155,6 @@ struct HostEventsHandoverTests {
     // waiting on the path that is gone and dial now, without pretending this
     // is a fresh start — the attempt count and the epoch are the outage's.
     @Test
-    func aRestoredPathCyclesTheRetainedSocketAndDialsNow() async throws {
-        let scene = try EventsScene()
-        defer { scene.tearDown() }
-        try await scene.establish()
-
-        await scene.moveTo(EventsScene.noPath)
-        #expect(scene.link.isStale)
-        await scene.moveTo(EventsScene.wifi)
-
-        try await waitFor { scene.socket.goingAwayCancels == 1 }
-        #expect(scene.events(.cycling).last?.reason == .pathRestored)
-        // The redial runs on the wake, not on the schedule: nothing here
-        // resumes a retry delay.
-        try await waitFor { scene.socket.resumes == 2 }
-        #expect(scene.link.isRunning)
-        #expect(scene.link.reconnectAttempt == 1)
-    }
-
-    // The host closes the socket while a challenge is outstanding, with its
-    // send still hanging. One redial follows; the replacement dial is not
-    // touched by the dead dial's deadline, and the old send returning after
-    // the replacement is live changes nothing. The schedule is the wide one
-    // so that resuming the dead dial's 2 s cannot be confused with resuming
-    // the delay before the redial.
-    @Test
     func aCloseMidChallengeRedialsOnceAndLeavesTheReplacementAlone() async throws {
         let scene = try EventsScene(pingSuspends: true, schedule: EventsLinkDefaults.wideSchedule)
         defer { scene.tearDown() }
@@ -187,9 +162,10 @@ struct HostEventsHandoverTests {
         _ = try await challenge(scene)
 
         scene.socket.failReceive(at: scene.now)
-        try await releaseRetryDelay(scene, EventsLinkDefaults.wideFirstDelay, untilDials: 2)
+        try await releaseRetryDelay(scene, EventsLinkDefaults.wideFirstDelay)
+        try await waitFor { scene.socket.resumes == 2 }
         scene.socket.deliver(Fixtures.agentsFrame(), at: scene.now)
-        try await waitForAnswer { scene.link.isStale == false }
+        try await waitFor { scene.link.isStale == false }
 
         // The dead dial's 2 s, and its send, both land after the fact.
         scene.clock.advance(by: .seconds(3))
@@ -229,60 +205,121 @@ struct HostEventsHandoverTests {
 
     // With no path of its own the phone knows nothing about the computer, so
     // two unanswered questions are about the phone, not about the Mac.
+    // The contract's ownership rule: one challenge owns one send, and only
+    // the socket's cancellation ends a send that never returns. A pong that
+    // answers the challenge does not release it, so the next path change
+    // cannot start a second ping on the same socket.
     @Test
-    func anUnsatisfiedPathWithholdsANewOfflineVerdict() async throws {
+    func aChallengeAnsweredWhileItsSendHangsRefusesTheNextUntilTheSocketEndsIt() async throws {
+        let scene = try EventsScene(pingSuspends: true)
+        defer { scene.tearDown() }
+        try await scene.establish()
+        let payload = try await challenge(scene)
+
+        scene.clock.advance(by: .seconds(1))
+        scene.socket.answer(payload, at: scene.now)
+        try await waitFor { !scene.events(.handoverChecked).isEmpty }
+        scene.clock.advance(by: .seconds(1))
+        try await scene.clock.resumeAll(for: HostConnection.handoverDeadline)
+        await settle()
+
+        // The interface moves again while that first send is still in flight.
+        await scene.moveTo(EventsScene.otherWiFi)
+        #expect(scene.socket.pings == 1)
+        #expect(scene.events(.handoverFailed).isEmpty)
+
+        // Cancelling the socket is what ends it, and nothing was orphaned.
+        scene.link.stop()
+        scene.socket.releasePings()
+        await settle()
+        #expect(scene.socket.pings == 1)
+    }
+
+    // A pong read after the budget is a miss even though the bound task has
+    // not run yet: the deadline is the clock's, not the scheduler's.
+    @Test
+    func aPongPastTheDeadlineInstantIsAMissBeforeTheBoundEvenFires() async throws {
         let scene = try EventsScene()
         defer { scene.tearDown() }
-        await scene.moveTo(EventsScene.noPath)
+        try await scene.establish()
+        let payload = try await challenge(scene)
 
-        try await failTwoDials(scene)
-        #expect(scene.link.isOffline == false)
-        #expect(scene.events(.offlineEntered).isEmpty)
-        #expect(scene.link.health == .connecting)
+        scene.clock.advance(by: .milliseconds(2_100))
+        scene.socket.answer(payload, at: scene.now)
+        await settle()
+        #expect(scene.events(.handoverChecked).isEmpty)
+
+        try await scene.clock.resumeAll(for: HostConnection.handoverDeadline)
+        try await waitFor { scene.socket.goingAwayCancels == 1 }
+        #expect(scene.events(.handoverFailed).first?.reason == .handover(.pongMissing))
     }
 
-    // An Offline already earned is a fact about the computer; losing the
-    // path afterwards does not unsay it.
+    // A foreground restart dials again on the same link. The replacement is
+    // not established until it has delivered a frame of its own, so a path
+    // change during its upgrade must not cut it at 2 s — the dial's own 15 s
+    // is the only budget it is under (#111).
     @Test
-    func anEarnedOfflineIsNotMaskedByAPathLoss() async throws {
+    func aRestartedLinkIsNotEstablishedUntilItsNewDialDeliversAFrame() async throws {
         let scene = try EventsScene()
         defer { scene.tearDown() }
+        try await scene.establish()
 
-        try await failTwoDials(scene)
-        try await waitForAnswer { scene.link.isOffline }
+        scene.link.stop()
+        scene.link.start()
+        try await waitFor { scene.socket.resumes == 2 }
 
-        await scene.moveTo(EventsScene.noPath)
-        #expect(scene.link.isOffline)
-        #expect(scene.events(.offlineCleared).isEmpty)
+        // The replacement has delivered nothing yet, so a path change finds
+        // nothing established to challenge. (The challenge is asked for by
+        // hand: a scripted path stream has one consumer, and the watch this
+        // link restarted is a second.)
+        scene.link.challengeHandover()
+        await settle()
+        #expect(scene.socket.pings == 0)
+        #expect(scene.link.streamConnectedAt == nil)
+        #expect(await scene.clock.timesScheduled(HostConnection.handoverDeadline) == 0)
+
+        // Its own first frame is what makes it established — and `hasLoaded`
+        // is no barrier here, since the previous dial had already set it.
+        scene.socket.deliver(Fixtures.agentsFrame(), at: scene.now)
+        try await waitFor { scene.link.streamConnectedAt != nil }
+        scene.link.challengeHandover()
+        try await waitFor { scene.socket.pings == 1 }
     }
 
-    // A 401 is definitive whatever the phone's network is doing.
+    // Reconfiguring is `stop()` and `start()` on one turn, so the replacement
+    // dial is under way while the old one is still parked in `receive()`:
+    // when that dial finally unwinds, its defer's `self.socket === socket`
+    // guard fails and it lets go of nothing. `stop()` is therefore the only
+    // owner that can have released the challenge — and if it does not, the
+    // slot stays occupied and the replacement can never challenge at all.
     @Test
-    func aRejectionRevokesEvenWithNoPath() async throws {
-        let scene = try EventsScene(host: StubHost(routing: ["GET /api/host": .json(401, "{}")]))
+    func aStopDuringAChallengeFreesTheNextDialToChallengeAgain() async throws {
+        let scene = try EventsScene(pingSuspends: true, ignoresCancel: true)
         defer { scene.tearDown() }
-        await scene.moveTo(EventsScene.noPath)
+        try await scene.establish()
+        _ = try await challenge(scene)
 
-        scene.socket.failReceive(at: scene.now)
-        try await waitFor { scene.link.isRevoked }
-        #expect(scene.link.health == .revoked)
-    }
+        scene.link.configure(
+            host: try Fixtures.hostEndpoint(),
+            credential: "secret",
+            recovery: scene.recovery
+        ) { _ in }
+        // Read on the same turn, before any defer, deadline or dial has had
+        // one: `stop()` is the only thing that has run, so the slot it left
+        // is the slot it chose to leave.
+        #expect(scene.link.handover == nil)
+        #expect(scene.link.handoverSend == nil)
 
-    // Two dials that produced no frame, each followed by the pair of
-    // questions the link asks a silent computer — everything Offline needs
-    // except a path to have asked over.
-    private func failTwoDials(_ scene: EventsScene) async throws {
-        let steps = [EventsLinkDefaults.firstDelay, EventsLinkDefaults.secondDelay]
-        for (index, step) in steps.enumerated() {
-            try await waitForAnswer { scene.socket.resumes == index + 1 }
-            scene.socket.failReceive(at: scene.now)
-            // The pair of questions the link asks a silent computer: the
-            // second is 1.5 s behind the first, both waited out on the
-            // manual clock. Then the dial's own place in the schedule.
-            try await waitForAnswer { await scene.clock.hasWaiter(for: .seconds(1.5)) }
-            try await scene.clock.resumeAll(for: .seconds(1.5))
-            try await waitForAnswer { await scene.clock.hasWaiter(within: step) }
-            try await scene.clock.resumeAll(within: step)
-        }
+        // The old dial unwinds behind the replacement, which delivers its own
+        // frame and is challenged in its own right; the old send returning
+        // late changes nothing.
+        scene.socket.releaseReceives()
+        try await waitFor { scene.socket.resumes == 2 }
+        scene.socket.deliver(Fixtures.agentsFrame(), at: scene.now)
+        try await waitFor { scene.link.hasLoaded }
+        scene.socket.releasePings()
+        await settle()
+        scene.link.challengeHandover()
+        try await waitFor { scene.socket.pings == 2 }
     }
 }

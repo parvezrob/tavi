@@ -6,6 +6,14 @@ import Testing
 // production watchdog policy, a socket whose every fact the test writes, and
 // a clock the test moves. Nothing here waits out a real deadline (#107, #111).
 
+// A manual clock tells waits apart by their length alone, so the lengths a
+// suite can see have to stay distinct: the watchdog's 5 s poll, the probe's
+// 1.5 s gap between two questions, the handover's 2 s budget, the connect
+// deadline, the first-frame remainder, and the step of the schedule the link
+// is sitting out. `schedule` overlaps the handover budget in its first step
+// (1.6–2.0 s of jitter around 2 s), which is why a suite that has a challenge
+// outstanding *and* a retry delay to release uses `wideSchedule`, whose first
+// step (6.4–8.0 s) collides with nothing.
 enum EventsLinkDefaults {
     static let policy = HostWatchdogPolicy.live
     // Long enough that the one wait this harness releases by its length is
@@ -24,16 +32,16 @@ enum EventsLinkDefaults {
         multiplier: 2,
         connectDeadline: .seconds(5)
     )
-    // A first step nowhere near the 2 s handover budget, for the one test
-    // that has to tell a dead dial's deadline from the delay before its
-    // replacement.
+    // A first step clear of the 2 s handover budget and of the 5 s watchdog
+    // poll, for the tests that have to tell a dead dial's deadline from the
+    // delay before its replacement.
     static let wideSchedule = ReconnectPolicy(
-        initialDelay: .seconds(6),
+        initialDelay: .seconds(8),
         maximumDelay: .seconds(10),
         multiplier: 2,
         connectDeadline: .seconds(60)
     )
-    static let wideFirstDelay = Duration.milliseconds(4_800)...Duration.seconds(6)
+    static let wideFirstDelay = Duration.milliseconds(6_400)...Duration.seconds(8)
     // The schedule's first three steps, less up to 20 % of jitter: which one
     // the link is sitting out is how a test reads its attempt count.
     static let firstDelay = Duration.milliseconds(1_600)...Duration.seconds(2)
@@ -60,12 +68,17 @@ final class EventsScene {
     // and the log's diagnostic stamp must not eat the link's path events.
     init(
         pingSuspends: Bool = false,
+        ignoresCancel: Bool = false,
         schedule: ReconnectPolicy = EventsLinkDefaults.schedule,
         host: StubHost = StubHost(.silence)
     ) throws {
         let clock = ManualTerminalClock()
         self.clock = clock
-        socket = WatchdogSocket(lastActivity: clock.timing.now(), pingSuspends: pingSuspends)
+        socket = WatchdogSocket(
+            lastActivity: clock.timing.now(),
+            pingSuspends: pingSuspends,
+            ignoresCancel: ignoresCancel
+        )
         recovery = RecoveryLog(timing: clock.timing, pathObserver: ScriptedPathObserver())
         link = try eventsLink(socket, clock, recovery: recovery, schedule: schedule, paths: paths, host: host)
     }
@@ -95,9 +108,15 @@ final class EventsScene {
     func tearDown() {
         link.stop()
         socket.releasePings()
+        socket.releaseReceives()
     }
 }
 
+// One caveat the scripted path observer carries: its stream has a single
+// consumer, and a link that is stopped and started subscribes a second time,
+// which receives nothing. A test that restarts a link therefore cannot drive
+// it with further `paths.emit` — ask the link for the challenge directly
+// (`challengeHandover()`), or the test will pass whatever the code does.
 @MainActor
 func eventsLink(
     _ socket: WatchdogSocket,
@@ -119,38 +138,30 @@ func eventsLink(
     return connection
 }
 
-// Some of what these suites wait for crosses an actor hop to the stub host
-// and back — a probe answer, the verdict behind it — and `waitFor`'s budget
-// of yields can be spent before the hop has been scheduled at all, since a
-// yield costs no time. Only the polling is by the wall clock here: every
-// deadline the link is under is still crossed on `ConnectionTiming`, and the
-// condition is still the fact under test.
+// The one wait in this file that is not on the manual clock, and the only
+// one: a probe answer comes back from the stub host's own actor, and yields
+// cost no time, so `waitFor`'s budget of them can be spent before that
+// executor has run at all. Everything the link is timed by — the retry delay,
+// the watchdog poll, the challenge budget, the first-frame arm — is still
+// crossed by moving `ConnectionTiming`, never by waiting.
 @MainActor
-func waitForAnswer(_ condition: () async -> Bool) async throws {
-    for _ in 0..<600 {
+func waitForProbe(_ condition: () async -> Bool) async throws {
+    // Generous, because it exits the moment the condition holds and the
+    // suites around it are yielding hard at the same main actor.
+    for _ in 0..<4_000 {
         if await condition() { return }
         try await Task.sleep(for: .milliseconds(5))
     }
     throw TerminalTestFailure()
 }
 
-// The retry delay a dial is sitting out, released once it is really there.
-// A challenge deadline can be the same length as the first step of the
-// schedule, and it may still be on the clock when the dial that armed it
-// ends — so the test releases until the redial happens rather than assuming
-// which wait it found.
+// The retry delay a dial is sitting out: waited for by its own length, then
+// released. The window belongs to one step of one schedule, so what it
+// matches is never another bound.
 @MainActor
-func releaseRetryDelay(
-    _ scene: EventsScene,
-    _ window: ClosedRange<Duration>,
-    untilDials dials: Int
-) async throws {
-    for _ in 0..<600 {
-        if scene.socket.resumes >= dials { return }
-        try? await scene.clock.resumeAll(within: window)
-        try await Task.sleep(for: .milliseconds(5))
-    }
-    throw TerminalTestFailure()
+func releaseRetryDelay(_ scene: EventsScene, _ window: ClosedRange<Duration>) async throws {
+    try await waitFor { await scene.clock.hasWaiter(within: window) }
+    try await scene.clock.resumeAll(within: window)
 }
 
 // One turn of the watchdog loop, released and then waited out: the loop has
@@ -177,6 +188,10 @@ func releaseWatchdogPoll(_ clock: ManualTerminalClock) async throws {
 final class WatchdogSocket: HostEventsSocketing, @unchecked Sendable {
     private let lock = NSLock()
     private let pingSuspends: Bool
+    // A socket that does not let go of its reader when it is cancelled: the
+    // dial reading it is still unwinding when the next one starts, which is
+    // the ordering a defer's `self.socket === socket` guard fails on (#108).
+    private let ignoresCancel: Bool
     private var activity: ContinuousClock.Instant
     private var frameActivity: ContinuousClock.Instant
     private var pingPayloads: [Data] = []
@@ -190,10 +205,11 @@ final class WatchdogSocket: HostEventsSocketing, @unchecked Sendable {
     private var resumeCount = 0
     private var pongHandler: (@Sendable (Data) -> Void)?
 
-    init(lastActivity: ContinuousClock.Instant, pingSuspends: Bool = false) {
+    init(lastActivity: ContinuousClock.Instant, pingSuspends: Bool = false, ignoresCancel: Bool = false) {
         activity = lastActivity
         frameActivity = lastActivity
         self.pingSuspends = pingSuspends
+        self.ignoresCancel = ignoresCancel
     }
 
     var pings: Int { lock.withLock { pingPayloads.count } }
@@ -309,11 +325,25 @@ final class WatchdogSocket: HostEventsSocketing, @unchecked Sendable {
 
     // A cancelled socket releases the read it was holding, as a real one
     // does: the dial ends rather than waiting for a host that has gone.
+    //
+    // `.normalClosure` is the exception, and it is what one double serving
+    // every dial costs: it is a dial's polite close of a socket it has
+    // already stopped reading, and a real link would be closing an object the
+    // next dial never sees. Carrying it over here would shut the replacement
+    // before its first read — every path that actually ends a read (`stop()`,
+    // a cycle, `failReceive`) goes through `.goingAway` or the test instead.
     func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        guard closeCode != .normalClosure else { return }
         lock.withLock {
             isCancelled = true
             if closeCode == .goingAway { goingAwayCount += 1 }
         }
+        guard !ignoresCancel else { return }
+        releaseReaders()
+    }
+
+    // Lets go of every parked read, so teardown leaves nothing behind.
+    func releaseReceives() {
         releaseReaders()
     }
 

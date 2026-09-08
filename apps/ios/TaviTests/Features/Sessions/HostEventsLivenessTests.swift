@@ -132,6 +132,33 @@ struct HostEventsLivenessTests {
         try await waitFor { await scene.clock.hasWaiter(within: EventsLinkDefaults.firstDelay) }
     }
 
+    // The close-mid-await leg: the socket goes while the 15 s arm is still
+    // pending. The arm belongs to the dial that armed it, so the replacement
+    // is dialled, established, and left alone by it.
+    @Test
+    func aCloseWhileTheFirstFrameArmIsPendingLeavesTheReplacementAlone() async throws {
+        let scene = try EventsScene(schedule: EventsLinkDefaults.probing)
+        defer { scene.tearDown() }
+
+        try await waitFor { await scene.clock.hasWaiter(for: EventsLinkDefaults.probing.connectDeadline) }
+        scene.clock.advance(by: .seconds(5))
+        try await scene.clock.resumeAll(for: EventsLinkDefaults.probing.connectDeadline)
+        try await waitFor { await scene.clock.hasWaiter(for: .seconds(10)) }
+
+        scene.socket.failReceive(at: scene.now)
+        try await releaseRetryDelay(scene, EventsLinkDefaults.firstDelay)
+        try await waitFor { scene.socket.resumes == 2 }
+        try await snapshot(scene)
+
+        // The dead dial's arm, completing late, reaches nothing.
+        scene.clock.advance(by: .seconds(20))
+        try? await scene.clock.resumeAll(for: .seconds(10))
+        await settle()
+        #expect(scene.socket.goingAwayCancels == 0)
+        #expect(scene.socket.resumes == 2)
+        #expect(scene.events(.firstFrameDeadline).isEmpty)
+    }
+
     @Test
     func aSnapshotBeforeTheFirstFrameDeadlineCancelsIt() async throws {
         let scene = try EventsScene(schedule: EventsLinkDefaults.probing)
