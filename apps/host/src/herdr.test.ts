@@ -381,7 +381,8 @@ test("a newer herdr that keeps the agent shape just works; one that breaks it as
 test("reports unavailable when herdr stops responding", async (context) => {
   const socketPath = temporarySocketPath(context);
   const server = createServer(() => {
-    // Accept the connection and never answer.
+    // Accept the connection and never answer — twice over, since #111: the
+    // retry runs and the sentence the person reads is still herdr's own.
   });
   await listen(context, server, socketPath);
 
@@ -420,6 +421,33 @@ test("joins tab labels onto agents and renames tabs", async (context) => {
   assert.deepEqual(renamed, { renamed: true, label: "ship the fix" });
 });
 
+// #111: a herdr that missed one 2 s deadline under load was read as gone.
+// The list is now retried once — and only when it actually timed out, so the
+// socket cost of a healthy call is exactly what #68 finding 3 measured.
+test("a timed-out read is retried once, and a healthy list still costs three connections", async (context) => {
+  const socketPath = temporarySocketPath(context);
+  const connections = { count: 0 };
+  const stallOnce = new Set<string>();
+  await startFakeHerdr(context, socketPath, {
+    protocol: 17,
+    agents: [{ agent: "claude", agent_status: "idle", pane_id: "wB:p1", tab_id: "wB:t1", workspace_id: "wB" }],
+    connections,
+    stallOnce,
+  });
+  const service = new HerdrService({ socketPath, requestTimeoutMilliseconds: 40 });
+
+  const healthy = await service.listAgents();
+  assert.equal(healthy.available, true);
+  assert.equal(connections.count, 3, "ping + agent.list + tab.list, and nothing else");
+
+  // One list goes unanswered: the retry answers, so the caller never learns.
+  stallOnce.add("agent.list");
+  const slow = await service.listAgents();
+  assert.equal(slow.available, true);
+  assert.equal(slow.agents[0]?.id, "wB:p1");
+  assert.equal(connections.count, 7, "one extra connection, for the one call that timed out");
+});
+
 function temporarySocketPath(context: TestContext): string {
   const directory = mkdtempSync(path.join(tmpdir(), "tavi-herdr-test-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -439,9 +467,15 @@ async function startFakeHerdr(
     promptError?: string;
     methodCalls?: string[];
     sentKeys?: string[][];
+    // One connection per request is the cost this fake counts (#68 finding 3).
+    connections?: { count: number };
+    // Methods to read and never answer, once each: a loaded herdr (#111).
+    stallOnce?: Set<string>;
   },
 ): Promise<void> {
   const server = createServer((socket) => {
+    if (behavior.connections) behavior.connections.count += 1;
+    socket.on("error", () => undefined);
     let buffered = "";
     socket.on("data", (chunk) => {
       buffered += chunk.toString("utf8");
@@ -454,6 +488,7 @@ async function startFakeHerdr(
       };
       buffered = buffered.slice(lineEnd + 1);
       behavior.methodCalls?.push(request.method);
+      if (behavior.stallOnce?.delete(request.method)) return;
       if (request.method === "agent.send_keys" && request.params?.keys) {
         behavior.sentKeys?.push(request.params.keys);
       }

@@ -104,6 +104,12 @@ test("merged snapshots force blocked with hook authority and republish on overla
   overlay.report({ event: "Notification", sessionId: "other", message: "permission" });
   const merged = detached.merge({ available: true, agents: [agent({ sessionRef: undefined })] });
   assert.equal(merged.agents[0]?.status, "idle");
+
+  // The overlay overlays a status; it must not lose the feed's own mark that
+  // the list is being held rather than freshly read (#111).
+  const held = detached.merge({ available: true, agents: [agent()], asOf: 1_700_000_000_000 });
+  assert.equal(held.asOf, 1_700_000_000_000);
+  assert.match(JSON.stringify({ type: "agents", ...held }), /"asOf":1700000000000/);
 });
 
 // The screen tiebreaker: an Esc'd dialog fires no hook, so the overlay must

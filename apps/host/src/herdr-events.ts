@@ -1,5 +1,6 @@
 import { createConnection, type Socket } from "node:net";
 import { SHELL_KIND } from "./agent-kinds.js";
+import { HELD_SNAPSHOT_GRACE_MILLISECONDS, HeldSnapshot } from "./herdr-snapshot-hold.js";
 import type { HerdrAgentSource } from "./herdr-types.js";
 import type { HerdrAgentInfo } from "./types.js";
 
@@ -34,6 +35,12 @@ export interface HerdrAgentsSnapshot {
   available: boolean;
   reason?: string;
   agents: HerdrAgentInfo[];
+  // Epoch milliseconds of the herdr reply this list came from — present only
+  // while the host is serving a *held* list because herdr has not answered
+  // since (see herdr-snapshot-hold.ts). Absent means "fresh, as of now",
+  // which is what every snapshot before this field was. Additive and
+  // optional: a decoder that ignores it reads exactly what it read before.
+  asOf?: number;
 }
 
 // The listener is handed the snapshot *and* the exact text every phone gets:
@@ -57,6 +64,7 @@ export interface HerdrEventFeedOptions {
   socketPath: string;
   reconnectDelayMilliseconds?: number;
   refreshDebounceMilliseconds?: number;
+  heldSnapshotGraceMilliseconds?: number;
 }
 
 // Keeps one long-lived events.subscribe connection to Herdr and re-reads
@@ -69,6 +77,8 @@ export class HerdrEventFeed implements AgentEventSource {
 
   private lastPublished: string | undefined;
   private lastSnapshot: HerdrAgentsSnapshot | undefined;
+  // What the phones keep seeing while herdr is merely slow (#111).
+  private readonly hold: HeldSnapshot;
   // Terminal panes handed back to herdr's detection (#66): when released,
   // and what was re-reported for them since. See reconcileShellPanes.
   private readonly released = new Map<string, { at: number; label: string }>();
@@ -85,6 +95,7 @@ export class HerdrEventFeed implements AgentEventSource {
   constructor(source: HerdrAgentSource, options: HerdrEventFeedOptions) {
     this.source = source;
     this.options = options;
+    this.hold = new HeldSnapshot(options.heldSnapshotGraceMilliseconds ?? HELD_SNAPSHOT_GRACE_MILLISECONDS);
   }
 
   get latest(): HerdrAgentsSnapshot | undefined {
@@ -219,7 +230,7 @@ export class HerdrEventFeed implements AgentEventSource {
     this.refreshDueAt = dueAt;
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = undefined;
-      void this.refreshAgents();
+      void this.refreshUntilFresh();
     }, delay);
     this.refreshTimer.unref?.();
   }
@@ -298,22 +309,33 @@ export class HerdrEventFeed implements AgentEventSource {
     this.retryTimer.unref?.();
   }
 
-  // Returns the agent list when Herdr answered, undefined when unavailable.
+  // Returns the agent list when Herdr answered, undefined when it did not —
+  // whether or not the last good list is being held on the wire meanwhile.
   private async refreshAgents(): Promise<HerdrAgentInfo[] | undefined> {
     const result = await this.source.listAgents();
     if (this.stopped) return undefined;
     if (!result.available) {
-      this.publish({
-        available: false,
-        reason: result.reason ?? "Herdr is unavailable.",
-        agents: [],
-      });
+      this.publish(this.hold.onFailure(result.reason ?? "Herdr is unavailable."));
       return undefined;
     }
     const agents = this.withReleasedPanes(result.agents);
+    this.hold.remember(agents);
     this.publish({ available: true, agents });
     void this.reconcileShellPanes(result.agents);
     return agents;
+  }
+
+  // A refresh that failed over a *live* events socket has nothing to wake it
+  // again: herdr is slow, not gone, so no socket error fires the reconnect
+  // loop. While a held list is on the wire the feed therefore retries on its
+  // own, so the hold ends in a fresh list rather than in the grace expiring
+  // — which is what "Tavi keeps retrying" has to mean. Bounded by the grace:
+  // once the hold is over, this loop stops and the reconnect loop owns it.
+  private async refreshUntilFresh(): Promise<void> {
+    const agents = await this.refreshAgents();
+    if (agents === undefined && this.hold.holding) {
+      this.scheduleRefresh(this.options.reconnectDelayMilliseconds ?? RECONNECT_DELAY_MILLISECONDS);
+    }
   }
 
   // Between Tavi releasing a Terminal pane and herdr's detection labelling

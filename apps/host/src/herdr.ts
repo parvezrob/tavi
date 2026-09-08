@@ -61,7 +61,8 @@ export class HerdrService implements HerdrAgentSource {
   async listAgents(): Promise<HerdrAgentsResult> {
     let protocol: number;
     try {
-      const pong = asRecord(await this.rpc.request("ping", {}));
+      // The home hangs on this call: its reads retry once (#111).
+      const pong = asRecord(await this.rpc.requestIdempotent("ping", {}));
       protocol = typeof pong.protocol === "number" ? pong.protocol : -1;
     } catch (error) {
       return unavailable(describeConnectionFailure(error));
@@ -79,9 +80,9 @@ export class HerdrService implements HerdrAgentSource {
       // the list (one round-trip of latency, not two) and as enrichment
       // only: a failed tab.list must never take the agent list down.
       const [result, labels] = await Promise.all([
-        this.rpc.request("agent.list", {}).then(asRecord),
+        this.rpc.requestIdempotent("agent.list", {}).then(asRecord),
         this.rpc
-          .request("tab.list", {})
+          .requestIdempotent("tab.list", {})
           .then(tabLabels)
           .catch(() => new Map<string, string>()),
       ]);

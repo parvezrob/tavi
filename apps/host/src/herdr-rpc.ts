@@ -10,10 +10,35 @@ import type { HerdrOptions } from "./herdr-types.js";
 
 const REQUEST_TIMEOUT_MILLISECONDS = 2_000;
 
+// A herdr that missed the deadline once has said nothing about being gone:
+// on a loaded Mac the reply lands moments later (#111 — one 2 s timeout
+// emptied the owner's home while herdr answered the very next call in
+// 0.32 s). Typed so a read can be retried and nothing else is.
+export class HerdrTimeoutError extends Error {
+  constructor() {
+    super("Herdr did not respond in time.");
+    this.name = "HerdrTimeoutError";
+  }
+}
+
 export class HerdrRpc {
   private requestCounter = 0;
 
   constructor(private readonly options: HerdrOptions) {}
+
+  // One retry, reads only. The second socket is opened only when the first
+  // call timed out, so a healthy call still costs exactly one connection
+  // (#68 finding 3 counts them). Never for a write: an agent.send_keys or
+  // agent.prompt that timed out may well have landed, and replaying it would
+  // press the key twice — the no-ambiguous-replay rule.
+  async requestIdempotent(method: string, params: Record<string, unknown>): Promise<unknown> {
+    try {
+      return await this.request(method, params);
+    } catch (error) {
+      if (!(error instanceof HerdrTimeoutError)) throw error;
+      return await this.request(method, params);
+    }
+  }
 
   request(method: string, params: Record<string, unknown>): Promise<unknown> {
     // biome-ignore lint/suspicious/noAssignInExpressions: the id must be unique per request, and the counter has no other reader.
@@ -32,10 +57,7 @@ export class HerdrRpc {
         socket.destroy();
         action();
       };
-      const timer = setTimeout(
-        () => finish(() => reject(new Error("Herdr did not respond in time."))),
-        timeoutMilliseconds,
-      );
+      const timer = setTimeout(() => finish(() => reject(new HerdrTimeoutError())), timeoutMilliseconds);
 
       socket.once("error", (error) => finish(() => reject(error)));
       socket.on("connect", () => {

@@ -149,6 +149,127 @@ test("hands a reported shell pane to herdr's detection and takes it back when th
   assert.equal(fake.authorityCalls.length, 2);
 });
 
+// #111: the owner's phone emptied — every project and agent of that Mac
+// gone behind "Herdr did not respond in time." — because one RPC missed its
+// 2 s deadline while the Mac was loaded. Herdr answered the next call in
+// 0.32 s. The four tests below are that night, in order of how bad it got.
+
+test("a slow herdr call is retried, so a busy moment never reaches the phone", async (context) => {
+  const socketPath = temporarySocketPath(context);
+  const fake = await startScriptedHerdr(context, socketPath);
+  fake.agents = [agentFixture("wB:p1", "working")];
+  const feed = new HerdrEventFeed(new HerdrService({ socketPath, requestTimeoutMilliseconds: 40 }), {
+    socketPath,
+    reconnectDelayMilliseconds: 20,
+    refreshDebounceMilliseconds: 5,
+  });
+  context.after(() => feed.stop());
+  const snapshots: HerdrAgentsSnapshot[] = [];
+  feed.subscribe((snapshot) => snapshots.push(snapshot));
+  feed.start();
+  await waitUntil(() => snapshots.length === 1);
+
+  // One agent.list goes unanswered; the retry lands.
+  fake.stallOnce.add("agent.list");
+  fake.agents = [agentFixture("wB:p1", "blocked")];
+  fake.emit({ event: "pane_agent_status_changed", data: { pane_id: "wB:p1" } });
+  await waitUntil(() => snapshots.at(-1)?.agents[0]?.status === "blocked");
+
+  // Nothing in between said the computer had nothing on it.
+  assert.deepEqual(
+    snapshots.map((snapshot) => `${snapshot.available}:${snapshot.agents.length}`),
+    ["true:1", "true:1"],
+  );
+  assert.equal(
+    snapshots.every((snapshot) => snapshot.asOf === undefined),
+    true,
+  );
+});
+
+test("a herdr that stops answering holds the last list, marked stale, and the next answer clears the mark", async (context) => {
+  const socketPath = temporarySocketPath(context);
+  const fake = await startScriptedHerdr(context, socketPath);
+  fake.agents = [agentFixture("wB:p1", "working")];
+  const feed = new HerdrEventFeed(new HerdrService({ socketPath, requestTimeoutMilliseconds: 40 }), {
+    socketPath,
+    reconnectDelayMilliseconds: 20,
+    refreshDebounceMilliseconds: 5,
+  });
+  context.after(() => feed.stop());
+  const snapshots: HerdrAgentsSnapshot[] = [];
+  feed.subscribe((snapshot) => snapshots.push(snapshot));
+  feed.start();
+  await waitUntil(() => snapshots.length === 1);
+  const before = Date.now();
+
+  // Herdr goes quiet: both tries time out, and the feed keeps retrying.
+  fake.stall.add("agent.list");
+  fake.emit({ event: "pane_agent_status_changed", data: { pane_id: "wB:p1" } });
+  await waitUntil(() => snapshots.at(-1)?.asOf !== undefined);
+  const held = snapshots.at(-1);
+  assert.equal(held?.available, true, "a held snapshot stays available — it is stale, not absent");
+  assert.equal(held?.reason, undefined);
+  assert.deepEqual(held?.agents, snapshots[0]?.agents);
+  assert.ok((held?.asOf ?? 0) <= before, "asOf is when herdr answered, not when the hold was published");
+  const holds = snapshots.length;
+
+  // Herdr answers again on the feed's own retry: the mark goes away.
+  fake.stall.clear();
+  await waitUntil(() => snapshots.length > holds);
+  assert.equal(snapshots.at(-1)?.asOf, undefined);
+  assert.equal(snapshots.at(-1)?.available, true);
+  assert.equal(snapshots.at(-1)?.agents[0]?.id, "wB:p1");
+});
+
+test("a herdr silent past the grace period is reported unavailable with the empty list", async (context) => {
+  const socketPath = temporarySocketPath(context);
+  const fake = await startScriptedHerdr(context, socketPath);
+  fake.agents = [agentFixture("wB:p1", "working")];
+  const feed = new HerdrEventFeed(new HerdrService({ socketPath, requestTimeoutMilliseconds: 40 }), {
+    socketPath,
+    reconnectDelayMilliseconds: 20,
+    refreshDebounceMilliseconds: 5,
+    heldSnapshotGraceMilliseconds: 150,
+  });
+  context.after(() => feed.stop());
+  const snapshots: HerdrAgentsSnapshot[] = [];
+  feed.subscribe((snapshot) => snapshots.push(snapshot));
+  feed.start();
+  await waitUntil(() => snapshots.length === 1);
+
+  fake.stall.add("agent.list");
+  fake.emit({ event: "pane_agent_status_changed", data: { pane_id: "wB:p1" } });
+  await waitUntil(() => snapshots.at(-1)?.available === false);
+  assert.ok(
+    snapshots.some((snapshot) => snapshot.asOf !== undefined),
+    "the list was held before it was given up on",
+  );
+  assert.deepEqual(snapshots.at(-1)?.agents, []);
+  assert.match(snapshots.at(-1)?.reason ?? "", /in time/);
+});
+
+test("a host with no herdr at all is reported unavailable at once, with herdr's own sentence", async (context) => {
+  const socketPath = temporarySocketPath(context);
+  const feed = new HerdrEventFeed(new HerdrService({ socketPath, requestTimeoutMilliseconds: 40 }), {
+    socketPath,
+    reconnectDelayMilliseconds: 20,
+    refreshDebounceMilliseconds: 5,
+    heldSnapshotGraceMilliseconds: 5_000,
+  });
+  context.after(() => feed.stop());
+  const snapshots: HerdrAgentsSnapshot[] = [];
+  const startedAt = Date.now();
+  feed.subscribe((snapshot) => snapshots.push(snapshot));
+  feed.start();
+
+  await waitUntil(() => snapshots.length === 1);
+  assert.equal(snapshots[0]?.available, false);
+  assert.equal(snapshots[0]?.asOf, undefined);
+  assert.deepEqual(snapshots[0]?.agents, []);
+  assert.match(snapshots[0]?.reason ?? "", /not running/);
+  assert.ok(Date.now() - startedAt < 1_000, "nothing was ever held, so nothing is waited for");
+});
+
 function shellFixture(paneId: string): Record<string, unknown> {
   return { ...agentFixture(paneId, "idle"), agent: "shell", terminal_title_stripped: "zsh" };
 }
@@ -173,6 +294,10 @@ interface ScriptedHerdr {
   subscriptions: Array<Array<Record<string, unknown>>>;
   // Every pane.report_agent / pane.release_agent the feed sent, in order.
   authorityCalls: Array<{ method: string; params: Record<string, unknown> }>;
+  // Methods left unanswered — a loaded herdr, not a dead one (#111):
+  // `stall` for every call, `stallOnce` for the next one of that method.
+  stall: Set<string>;
+  stallOnce: Set<string>;
   emit(event: Record<string, unknown>): void;
 }
 
@@ -183,6 +308,8 @@ async function startScriptedHerdr(context: TestContext, socketPath: string): Pro
     panes: new Set(),
     subscriptions: [],
     authorityCalls: [],
+    stall: new Set(),
+    stallOnce: new Set(),
     emit(event) {
       for (const socket of eventSockets) {
         socket.write(`${JSON.stringify(event)}\n`);
@@ -210,6 +337,12 @@ async function startScriptedHerdr(context: TestContext, socketPath: string): Pro
           params: Record<string, unknown>;
         };
         buffered = buffered.slice(lineEnd + 1);
+        if (scripted.stall.has(request.method) || scripted.stallOnce.delete(request.method)) {
+          // Read but never answered: the caller's own timeout is the only
+          // thing that ends this request.
+          lineEnd = buffered.indexOf("\n");
+          continue;
+        }
         if (request.method === "ping") {
           socket.write(`${JSON.stringify({ id: request.id, result: { type: "pong", protocol: 17 } })}\n`);
         } else if (request.method === "agent.list") {
