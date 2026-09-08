@@ -30,6 +30,14 @@ import { pairingRoutes, publicPairingRoutes } from "./routes/pairing.js";
 import { previewRoutes } from "./routes/preview.js";
 import { sourceControlRoutes } from "./routes/source-control.js";
 import { configureTailscale, type TailscaleRunner } from "./tailscale.js";
+import {
+  credentialRevoked,
+  hostClosing,
+  socketCensus,
+  socketClosed,
+  type SocketKind,
+  socketOpened,
+} from "./socket-log.js";
 import { upgradeEvents, upgradeTerminal } from "./websocket-upgrades.js";
 import {
   bridgeTerminal,
@@ -79,6 +87,10 @@ export interface TaviServerOptions {
   /** Fault injection (#111); present only under `TAVI_CHAOS=on`. */
   chaos?: Chaos;
 }
+
+// How often the census line may speak at all; it stays quiet unless the counts
+// moved since the last one.
+const CENSUS_INTERVAL_MS = 60_000;
 
 export async function createTaviServer(options: TaviServerOptions) {
   const {
@@ -136,11 +148,23 @@ export async function createTaviServer(options: TaviServerOptions) {
   // A revoked phone may hold an events stream or a terminal open for hours;
   // re-check its credential on a short clock and close with a code the app
   // can tell apart from a network drop.
-  const keepAuthorized = (websocket: WebSocket, request: IncomingMessage): void => {
+  const keepAuthorized = (websocket: WebSocket, request: IncomingMessage, kind: SocketKind): void => {
     const token = bearerToken(request);
+    // The device's public id, never its credential. The host's own token is a
+    // person at a terminal, not a paired phone, and says so.
+    const device = devices.authorize(token ?? "")?.id ?? (isAuthorized(token, config.token) ? "host-token" : "unknown");
+    socketOpened(websocket, kind, {
+      device,
+      // Path only: a terminal's query carries its resume epoch, which is
+      // nobody's business in a log.
+      path: (request.url ?? "").split("?")[0] ?? "",
+      protocol: websocket.protocol,
+    });
+    websocket.once("close", (code: number, reason: Buffer) => socketClosed(websocket, kind, code, reason.toString()));
     const timer = setInterval(() => {
       if (credentialAuthorized(token)) return;
       clearInterval(timer);
+      credentialRevoked(websocket, kind);
       // No gate may hold this one: a revoked phone reads 4401, not silence.
       chaos?.revoke(websocket);
       websocket.close(4401, "credential revoked");
@@ -148,6 +172,11 @@ export async function createTaviServer(options: TaviServerOptions) {
     timer.unref?.();
     websocket.once("close", () => clearInterval(timer));
   };
+
+  // The one recurring line, and it only speaks when the numbers changed —
+  // enough to see a reconnect loop in the log without it becoming the log.
+  const census = setInterval(() => socketCensus(eventsWss.clients.size, wss.clients.size), CENSUS_INTERVAL_MS);
+  census.unref?.();
 
   const server = createServer(async (request, response) => {
     // `hostPause` (#111): the answer is withheld, not refused — the request
@@ -228,6 +257,7 @@ export async function createTaviServer(options: TaviServerOptions) {
   );
 
   server.on("close", () => {
+    clearInterval(census);
     attachments.disposeAll();
     agentEvents?.stop();
     previews.stop();
@@ -242,8 +272,10 @@ export async function createTaviServer(options: TaviServerOptions) {
   // process exits promptly.
   const closeServer = server.close.bind(server);
   server.close = (callback?: (error?: Error) => void) => {
-    for (const websocket of eventsWss.clients) websocket.close(1001, "host restarting");
-    for (const websocket of wss.clients) websocket.close(1001, "host restarting");
+    for (const websocket of [...eventsWss.clients, ...wss.clients]) {
+      hostClosing(websocket);
+      websocket.close(1001, "host restarting");
+    }
     server.closeAllConnections();
     return closeServer(callback);
   };

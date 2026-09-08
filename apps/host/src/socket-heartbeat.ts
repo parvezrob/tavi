@@ -22,6 +22,8 @@ export interface KeepAliveOptions {
   gate?: () => boolean;
   /** How a ping leaves. Injectable so a send that never completes is testable. */
   send?: (websocket: WebSocket, done: () => void) => void;
+  /** The second-miss path, so the host's log can say the socket was hung up on. */
+  onTerminate?: (sinceLastPongMs: number) => void;
 }
 
 export function keepAlive(websocket: WebSocket, options: KeepAliveOptions = {}): void {
@@ -31,6 +33,9 @@ export function keepAlive(websocket: WebSocket, options: KeepAliveOptions = {}):
   let timer: ChaosTimerHandle | undefined;
   let unanswered = false;
   let misses = 0;
+  // Ticks since the last pong (or since connect), gated ones included: the
+  // interval is what makes that a number of seconds for the log.
+  let ticksSincePong = 0;
   let stopped = false;
 
   const stop = (): void => {
@@ -55,6 +60,7 @@ export function keepAlive(websocket: WebSocket, options: KeepAliveOptions = {}):
     // the ping outstanding when the window opened is forgiven — the peer was
     // never given a chance to answer that one. Misses already counted stand,
     // or a fault on alternate ticks would keep a dead socket alive for ever.
+    ticksSincePong += 1;
     if (options.gate?.() === false) {
       unanswered = false;
       arm();
@@ -64,6 +70,7 @@ export function keepAlive(websocket: WebSocket, options: KeepAliveOptions = {}):
       misses += 1;
       if (misses >= MISSES_BEFORE_TERMINATE) {
         stop();
+        options.onTerminate?.(ticksSincePong * intervalMs);
         websocket.terminate();
         return;
       }
@@ -79,6 +86,7 @@ export function keepAlive(websocket: WebSocket, options: KeepAliveOptions = {}):
   websocket.on("pong", () => {
     unanswered = false;
     misses = 0;
+    ticksSincePong = 0;
   });
   websocket.once("close", stop);
   websocket.once("error", stop);

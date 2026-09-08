@@ -8,6 +8,7 @@ import type { HerdrAgentSource } from "./herdr-types.js";
 import { agentsFrame, type AgentEventSource } from "./herdr-events.js";
 import { EVENTS_PROTOCOL, TERMINAL_PROTOCOL, TERMINAL_PROTOCOL_V2 } from "./protocol.js";
 import { keepAlive } from "./socket-heartbeat.js";
+import { heartbeatTerminated, type SocketKind } from "./socket-log.js";
 import { parseResumeRequest, spawnAttachmentTerminal, type TerminalTarget } from "./terminal-bridge.js";
 import { safeSessionId } from "./validation.js";
 
@@ -22,7 +23,7 @@ interface UpgradeCommon {
   socket: Duplex;
   head: Buffer;
   authorized: (request: IncomingMessage) => boolean;
-  keepAuthorized: (websocket: WebSocket, request: IncomingMessage) => void;
+  keepAuthorized: (websocket: WebSocket, request: IncomingMessage, kind: SocketKind) => void;
 }
 
 // The events stream (#46): one open socket per phone, carrying the whole
@@ -46,7 +47,7 @@ export function upgradeEvents(
     return;
   }
   eventsWss.handleUpgrade(request, socket, head, (websocket) => {
-    keepAuthorized(websocket, request);
+    keepAuthorized(websocket, request, "events");
     serveAgentEvents(websocket, agentEvents, chaos);
   });
 }
@@ -109,7 +110,7 @@ export async function upgradeTerminal(
 
   const resume = parseResumeRequest(url);
   wss.handleUpgrade(request, socket, head, (websocket) => {
-    keepAuthorized(websocket, request);
+    keepAuthorized(websocket, request, "terminal");
     wss.emit("connection", websocket, request, target, resume);
   });
 }
@@ -117,7 +118,10 @@ export async function upgradeTerminal(
 // Snapshot-based push: the phone always receives the full agent list, so a
 // missed frame can never leave a stale agent on screen.
 function serveAgentEvents(websocket: WebSocket, agentEvents?: AgentEventSource, chaos?: Chaos): void {
-  keepAlive(websocket, { ...(chaos ? { clock: chaos, gate: () => chaos.gate(websocket) } : {}) });
+  keepAlive(websocket, {
+    onTerminate: (sinceLastPongMs) => heartbeatTerminated(websocket, sinceLastPongMs),
+    ...(chaos ? { clock: chaos, gate: () => chaos.gate(websocket) } : {}),
+  });
   // Chaos only (#111): a blackholed socket keeps the *latest* frame it skipped
   // and sends that one when the window ends — a snapshot is the whole list, so
   // replaying the older ones would only paint stale state.

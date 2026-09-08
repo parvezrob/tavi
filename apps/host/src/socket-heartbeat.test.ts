@@ -27,8 +27,40 @@ import {
 const INTERVAL = EVENTS_PING_INTERVAL_MILLISECONDS;
 const SETTLE_MS = 150;
 
+// The test runner writes its own protocol down the same stream, so a captured
+// line is found by its `tavi ` prefix rather than by where a newline fell.
+function line(written: string, needle: string): string {
+  const at = written.indexOf(needle);
+  assert.ok(at >= 0, `no ${needle} line in:\n${written}`);
+  const start = written.lastIndexOf("tavi ", at);
+  const end = written.indexOf("\n", at);
+  return written.slice(start < 0 ? at : start, end < 0 ? undefined : end);
+}
+
 function settle(): Promise<unknown> {
   return new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+}
+
+// The host's own log lines while `act` runs. Written through as well, so a
+// failing test still shows what the run printed.
+async function hostLog(act: () => Promise<void>): Promise<string> {
+  let captured = "";
+  const streams = [process.stdout, process.stderr] as const;
+  const originals = streams.map((stream) => stream.write.bind(stream));
+  streams.forEach((stream, index) => {
+    stream.write = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
+      captured += String(chunk);
+      return (originals[index] as (...args: unknown[]) => boolean)(chunk, ...rest);
+    }) as typeof stream.write;
+  });
+  try {
+    await act();
+  } finally {
+    streams.forEach((stream, index) => {
+      stream.write = originals[index] as typeof stream.write;
+    });
+  }
+  return captured;
 }
 
 // Resolves once the host has handled everything this client sent before the
@@ -354,6 +386,80 @@ test("a miss counted before a blackhole still counts after it: one more is enoug
     assert.equal(websocket.readyState, WebSocket.OPEN, "the forgiven ping is only the one the peer never saw");
     clock.advance(INTERVAL);
     assert.equal((await closed)[0], 1006, "the miss from before the window was still on the count");
+  } finally {
+    await close(server);
+  }
+});
+
+test("the log names the heartbeat terminate, and carries no token or frame", { timeout: 15_000 }, async () => {
+  const clock = new ChaosTestClock();
+  const harness = chaosHarness(clock);
+  const server = await harness.startServer();
+
+  try {
+    const websocket = openEvents(server);
+    let pings = 0;
+    websocket.on("ping", () => {
+      pings += 1;
+    });
+    await once(websocket, "open");
+
+    const written = await hostLog(async () => {
+      const closed = once(websocket, "close");
+      clock.advance(INTERVAL);
+      await waitUntil(() => pings === 1);
+      clock.advance(INTERVAL);
+      await waitUntil(() => pings === 2);
+      clock.advance(INTERVAL);
+      assert.equal((await closed)[0], 1006);
+      // The host's close handler runs on its own turn.
+      await settle();
+    });
+
+    const terminate = line(written, "heartbeat terminate");
+    assert.match(terminate, /^tavi warn socket: heartbeat terminate: two unanswered pings /);
+    assert.match(terminate, /kind="events"/);
+    assert.match(terminate, /device="host-token"/);
+    assert.match(terminate, /sinceLastPongMs=45000/);
+
+    // The close that follows says the host hung up, not the phone.
+    const closed = line(written, "socket closed");
+    assert.match(closed, /^tavi info socket: socket closed kind="events"/);
+    assert.match(closed, /code=1006/);
+    assert.match(closed, /byHost=true/);
+    assert.ok(!written.includes(config.token), "the credential must never reach the log");
+  } finally {
+    await close(server);
+  }
+});
+
+test("the log names a phone's own close, with its code, reason and how long it was open", async () => {
+  const harness = new TerminalHarness();
+  const server = await harness.startServer();
+
+  try {
+    const written = await hostLog(async () => {
+      const websocket = openEvents(server, { autoPong: true });
+      await once(websocket, "open");
+      websocket.close(4000, "phone went to sleep");
+      await once(websocket, "close");
+      await settle();
+    });
+
+    const opened = line(written, "socket opened");
+    assert.match(opened, /^tavi info socket: socket opened kind="events"/);
+    assert.match(opened, /path="\/api\/events"/);
+    assert.match(opened, /protocol="tavi\.events\.v1"/);
+
+    const closed = line(written, "socket closed");
+    assert.match(closed, /code=4000/);
+    assert.match(closed, /reason="phone went to sleep"/);
+    assert.match(closed, /byHost=false/, "a close the phone chose is not the host's");
+    assert.match(closed, /openMs=\d+/);
+
+    // Nothing that identifies the person or repeats what crossed the wire.
+    assert.ok(!written.includes(config.token), "the credential must never reach the log");
+    assert.ok(!written.includes('"type":"agents"'), "no frame body belongs in the log");
   } finally {
     await close(server);
   }
