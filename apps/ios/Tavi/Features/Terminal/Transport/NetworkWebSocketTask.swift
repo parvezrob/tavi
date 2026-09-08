@@ -55,6 +55,13 @@ final class NetworkWebSocketTask: TerminalWebSocketTasking, @unchecked Sendable 
     // the idle clock a caller's heartbeat runs on (#86).
     private var lastActivityStorage = ContinuousClock().now
     var lastActivity: ContinuousClock.Instant { lock.withLock { lastActivityStorage } }
+    // When the peer last delivered a frame; `lastActivity` also moves for
+    // the completion that ends a socket, which is not life (#111).
+    private var lastFrameStorage = ContinuousClock().now
+    var lastFrameAt: ContinuousClock.Instant { lock.withLock { lastFrameStorage } }
+    // Where pong payloads go, so a challenge can find its own answer. The
+    // payload is the caller's bytes and is never logged (#111).
+    private var pongHandler: (@Sendable (Data) -> Void)?
 
     init(request: URLRequest) {
         let url = request.url ?? URL(string: "wss://invalid.invalid")!
@@ -144,8 +151,10 @@ final class NetworkWebSocketTask: TerminalWebSocketTasking, @unchecked Sendable 
                     let metadata = context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata
                     switch metadata?.opcode {
                     case .text?:
+                        self.stampFrame()
                         once.resume(returning: .string(String(decoding: content ?? Data(), as: UTF8.self)))
                     case .binary?:
+                        self.stampFrame()
                         once.resume(returning: .data(content ?? Data()))
                     case .close?:
                         var code: UInt16?
@@ -154,8 +163,14 @@ final class NetworkWebSocketTask: TerminalWebSocketTasking, @unchecked Sendable 
                         if case let .privateCode(value) = metadata?.closeCode { code = value }
                         let reason = (content?.isEmpty ?? true) ? nil : String(bytes: content ?? Data(), encoding: .utf8)
                         once.resume(throwing: self.fail(with: .closed(code: code, reason: reason)))
-                    case .ping?, .pong?, .cont?:
+                    case .pong?:
+                        // The answer to whichever challenge sent this payload.
+                        self.stampFrame()
+                        self.lock.withLock { self.pongHandler }?(content ?? Data())
+                        once.resume(returning: nil)
+                    case .ping?, .cont?:
                         // Control frames are handled by the stack; ask again.
+                        self.stampFrame()
                         once.resume(returning: nil)
                     default:
                         // A completed receive with no frame is the peer going away.
@@ -167,9 +182,19 @@ final class NetworkWebSocketTask: TerminalWebSocketTasking, @unchecked Sendable 
         }
     }
 
-    // A WebSocket ping; the peer's stack answers with a pong, which lands
-    // on `lastActivity`. Silence past that is the socket's own verdict.
-    func ping() async throws {
+    private func stampFrame() {
+        lock.withLock { lastFrameStorage = ContinuousClock().now }
+    }
+
+    // Set before `resume()`; the socket holds it for its life.
+    func onPong(_ handler: @escaping @Sendable (Data) -> Void) {
+        lock.withLock { pongHandler = handler }
+    }
+
+    // A WebSocket ping; the peer's stack answers with a pong carrying the
+    // same payload, which lands on `lastActivity` and on `onPong`. Silence
+    // past that is the socket's own verdict.
+    func ping(payload: Data) async throws {
         let ready: Bool = lock.withLock {
             if case .ready = phase { return true }
             return false
@@ -180,7 +205,7 @@ final class NetworkWebSocketTask: TerminalWebSocketTasking, @unchecked Sendable 
             metadata: [NWProtocolWebSocket.Metadata(opcode: .ping)]
         )
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            connection.send(content: Data(), contentContext: context, isComplete: true, completion: .contentProcessed { error in
+            connection.send(content: payload, contentContext: context, isComplete: true, completion: .contentProcessed { error in
                 if let error {
                     continuation.resume(throwing: Failure.connectionFailed(error.localizedDescription))
                 } else {
@@ -351,32 +376,6 @@ final class NetworkWebSocketTask: TerminalWebSocketTasking, @unchecked Sendable 
             case nil:
                 break
             }
-        }
-    }
-}
-
-// A continuation that can be resumed from two places (the receive
-// completion and a state change) and takes only the first.
-private final class OnceContinuation<Value: Sendable>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Value?, Error>?
-
-    func attach(_ continuation: CheckedContinuation<Value?, Error>) {
-        lock.withLock { self.continuation = continuation }
-    }
-
-    func resume(returning value: Value?) {
-        take()?.resume(returning: value)
-    }
-
-    func resume(throwing error: Error) {
-        take()?.resume(throwing: error)
-    }
-
-    private func take() -> CheckedContinuation<Value?, Error>? {
-        lock.withLock {
-            defer { continuation = nil }
-            return continuation
         }
     }
 }

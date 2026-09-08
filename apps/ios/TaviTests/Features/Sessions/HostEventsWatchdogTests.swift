@@ -10,39 +10,16 @@ import Testing
 // watchdog's poll and never the link's 5 s deadline.
 @MainActor
 struct HostEventsWatchdogTests {
-    private static let policy = HostWatchdogPolicy.live
-    private static let schedule = ReconnectPolicy(
-        initialDelay: .seconds(2),
-        maximumDelay: .seconds(10),
-        multiplier: 2,
-        connectDeadline: .seconds(60)
-    )
-
     private func link(_ socket: WatchdogSocket, _ clock: ManualTerminalClock, recovery: RecoveryLog? = nil) throws -> HostConnection {
-        let connection = HostConnection(
-            transport: StubHost(.silence).transport,
-            makeSocket: { _ in socket },
-            watchdogPolicy: Self.policy,
-            reconnectPolicy: Self.schedule,
-            timing: clock.timing
-        )
-        connection.configure(host: try Fixtures.hostEndpoint(), credential: "secret", recovery: recovery) { _ in }
-        return connection
+        try eventsLink(socket, clock, recovery: recovery)
     }
 
-    // One turn of the watchdog loop, released and then waited out: the loop
-    // has to have read this idle age — and asked for its next poll — before
-    // the test moves the clock again.
     private func poll(_ clock: ManualTerminalClock) async throws {
-        try await releasePoll(clock)
-        try await waitFor { await clock.hasWaiter(for: Self.policy.pollInterval) }
+        try await pollWatchdog(clock)
     }
 
-    // The turn that ends the loop asks for no next poll, so the caller waits
-    // on what that turn did instead.
     private func releasePoll(_ clock: ManualTerminalClock) async throws {
-        try await waitFor { await clock.hasWaiter(for: Self.policy.pollInterval) }
-        try await clock.resumeAll(for: Self.policy.pollInterval)
+        try await releaseWatchdogPoll(clock)
     }
 
     // The reproduced defect: awaiting the ping inline stopped the loop
@@ -161,111 +138,5 @@ struct HostEventsWatchdogTests {
         #expect(cycles.count == 1)
         #expect(cycles.first?.reason == .watchdog)
         #expect(recovery.counters[.events]?.cycles[.watchdog] == 1)
-    }
-}
-
-// An events socket whose every fact the test writes: when a frame last
-// arrived, what it carried, and whether a ping ever returns. The lock is the
-// whole invariant: written from the test, read from the watchdog's task.
-final class WatchdogSocket: HostEventsSocketing, @unchecked Sendable {
-    private let lock = NSLock()
-    private let pingSuspends: Bool
-    private var activity: ContinuousClock.Instant
-    private var pingCount = 0
-    private var goingAwayCount = 0
-    private var pingGates: [CheckedContinuation<Void, Never>] = []
-    private var frames: [String] = []
-    // A reader is handed a frame, or nil when the socket is cancelled
-    // under it.
-    private var readers: [CheckedContinuation<String?, Never>] = []
-    private var isCancelled = false
-
-    init(lastActivity: ContinuousClock.Instant, pingSuspends: Bool = false) {
-        activity = lastActivity
-        self.pingSuspends = pingSuspends
-    }
-
-    var pings: Int { lock.withLock { pingCount } }
-    var goingAwayCancels: Int { lock.withLock { goingAwayCount } }
-
-    // A frame arrived at this instant and nothing else changed — the socket
-    // is answering, and the watchdog's idle age says so.
-    func arrive(at instant: ContinuousClock.Instant) {
-        lock.withLock { activity = instant }
-    }
-
-    // Hands a frame to whichever dial is reading; the arrival is activity,
-    // stamped at the instant the test says it landed.
-    func deliver(_ text: String, at instant: ContinuousClock.Instant) {
-        let reader = lock.withLock { () -> CheckedContinuation<String?, Never>? in
-            activity = instant
-            guard !readers.isEmpty else {
-                frames.append(text)
-                return nil
-            }
-            return readers.removeFirst()
-        }
-        reader?.resume(returning: text)
-    }
-
-    // Resumes every ping the test left hanging — all of them, not just the
-    // last: if the "only one challenge" assertion is the thing that failed,
-    // the extra continuations must still be released rather than leaked.
-    func releasePings() {
-        let gates = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
-            defer { pingGates.removeAll() }
-            return pingGates
-        }
-        gates.forEach { $0.resume() }
-    }
-
-    var lastActivity: ContinuousClock.Instant { lock.withLock { activity } }
-
-    func resume() {}
-
-    func receive() async throws -> URLSessionWebSocketTask.Message {
-        let frame = await withTaskCancellationHandler {
-            await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
-                // A reader that registers after the cancel must not wait for
-                // a release that has already happened.
-                let ready = lock.withLock { () -> String?? in
-                    guard !isCancelled else { return .some(nil) }
-                    guard frames.isEmpty else { return frames.removeFirst() }
-                    readers.append(continuation)
-                    return nil
-                }
-                if let ready { continuation.resume(returning: ready) }
-            }
-        } onCancel: {
-            releaseReaders()
-        }
-        guard let frame else { throw NetworkWebSocketTask.Failure.cancelled }
-        return .string(frame)
-    }
-
-    func ping() async throws {
-        lock.withLock { pingCount += 1 }
-        guard pingSuspends else { return }
-        await withCheckedContinuation { continuation in
-            lock.withLock { pingGates.append(continuation) }
-        }
-    }
-
-    // A cancelled socket releases the read it was holding, as a real one
-    // does: the dial ends rather than waiting for a host that has gone.
-    func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        lock.withLock {
-            isCancelled = true
-            if closeCode == .goingAway { goingAwayCount += 1 }
-        }
-        releaseReaders()
-    }
-
-    private func releaseReaders() {
-        let waiting = lock.withLock { () -> [CheckedContinuation<String?, Never>] in
-            defer { readers.removeAll() }
-            return readers
-        }
-        waiting.forEach { $0.resume(returning: nil) }
     }
 }

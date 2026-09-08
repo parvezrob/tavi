@@ -245,6 +245,7 @@ final class HeldEventsSocket: HostEventsSocketing, @unchecked Sendable {
     }
 
     var lastActivity: ContinuousClock.Instant { ContinuousClock().now }
+    var lastFrameAt: ContinuousClock.Instant { ContinuousClock().now }
 
     // Closing the socket the ordinary way is the last thing `streamOnce`
     // does, so this is a test's proof that a dial has fully unwound —
@@ -281,7 +282,9 @@ final class HeldEventsSocket: HostEventsSocketing, @unchecked Sendable {
         }
     }
 
-    func ping() async throws {}
+    func ping(payload: Data) async throws {}
+
+    func onPong(_ handler: @escaping @Sendable (Data) -> Void) {}
 
     func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         guard closeCode == .normalClosure else { return }

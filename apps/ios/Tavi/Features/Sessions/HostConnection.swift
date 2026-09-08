@@ -116,9 +116,9 @@ final class HostConnection {
     // moves, so failed redials cannot starve it.
     var epoch = 0
     var reachabilityGeneration = 0
-    // The dial the watchdog cycled, so its cause is not overwritten by the
+    // The dial a deadline cycled, so its cause is not overwritten by the
     // cancelled socket the catch then sees (#111).
-    var watchdogCycledDial: Int?
+    var cycledDial: Int?
     // The watchdog's one outstanding challenge to a quiet socket (#107).
     var watchdogPing: Task<Void, Never>?
     var watchdogPingGeneration = 0
@@ -292,13 +292,17 @@ final class HostConnection {
     }
 
     // What one text frame does to the link, and whether it was the agents
-    // snapshot this dial was waiting for. Out of line because `streamOnce`
-    // is at its complexity bound, and here rather than beside the dial
-    // because this is the only part of a dial that writes what the home
-    // reads.
-    func apply(_ text: String, dial: Int, attempt: Int, isFirst: Bool, dialledAt: ContinuousClock.Instant) throws -> Bool {
+    // snapshot this dial was waiting for (`measured`). Out of line because
+    // `streamOnce` is at its complexity bound, and here rather than beside
+    // the dial because this is the only part of a dial that writes what the
+    // home reads.
+    func apply(_ text: String, dial: Int, attempt: Int, measured: inout Bool, dialledAt: ContinuousClock.Instant) throws {
         let snapshot = try JSONDecoder().decode(AgentsSnapshotMessage.self, from: Data(text.utf8))
-        guard snapshot.type == "agents" else { return false }
+        guard snapshot.type == "agents" else { return }
+        // The frame the dial's whole budget was for: the 5 s probe arm and
+        // the 15 s first-frame arm are both done here, and nowhere else —
+        // control frames and other text do not buy a dial more time (#111).
+        cancelConnectDeadline(dial)
         recordSnapshot(afterDrop: isStale || isOffline, dial: dial, attempt: attempt)
         hasLoaded = true
         isStale = false
@@ -310,16 +314,10 @@ final class HostConnection {
         reachabilityTask = nil
         onEvent?(.snapshot(agents: snapshot.agents, available: snapshot.available, reason: snapshot.reason))
         if streamConnectedAt == nil { streamConnectedAt = timing.now() }
-        // The backoff forgets only once the stream has held for a while; a
-        // link that works for one frame and dies stays on the slow end of
-        // the schedule (#86).
-        if let since = streamConnectedAt, since.duration(to: timing.now()) >= Self.stableStreamInterval {
-            reconnectAttempt = 0
-        }
-        guard isFirst else { return true }
+        guard !measured else { return }
+        measured = true
         recordFirstFrame(dial: dial, attempt: attempt, since: dialledAt)
         measureFirstFrameLatency(dial)
-        return true
     }
 
     // The end of a dial: what happened, and then the last known agents kept

@@ -7,10 +7,14 @@ struct HostWatchdogPolicy: Sendable, Equatable {
     let pingAfterIdle: Duration
     let cycleAfterIdle: Duration
 
+    // Effectively 20–25 s and 35–40 s, since the loop only looks every 5 s.
+    // Safe to shorten from 30/45 because a host from 0.1.18 pings every 15 s
+    // and a 0.1.17 host auto-pongs this link's own ping: a live socket is
+    // never idle for 20 s, so what these marks catch is a dead one (#111).
     static let live = HostWatchdogPolicy(
         pollInterval: .seconds(5),
-        pingAfterIdle: .seconds(30),
-        cycleAfterIdle: .seconds(45)
+        pingAfterIdle: .seconds(20),
+        cycleAfterIdle: .seconds(35)
     )
 }
 
@@ -20,6 +24,9 @@ struct HostWatchdogPolicy: Sendable, Equatable {
 // its schedule, this owns the dial and the deadlines that cut it.
 extension HostConnection {
     static let stableStreamInterval: Duration = .seconds(30)
+    // From dial start, covering TCP, TLS, the upgrade and the wait for the
+    // first agents frame.
+    static let firstFrameDeadline: Duration = .seconds(15)
 
     func streamOnce(handshake: URLRequest) async {
         // This dial's place in the link's history; everything below judges
@@ -38,7 +45,7 @@ extension HostConnection {
             if self.socket === socket { self.socket = nil }
         }
 
-        armConnectDeadline(dial)
+        armConnectDeadline(dial, attempt: attempt, since: dialledAt)
         defer { cancelConnectDeadline(dial) }
 
         let watchdog = startWatchdog(for: socket, dial: dial, attempt: attempt, since: dialledAt)
@@ -56,6 +63,15 @@ extension HostConnection {
             // by which time another computer may be in place.
             if dial == epoch {
                 if measured { consecutiveFailedDials = 0 } else { consecutiveFailedDials += 1 }
+                // The backoff forgets a stream that was alive across the
+                // stable interval — frames delivered, not time passed
+                // (#111). `lastFrameAt` is stamped by delivered frames
+                // alone, so the error that ended this dial cannot pass for
+                // life, and a socket that got one snapshot and then nothing
+                // stays on the slow end of the schedule.
+                if let since = streamConnectedAt, since.duration(to: socket.lastFrameAt) >= Self.stableStreamInterval {
+                    reconnectAttempt = 0
+                }
                 streamConnectedAt = nil
             }
         }
@@ -63,11 +79,8 @@ extension HostConnection {
             while !Task.isCancelled {
                 let frame = try await socket.receive()
                 guard dial == epoch else { return }
-                cancelConnectDeadline(dial)
                 guard case let .string(text) = frame else { continue }
-                if try apply(text, dial: dial, attempt: attempt, isFirst: !measured, dialledAt: dialledAt) {
-                    measured = true
-                }
+                try apply(text, dial: dial, attempt: attempt, measured: &measured, dialledAt: dialledAt)
             }
         } catch {
             guard !Task.isCancelled, dial == epoch else { return }
@@ -90,12 +103,20 @@ extension HostConnection {
         recovery?.record(.ready, source: .events, generation: dial, attempt: attempt, elapsedMilliseconds: elapsed)
     }
 
-    // The cause belongs to the watchdog, not to the cancel it performs: the
-    // catch below sees only a cancelled socket, a beat later (#111).
-    func recordWatchdogCycle(dial: Int, attempt: Int, since: ContinuousClock.Instant) {
-        watchdogCycledDial = dial
+    // The cause belongs to whatever cut the socket, not to the cancel it
+    // performs: the receive loop sees only a cancelled socket, a beat later
+    // (#111). Recording before the cancel is what keeps the two in order.
+    func cycleSocket(
+        _ socket: any HostEventsSocketing,
+        reason: RecoveryLog.Reason,
+        dial: Int,
+        attempt: Int,
+        since: ContinuousClock.Instant
+    ) {
+        cycledDial = dial
         let lasted = Int(since.milliseconds(to: timing.now()))
-        recovery?.record(.cycling, source: .events, reason: .watchdog, generation: dial, attempt: attempt, elapsedMilliseconds: lasted)
+        recovery?.record(.cycling, source: .events, reason: reason, generation: dial, attempt: attempt, elapsedMilliseconds: lasted)
+        socket.cancel(with: .goingAway, reason: nil)
     }
 
     // A stream end is both what happened and why the link cycles — unless the
@@ -104,25 +125,60 @@ extension HostConnection {
         let cause = RecoveryLog.Reason.socket(failure.tag, code: failure.code)
         let lasted = Int(since.milliseconds(to: timing.now()))
         recovery?.record(.streamEnded, source: .events, reason: cause, generation: dial, attempt: attempt, elapsedMilliseconds: lasted)
-        guard watchdogCycledDial != dial else { return }
+        guard cycledDial != dial else { return }
         recovery?.record(.cycling, source: .events, reason: cause, generation: dial, attempt: attempt, elapsedMilliseconds: lasted)
     }
 
     // Bounded "Connecting…": if nothing has arrived by the deadline, ask the
     // host directly; no answer is Offline, said now, while the attempt keeps
     // going in case it is merely slow. The first frame cancels this.
-    func armConnectDeadline(_ dial: Int) {
+    func armConnectDeadline(_ dial: Int, attempt: Int, since: ContinuousClock.Instant) {
         let deadline = reconnectPolicy.connectDeadline
         connectDeadlineTask?.cancel()
         connectDeadlineTask = Task { [weak self, timing] in
             try? await timing.sleep(deadline)
             guard !Task.isCancelled, let self else { return }
-            let probe = await self.reachability.askTwice(self.reachabilityGeneration)
-            guard !Task.isCancelled, dial == self.epoch else { return }
-            // Earned, not guessed (#86): the first dial that fails is
-            // "Connecting…" or "Reconnecting"; Offline waits for the next.
-            if probe == .unreachable, self.consecutiveFailedDials >= 1 { self.setOffline(true, dial: dial) }
+            // The question runs beside the rest of the budget, never in
+            // front of it: two 5 s questions waited out first would push the
+            // absolute first-frame deadline past 15 s. Structured, so
+            // cancelling this task cancels both halves.
+            async let asked: Void = self.probeAfterConnectDeadline(dial)
+            await self.cutAtFirstFrameDeadline(dial: dial, attempt: attempt, since: since)
+            await asked
         }
+    }
+
+    // Earned, not guessed (#86): the first dial that fails is "Connecting…"
+    // or "Reconnecting"; Offline waits for the next.
+    private func probeAfterConnectDeadline(_ dial: Int) async {
+        let probe = await reachability.askTwice(reachabilityGeneration)
+        guard !Task.isCancelled, dial == epoch else { return }
+        if probe == .unreachable, consecutiveFailedDials >= 1 { setOffline(true, dial: dial) }
+    }
+
+    // The same task's second, later arm. A dial gets 15 s from its start to
+    // deliver a first agents frame, the upgrade included: a host that
+    // withholds the upgrade answer hangs the dial exactly as one that
+    // connects and then says nothing does, and both used to wait for the
+    // watchdog (#111, the 2026-09-08 hostPause finding — 45 s per dial, so
+    // one frameless dial in a 120 s outage and Offline never earned).
+    // Control frames do not extend it; the ordinary schedule redials.
+    private func cutAtFirstFrameDeadline(dial: Int, attempt: Int, since: ContinuousClock.Instant) async {
+        let spent = since.duration(to: timing.now())
+        if spent < Self.firstFrameDeadline {
+            try? await timing.sleep(Self.firstFrameDeadline - spent)
+        }
+        guard !Task.isCancelled, dial == epoch, let socket else { return }
+        let waited = Int(since.milliseconds(to: timing.now()))
+        recovery?.record(
+            .firstFrameDeadline,
+            source: .events,
+            reason: .firstFrameDeadline,
+            generation: dial,
+            attempt: attempt,
+            elapsedMilliseconds: waited
+        )
+        cycleSocket(socket, reason: .firstFrameDeadline, dial: dial, attempt: attempt, since: since)
     }
 
     // Only this dial's: a stream unwinding late must not cancel the
@@ -152,8 +208,7 @@ extension HostConnection {
                 let idle = socket.lastActivity.duration(to: timing.now())
                 if idle >= policy.cycleAfterIdle {
                     cancelWatchdogPing()
-                    recordWatchdogCycle(dial: dial, attempt: attempt, since: since)
-                    socket.cancel(with: .goingAway, reason: nil)
+                    cycleSocket(socket, reason: .watchdog, dial: dial, attempt: attempt, since: since)
                     return
                 }
                 guard idle >= policy.pingAfterIdle else {
@@ -167,6 +222,13 @@ extension HostConnection {
         }
     }
 
+    // A fresh nonce per challenge, so a pong belongs to exactly one round and
+    // a late one is told apart by its bytes (the events protocol allows 16;
+    // eight is a nonce). Never logged (#111).
+    static func challengePayload() -> Data {
+        withUnsafeBytes(of: UInt64.random(in: .min ... .max)) { Data($0) }
+    }
+
     // One challenge in flight per link until the send actually finishes: a
     // send that ignores cancellation must not be multiplied by the next
     // quiet period. Cancelling the socket releases the real one (#107).
@@ -174,8 +236,9 @@ extension HostConnection {
         guard watchdogPing == nil else { return }
         watchdogPingGeneration += 1
         let generation = watchdogPingGeneration
+        let payload = Self.challengePayload()
         watchdogPing = Task { [weak self, weak socket] in
-            try? await socket?.ping()
+            try? await socket?.ping(payload: payload)
             guard let self, watchdogPingGeneration == generation else { return }
             watchdogPing = nil
         }

@@ -155,6 +155,7 @@ final class FakeEventsSocket: HostEventsSocketing, @unchecked Sendable {
     }
 
     var lastActivity: ContinuousClock.Instant { ContinuousClock().now }
+    var lastFrameAt: ContinuousClock.Instant { ContinuousClock().now }
 
     func resume() {}
 
@@ -171,7 +172,9 @@ final class FakeEventsSocket: HostEventsSocketing, @unchecked Sendable {
         }
     }
 
-    func ping() async throws {}
+    func ping(payload: Data) async throws {}
+
+    func onPong(_ handler: @escaping @Sendable (Data) -> Void) {}
 
     func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {}
 }
