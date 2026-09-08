@@ -22,16 +22,20 @@ const MAX_PENDING_SECRETS = 5;
 // Last-seen is informational; writing it on every request would turn each
 // API call into a disk write.
 const LAST_SEEN_WRITE_INTERVAL_MILLISECONDS = 60_000;
-// Every open WebSocket re-checks its credential every 2 s (#46). Reading and
-// parsing devices.json for each of those was the whole idle cost of a paired
-// phone (#68 finding 1): the list is answered from memory, and the disk is
-// consulted at most this often — a write this host made replaces the memory
-// copy outright, so only another process's edit waits for the window.
-const DEVICE_CACHE_INTERVAL_MILLISECONDS = 30_000;
+// Every open WebSocket re-checks its credential every 2 s (#46). Reading,
+// parsing and hashing devices.json for each of those was the whole idle cost
+// of a paired phone (#68 finding 1) — the expensive part was the read, not
+// how often it was asked for. So the list is answered from memory, one
+// `statSync` says whether the file moved, and only a moved file is read again.
+// The stat is throttled to less than one recheck interval, so N phones
+// sharing a 2 s recheck cost one stat between them and no recheck is ever
+// more than its own interval behind the file: `tavi devices revoke` in
+// another process still cuts a live phone off within 2 s.
+const DEVICE_STAT_INTERVAL_MILLISECONDS = 1_000;
 
 interface DeviceCache {
   devices: StoredDevice[];
-  checkedAtMs: number;
+  statedAtMs: number;
   modifiedAtMs: number;
 }
 
@@ -159,20 +163,20 @@ export class DeviceRegistry {
     return path.join(this.stateDir, DEVICES_FILE_NAME);
   }
 
-  // The paired list as this host last saw it. Between windows the answer is
-  // the one in memory; at a window the file's mtime says whether anything
-  // outside this process changed it, and only then is it parsed again.
+  // The paired list as this host last saw it. The file's mtime is what says
+  // whether anything outside this process changed it; only a moved file is
+  // read and parsed again.
   private load(): StoredDevice[] {
     const cached = this.cache;
     const nowMs = this.now().getTime();
-    if (cached && nowMs - cached.checkedAtMs < DEVICE_CACHE_INTERVAL_MILLISECONDS) return cached.devices;
+    if (cached && nowMs - cached.statedAtMs < DEVICE_STAT_INTERVAL_MILLISECONDS) return cached.devices;
     const modifiedAtMs = this.modifiedAtMs();
     if (cached && modifiedAtMs === cached.modifiedAtMs) {
-      cached.checkedAtMs = nowMs;
+      cached.statedAtMs = nowMs;
       return cached.devices;
     }
     const devices = this.readDevices();
-    this.cache = { devices, checkedAtMs: nowMs, modifiedAtMs };
+    this.cache = { devices, statedAtMs: nowMs, modifiedAtMs };
     return devices;
   }
 
@@ -220,8 +224,8 @@ export class DeviceRegistry {
     try {
       writeStateFile(this.file, { version: DEVICES_SCHEMA_VERSION, devices });
       // What this host just wrote is the truth, so a revoke here reaches the
-      // next 2 s recheck rather than waiting for the disk window.
-      this.cache = { devices, checkedAtMs: this.now().getTime(), modifiedAtMs: this.modifiedAtMs() };
+      // next recheck without even a stat.
+      this.cache = { devices, statedAtMs: this.now().getTime(), modifiedAtMs: this.modifiedAtMs() };
     } catch (error) {
       this.report(`Tavi could not save the paired devices (${this.file}): ${describe(error)}.`);
       throw error;

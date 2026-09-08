@@ -73,7 +73,7 @@ test("last-seen is recorded but not on every request", () => {
   assert.notEqual(registry.list()[0]?.lastSeenAt, first);
 });
 
-test("a minute of credential rechecks across five sockets reads the device list at most three times (#68)", () => {
+test("a minute of credential rechecks across five sockets reads the device list once (#68)", () => {
   let tick = 0;
   let reads = 0;
   const registry = new DeviceRegistry(
@@ -89,14 +89,15 @@ test("a minute of credential rechecks across five sockets reads the device list 
   reads = 0;
 
   // Five phones holding a socket open, each re-checking its credential on the
-  // host's 2 s clock: 150 checks, and the disk is asked once per 30 s window.
+  // host's 2 s clock: 150 checks, and nothing moved the file, so it is never
+  // read again. The mtime checks those rechecks make are not reads.
   for (tick = 0; tick <= 60_000; tick += 2_000) {
     for (let socket = 0; socket < 5; socket += 1) assert.ok(registry.authorize(credential));
   }
-  assert.ok(reads <= 3, `the device list was read ${reads} times in a minute`);
+  assert.equal(reads, 0, `the device list was read ${reads} times in a minute of rechecks`);
 });
 
-test("a revoke this host makes reaches the next 2 s recheck, not the next disk window (#68)", () => {
+test("a revoke this host makes reaches the next 2 s recheck without even a stat (#68)", () => {
   let tick = 0;
   const registry = new DeviceRegistry(
     scratch(),
@@ -112,7 +113,7 @@ test("a revoke this host makes reaches the next 2 s recheck, not the next disk w
   assert.equal(registry.authorize(credential), undefined);
 });
 
-test("a device list another process rewrote is picked up at the next disk window (#68)", () => {
+test("a revoke another process made cuts a live phone off within one 2 s recheck (#68)", () => {
   const stateDir = scratch();
   let tick = 0;
   const registry = new DeviceRegistry(
@@ -123,7 +124,8 @@ test("a device list another process rewrote is picked up at the next disk window
   const { credential } = registry.add("phone");
   assert.ok(registry.authorize(credential));
 
-  // `tavi devices revoke` is its own process writing the same file.
+  // `tavi devices revoke` is its own process writing the same file, and the
+  // promise in protocol/README.md is that it takes effect immediately.
   const cli = new DeviceRegistry(
     stateDir,
     () => new Date(tick),
@@ -131,9 +133,7 @@ test("a device list another process rewrote is picked up at the next disk window
   );
   assert.equal(cli.revoke(cli.list()[0]?.id ?? ""), true);
 
-  tick = 29_000;
-  assert.ok(registry.authorize(credential), "inside the window the list in memory is the answer");
-  tick = 30_000;
+  tick = 2_000;
   assert.equal(registry.authorize(credential), undefined, "the file's mtime moved, so it is read again");
 });
 
@@ -149,8 +149,8 @@ test("an unreadable device list lets nobody in and says why", () => {
   const { credential } = registry.add("phone");
 
   writeFileSync(path.join(stateDir, "devices.json"), "{ nope");
-  // An edit no host process made is seen at the next disk window (#68 finding 1).
-  tick = 30_000;
+  // An edit no host process made is seen at the next recheck (#68 finding 1).
+  tick = 2_000;
   assert.equal(registry.authorize(credential), undefined);
   assert.match(reported.at(-1) ?? "", /could not read the paired devices/);
 });
