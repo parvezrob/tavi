@@ -18,7 +18,7 @@ import { DeviceRegistry, PairingSessions } from "./pairing.js";
 import { PreviewRegistry } from "./preview.js";
 import type { DiscoveryDeps } from "./preview-servers.js";
 import { ProjectHistory } from "./projects.js";
-import { EVENTS_PROTOCOL, TERMINAL_PROTOCOL, TERMINAL_PROTOCOL_V2 } from "./protocol.js";
+import { EVENTS_PROTOCOL, MAX_TERMINAL_FRAME_BYTES, TERMINAL_PROTOCOL, TERMINAL_PROTOCOL_V2 } from "./protocol.js";
 import { agentRoutes } from "./routes/agents.js";
 import { chaosRoutes } from "./routes/chaos.js";
 import { deviceRoutes } from "./routes/devices.js";
@@ -106,6 +106,10 @@ export async function createTaviServer(options: TaviServerOptions) {
   previews.start();
   const eventsWss = new WebSocketServer({
     noServer: true,
+    // The events socket carries snapshots and control frames; a client frame
+    // larger than a terminal's is a bug or an attack, and ws answers 1009
+    // rather than buffering it (#111).
+    maxPayload: MAX_TERMINAL_FRAME_BYTES,
     handleProtocols(protocols) {
       return protocols.has(EVENTS_PROTOCOL) ? EVENTS_PROTOCOL : false;
     },

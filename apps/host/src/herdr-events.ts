@@ -36,11 +36,21 @@ export interface HerdrAgentsSnapshot {
   agents: HerdrAgentInfo[];
 }
 
+// The listener is handed the snapshot *and* the exact text every phone gets:
+// the `{type:"agents", …}` envelope is serialized once per snapshot, not once
+// per open socket (#68 finding 2).
+export type AgentsListener = (snapshot: HerdrAgentsSnapshot, frame: string) => void;
+
 export interface AgentEventSource {
   start(): void;
   stop(): void;
-  subscribe(listener: (snapshot: HerdrAgentsSnapshot) => void): () => void;
+  subscribe(listener: AgentsListener): () => void;
   readonly latest: HerdrAgentsSnapshot | undefined;
+}
+
+/** The one text frame the events socket carries. */
+export function agentsFrame(snapshot: HerdrAgentsSnapshot): string {
+  return JSON.stringify({ type: "agents", ...snapshot });
 }
 
 export interface HerdrEventFeedOptions {
@@ -53,7 +63,7 @@ export interface HerdrEventFeedOptions {
 // agent.list whenever anything fires: Herdr stays the only state authority,
 // events are just change triggers, and snapshots can never miss a removal.
 export class HerdrEventFeed implements AgentEventSource {
-  private readonly listeners = new Set<(snapshot: HerdrAgentsSnapshot) => void>();
+  private readonly listeners = new Set<AgentsListener>();
   private readonly options: HerdrEventFeedOptions;
   private readonly source: HerdrAgentSource;
 
@@ -94,9 +104,9 @@ export class HerdrEventFeed implements AgentEventSource {
     this.listeners.clear();
   }
 
-  subscribe(listener: (snapshot: HerdrAgentsSnapshot) => void): () => void {
+  subscribe(listener: AgentsListener): () => void {
     this.listeners.add(listener);
-    if (this.lastSnapshot) listener(this.lastSnapshot);
+    if (this.lastSnapshot && this.lastPublished) listener(this.lastSnapshot, this.lastPublished);
     return () => {
       this.listeners.delete(listener);
     };
@@ -324,11 +334,13 @@ export class HerdrEventFeed implements AgentEventSource {
 
   private publish(snapshot: HerdrAgentsSnapshot): void {
     this.lastSnapshot = snapshot;
-    const serialized = JSON.stringify(snapshot);
-    if (serialized === this.lastPublished) return;
-    this.lastPublished = serialized;
+    // The envelope is both the change detector and the wire text, so a
+    // snapshot costs one JSON.stringify however many phones are listening.
+    const frame = agentsFrame(snapshot);
+    if (frame === this.lastPublished) return;
+    this.lastPublished = frame;
     for (const listener of [...this.listeners]) {
-      listener(snapshot);
+      listener(snapshot, frame);
     }
   }
 

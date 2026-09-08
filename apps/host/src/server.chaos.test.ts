@@ -183,7 +183,9 @@ test("a blackholed events socket keeps TCP up, answers no ping, and sends one re
     start() {},
     stop() {},
     subscribe(listener) {
-      publish = listener as typeof publish;
+      // The frame is the wire text the host now sends verbatim, so the fake
+      // produces it exactly as the feed does.
+      publish = (snapshot) => listener(snapshot as never, JSON.stringify({ type: "agents", ...snapshot }));
       return () => {
         publish = undefined;
       };
@@ -501,7 +503,9 @@ test("a fault reaches only the socket it names", async () => {
     start() {},
     stop() {},
     subscribe(listener) {
-      publish = listener as typeof publish;
+      // The frame is the wire text the host now sends verbatim, so the fake
+      // produces it exactly as the feed does.
+      publish = (snapshot) => listener(snapshot as never, JSON.stringify({ type: "agents", ...snapshot }));
       return () => {
         publish = undefined;
       };

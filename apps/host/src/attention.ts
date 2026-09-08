@@ -1,4 +1,4 @@
-import type { AgentEventSource, HerdrAgentsSnapshot } from "./herdr-events.js";
+import { agentsFrame, type AgentEventSource, type AgentsListener, type HerdrAgentsSnapshot } from "./herdr-events.js";
 import type { HerdrAgentInfo } from "./types.js";
 
 // Herdr's agent_status is a screen-detection heuristic and can miss or lag
@@ -216,6 +216,9 @@ export class AttentionReconciler {
 // sees hook-reported blocks with the same sub-second latency as Herdr's own
 // events.
 export class AttentiveAgentEvents implements AgentEventSource {
+  private readonly listeners = new Set<AgentsListener>();
+  private detach: (() => void) | undefined;
+
   constructor(
     private readonly inner: AgentEventSource,
     private readonly overlay: AttentionOverlay,
@@ -234,16 +237,38 @@ export class AttentiveAgentEvents implements AgentEventSource {
     this.inner.stop();
   }
 
-  subscribe(listener: (snapshot: HerdrAgentsSnapshot) => void): () => void {
-    const unsubscribeInner = this.inner.subscribe((snapshot) => listener(this.merge(snapshot)));
+  // One inner subscription for every phone, not one each: the merge and the
+  // envelope that follows it are done once per snapshot (#68 finding 2).
+  subscribe(listener: AgentsListener): () => void {
+    // Attach before the listener joins, so the inner feed's replay lands on
+    // nobody and every subscriber is replayed the same way, right below.
+    if (this.detach === undefined) this.attach();
+    this.listeners.add(listener);
+    const snapshot = this.latest;
+    if (snapshot) listener(snapshot, agentsFrame(snapshot));
+    return () => {
+      this.listeners.delete(listener);
+      if (this.listeners.size > 0) return;
+      this.detach?.();
+      this.detach = undefined;
+    };
+  }
+
+  private attach(): void {
+    const unsubscribeInner = this.inner.subscribe((snapshot) => this.fanOut(this.merge(snapshot)));
     const unsubscribeOverlay = this.overlay.subscribe(() => {
       const snapshot = this.inner.latest;
-      if (snapshot) listener(this.merge(snapshot));
+      if (snapshot) this.fanOut(this.merge(snapshot));
     });
-    return () => {
+    this.detach = () => {
       unsubscribeInner();
       unsubscribeOverlay();
     };
+  }
+
+  private fanOut(snapshot: HerdrAgentsSnapshot): void {
+    const frame = agentsFrame(snapshot);
+    for (const listener of [...this.listeners]) listener(snapshot, frame);
   }
 
   merge(snapshot: HerdrAgentsSnapshot): HerdrAgentsSnapshot {

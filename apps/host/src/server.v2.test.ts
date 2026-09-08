@@ -336,7 +336,9 @@ test("events endpoint pushes agent snapshots and degrades honestly when unconfig
     start() {},
     stop() {},
     subscribe(listener) {
-      publish = listener as typeof publish;
+      // The frame is the wire text the host now sends verbatim, so the fake
+      // produces it exactly as the feed does.
+      publish = (snapshot) => listener(snapshot as never, JSON.stringify({ type: "agents", ...snapshot }));
       return () => {
         publish = undefined;
       };

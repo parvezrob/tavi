@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AttentionOverlay, AttentionReconciler, AttentiveAgentEvents, parseClaudeHookEvent } from "./attention.js";
-import type { AgentEventSource, HerdrAgentsSnapshot } from "./herdr-events.js";
+import type { AgentEventSource, AgentsListener, HerdrAgentsSnapshot } from "./herdr-events.js";
 import type { HerdrAgentInfo } from "./types.js";
 
 const agent = (overrides: Partial<HerdrAgentInfo> = {}): HerdrAgentInfo => ({
@@ -69,7 +69,7 @@ test("hook-reported blocks expire after the ttl", () => {
 test("merged snapshots force blocked with hook authority and republish on overlay changes", () => {
   const overlay = new AttentionOverlay();
   const snapshot: HerdrAgentsSnapshot = { available: true, agents: [agent()] };
-  const listeners = new Set<(published: HerdrAgentsSnapshot) => void>();
+  const listeners = new Set<AgentsListener>();
   const inner: AgentEventSource = {
     start() {},
     stop() {},
@@ -81,16 +81,23 @@ test("merged snapshots force blocked with hook authority and republish on overla
   };
   const source = new AttentiveAgentEvents(inner, overlay);
   const published: HerdrAgentsSnapshot[] = [];
-  source.subscribe((published_) => published.push(published_));
+  const frames: string[] = [];
+  source.subscribe((published_, frame) => {
+    published.push(published_);
+    frames.push(frame);
+  });
+  // Subscribing replays the current state, as the herdr feed itself does.
+  assert.equal(published.length, 1);
 
   overlay.report({ event: "Notification", sessionId: "sess-1", message: "permission to use Bash" });
-  assert.equal(published.length, 1);
-  assert.equal(published[0]?.agents[0]?.status, "blocked");
-  assert.equal(published[0]?.agents[0]?.authority, "claude-hook");
+  assert.equal(published.length, 2);
+  assert.equal(published[1]?.agents[0]?.status, "blocked");
+  assert.equal(published[1]?.agents[0]?.authority, "claude-hook");
+  assert.equal(frames[1], JSON.stringify({ type: "agents", ...published[1] }));
 
   overlay.report({ event: "Stop", sessionId: "sess-1" });
-  assert.equal(published[1]?.agents[0]?.status, "idle");
-  assert.equal(published[1]?.agents[0]?.authority, "herdr");
+  assert.equal(published[2]?.agents[0]?.status, "idle");
+  assert.equal(published[2]?.agents[0]?.authority, "herdr");
 
   // Agents without a session ref are never touched.
   const detached = new AttentiveAgentEvents(inner, overlay);

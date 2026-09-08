@@ -5,8 +5,9 @@ import type { WebSocket, WebSocketServer } from "ws";
 import type { Chaos } from "./chaos.js";
 import type { HostConfig } from "./config.js";
 import type { HerdrAgentSource } from "./herdr-types.js";
-import type { AgentEventSource } from "./herdr-events.js";
+import { agentsFrame, type AgentEventSource } from "./herdr-events.js";
 import { EVENTS_PROTOCOL, TERMINAL_PROTOCOL, TERMINAL_PROTOCOL_V2 } from "./protocol.js";
+import { keepAlive } from "./socket-heartbeat.js";
 import { parseResumeRequest, spawnAttachmentTerminal, type TerminalTarget } from "./terminal-bridge.js";
 import { safeSessionId } from "./validation.js";
 
@@ -116,17 +117,20 @@ export async function upgradeTerminal(
 // Snapshot-based push: the phone always receives the full agent list, so a
 // missed frame can never leave a stale agent on screen.
 function serveAgentEvents(websocket: WebSocket, agentEvents?: AgentEventSource, chaos?: Chaos): void {
-  // Chaos only (#111): a blackholed socket keeps the *latest* snapshot it
-  // skipped and sends that one when the window ends — a snapshot is the whole
-  // list, so replaying the older ones would only paint stale state.
-  let retained: AgentsSnapshot | undefined;
-  const send = (snapshot: AgentsSnapshot) => {
+  keepAlive(websocket, {
+    ...(chaos ? { clock: chaos, gate: (socket: WebSocket) => chaos.gate(socket) } : {}),
+  });
+  // Chaos only (#111): a blackholed socket keeps the *latest* frame it skipped
+  // and sends that one when the window ends — a snapshot is the whole list, so
+  // replaying the older ones would only paint stale state.
+  let retained: string | undefined;
+  const send = (frame: string) => {
     if (websocket.readyState !== websocket.OPEN) return;
     if (chaos && !chaos.gate(websocket)) {
-      retained = snapshot;
+      retained = frame;
       return;
     }
-    websocket.send(JSON.stringify({ type: "agents", ...snapshot }));
+    websocket.send(frame);
   };
 
   let unsubscribe: () => void = () => undefined;
@@ -140,26 +144,18 @@ function serveAgentEvents(websocket: WebSocket, agentEvents?: AgentEventSource, 
   });
 
   if (!agentEvents) {
-    send({
-      available: false,
-      reason: "Herdr integration is not configured on this host.",
-      agents: [],
-    });
+    send(agentsFrame({ available: false, reason: "Herdr integration is not configured on this host.", agents: [] }));
     return;
   }
 
-  unsubscribe = agentEvents.subscribe(send);
+  // The frame arrives already serialized: one envelope per snapshot, shared by
+  // every phone, instead of one JSON.stringify per socket (#68 finding 2).
+  unsubscribe = agentEvents.subscribe((_snapshot, frame) => send(frame));
   if (!agentEvents.latest) {
-    send({ available: false, reason: "Waiting for the first Herdr snapshot.", agents: [] });
+    send(agentsFrame({ available: false, reason: "Waiting for the first Herdr snapshot.", agents: [] }));
   }
   websocket.once("close", () => unsubscribe());
   websocket.once("error", () => unsubscribe());
-}
-
-interface AgentsSnapshot {
-  available: boolean;
-  reason?: string;
-  agents: unknown[];
 }
 
 function offersEventsProtocol(request: IncomingMessage): boolean {
