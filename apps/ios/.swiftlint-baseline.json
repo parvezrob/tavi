@@ -576,11 +576,11 @@
       "ruleIdentifier": "file_length",
       "ruleDescription": "Files should not span too many lines.",
       "location": {
-        "line": 570,
+        "line": 563,
         "file": "TaviUITests/TaviChaosSoak.swift",
         "character": 1
       },
-      "reason": "File should contain 400 lines or less: currently contains 570",
+      "reason": "File should contain 400 lines or less: currently contains 563",
       "ruleName": "File Length"
     }
   },

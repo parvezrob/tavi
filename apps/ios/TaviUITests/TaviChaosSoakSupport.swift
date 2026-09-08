@@ -122,6 +122,29 @@ extension TaviChaosSoak {
     func lastReadyAt(_ source: String) -> Double? {
         collector.events.last { $0.source == source && $0.kind == "ready" }.map { Double($0.at) }
     }
+
+    // The owner's field report (#111): reconnect loops when scrolling or
+    // typing on a good link. Every healthy window scrolls into history and
+    // flicks back before its MARK, so a cycle caused by interaction lands in
+    // the report as a cycle inside a fault-free window. Scrolled into
+    // history, herdr freezes the frame — scrollback working, not a broken
+    // stream — so the flick back is confirmed the way
+    // `testTouchScrollLeavesStreamingHealthy` confirms it: once the flick's
+    // momentum has died down, two spaced spontaneous updates.
+    func scrollIntoHistoryAndBack(_ app: XCUIApplication) async throws {
+        let surface = app.descendants(matching: .any)["terminal.surface"]
+        surface.swipeDown()
+        try await Task.sleep(for: .seconds(2))
+        for _ in 0..<5 {
+            surface.swipeUp()
+            try await Task.sleep(for: .seconds(2.5))
+            let parked = (surface.value as? String) ?? ""
+            guard waitForTranscript(of: surface, timeout: 2, until: { $0 != parked }) else { continue }
+            let changedOnce = (surface.value as? String) ?? ""
+            if waitForTranscript(of: surface, timeout: 2, until: { $0 != changedOnce }) { return }
+        }
+        XCTFail("Flicking back after a scroll never returned the viewport to the live tail.")
+    }
 }
 
 // The complete history the phone cannot keep: every ring event this run ever

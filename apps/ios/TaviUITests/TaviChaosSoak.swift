@@ -127,6 +127,7 @@ final class TaviChaosSoak: XCTestCase {
             // One MARK into every fault-free window, one a second before the fault that ends it.
             if let live, live >= 10, !cycle.markedHealthy {
                 cycle.markedHealthy = true
+                try await scrollIntoHistoryAndBack(app)
                 type(app, mark: nextMark(.healthy))
                 continue
             }
@@ -186,10 +187,10 @@ final class TaviChaosSoak: XCTestCase {
         surface.tap()
         // The fixture travels as one typed line: base64 through the keyboard,
         // decoded into a file on the host, checked by `sh -n`, and only then
-        // sourced. One line because a multi-line heredoc typed key by key
-        // executes each line as it lands, and a bracketed paste is not an
-        // option — XCUITest's `typeText` never delivers the ESC that opens
-        // one (the first run typed `[200~cat`, which zsh rejected as a glob).
+        // sourced. A bracketed paste is not an option — XCUITest's `typeText`
+        // never delivers the ESC that opens one (the first live run typed
+        // `[200~cat`, which zsh rejected as a glob) — and one line has no
+        // half-typed state a reconnect could leave behind.
         // A syntax error is named by the shell that would have run it, in
         // the first seconds rather than at minute three.
         let path = Self.fixturePath(paneId)
@@ -502,14 +503,6 @@ final class TaviChaosSoak: XCTestCase {
     // the next marker.
     private func type(_ app: XCUIApplication, mark: Mark) {
         let surface = app.descendants(matching: .any)["terminal.surface"]
-        // The owner's field report (#111): reconnect loops when scrolling or
-        // typing on a good link. A healthy window scrolls the scrollback and
-        // back before it types, so a cycle caused by interaction lands in
-        // the report as a cycle inside a fault-free window.
-        if mark.window == .healthy {
-            surface.swipeUp()
-            surface.swipeDown()
-        }
         surface.tap()
         if mark.window == .healthy { surface.typeText("\r") }
         surface.typeText("MARK-\(mark.number)\r")
