@@ -5,6 +5,9 @@ import Foundation
 // text or terminal output ever join it.
 enum TerminalRecoveryReason: String, Sendable {
     case connectDeadline = "connect-deadline"
+    // The 2 s challenge round after a network path change (#111 P2).
+    case handoverPongMissing = "handover-pong-missing"
+    case handoverSendStalled = "handover-send-stalled"
     case heartbeatPongMissing = "heartbeat-pong-missing"
     case heartbeatSendStalled = "heartbeat-send-stalled"
     case networkPathLost = "network-path-lost"

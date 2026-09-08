@@ -61,7 +61,18 @@ final class RecoveryLog {
         // The events watchdog cycled a socket that had gone quiet; the cancel
         // it performs would otherwise read as an ordinary cancelled socket.
         case watchdog
+        // A dial that never delivered its first agents frame inside its
+        // budget — the upgrade answer withheld, or a host that connects and
+        // says nothing (#111 P2).
+        case firstFrameDeadline
+        // The 2 s challenge after a network path change went unanswered.
+        case handover(HandoverMiss)
         case none
+    }
+
+    enum HandoverMiss: String {
+        case pongMissing = "handover-pong-missing"
+        case sendStalled = "handover-send-stalled"
     }
 
     // The facts a connection counts without a ring entry: a dial has no

@@ -207,6 +207,8 @@
             case let .terminal(reason): "terminal:\(reason.rawValue)"
             case let .socket(tag, code): "socket:\(tag.rawValue):\(code)"
             case .watchdog: "watchdog"
+            case .firstFrameDeadline: "first-frame-deadline"
+            case let .handover(miss): miss.rawValue
             case .none: "none"
             }
         }
