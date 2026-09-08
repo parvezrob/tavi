@@ -11,6 +11,7 @@ import {
   PAIRING_SECRET_TTL_MILLISECONDS,
   PairingSessions,
 } from "./pairing.js";
+import { readStateFile } from "./state-file.js";
 
 function scratch(): string {
   return mkdtempSync(path.join(tmpdir(), "tavi-pairing-"));
@@ -72,11 +73,79 @@ test("last-seen is recorded but not on every request", () => {
   assert.notEqual(registry.list()[0]?.lastSeenAt, first);
 });
 
+test("a minute of credential rechecks across five sockets reads the device list at most three times (#68)", () => {
+  let tick = 0;
+  let reads = 0;
+  const registry = new DeviceRegistry(
+    scratch(),
+    () => new Date(tick),
+    () => {},
+    (file) => {
+      reads += 1;
+      return readStateFile(file);
+    },
+  );
+  const { credential } = registry.add("phone");
+  reads = 0;
+
+  // Five phones holding a socket open, each re-checking its credential on the
+  // host's 2 s clock: 150 checks, and the disk is asked once per 30 s window.
+  for (tick = 0; tick <= 60_000; tick += 2_000) {
+    for (let socket = 0; socket < 5; socket += 1) assert.ok(registry.authorize(credential));
+  }
+  assert.ok(reads <= 3, `the device list was read ${reads} times in a minute`);
+});
+
+test("a revoke this host makes reaches the next 2 s recheck, not the next disk window (#68)", () => {
+  let tick = 0;
+  const registry = new DeviceRegistry(
+    scratch(),
+    () => new Date(tick),
+    () => {},
+  );
+  const { device, credential } = registry.add("phone");
+
+  tick = 2_000;
+  assert.ok(registry.authorize(credential));
+  assert.equal(registry.revoke(device.id), true);
+  tick = 4_000;
+  assert.equal(registry.authorize(credential), undefined);
+});
+
+test("a device list another process rewrote is picked up at the next disk window (#68)", () => {
+  const stateDir = scratch();
+  let tick = 0;
+  const registry = new DeviceRegistry(
+    stateDir,
+    () => new Date(tick),
+    () => {},
+  );
+  const { credential } = registry.add("phone");
+  assert.ok(registry.authorize(credential));
+
+  // `tavi devices revoke` is its own process writing the same file.
+  const cli = new DeviceRegistry(
+    stateDir,
+    () => new Date(tick),
+    () => {},
+  );
+  assert.equal(cli.revoke(cli.list()[0]?.id ?? ""), true);
+
+  tick = 29_000;
+  assert.ok(registry.authorize(credential), "inside the window the list in memory is the answer");
+  tick = 30_000;
+  assert.equal(registry.authorize(credential), undefined, "the file's mtime moved, so it is read again");
+});
+
 test("an unreadable device list lets nobody in and says why", () => {
   const stateDir = scratch();
   const reported: string[] = [];
   let tick = 0;
-  const registry = new DeviceRegistry(stateDir, () => new Date(tick), (message) => reported.push(message));
+  const registry = new DeviceRegistry(
+    stateDir,
+    () => new Date(tick),
+    (message) => reported.push(message),
+  );
   const { credential } = registry.add("phone");
 
   writeFileSync(path.join(stateDir, "devices.json"), "{ nope");
