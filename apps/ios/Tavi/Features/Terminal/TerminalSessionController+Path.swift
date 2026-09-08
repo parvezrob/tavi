@@ -39,7 +39,9 @@ extension TerminalSessionController {
 
     // A socket is judged by its own heartbeat (#86, PRD §7.13): most cellular
     // handovers leave a working socket working, so it is asked rather than
-    // torn down.
+    // torn down. The ask is the handover check (#111 P2): the round in
+    // flight is shortened to the handover deadline rather than restarted,
+    // and only an idle heartbeat opens a new round.
     private func askHeartbeat() {
         heartbeat.start(generation: connectionGeneration, immediately: true)
     }

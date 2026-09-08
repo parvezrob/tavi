@@ -342,7 +342,10 @@ final class TerminalSessionController {
                 resumePoint?.advance(to: offset + UInt64(data.count))
             }
         case let .pong(identifier):
-            heartbeat.pongReceived(identifier)
+            // A path change turns the round in flight into the handover
+            // check; an answer inside its deadline is the evidence the
+            // socket survived the move (#111 P2).
+            if heartbeat.pongReceived(identifier) { record(.handoverChecked) }
         case .exit:
             endSession(.terminalExited)
         case let .error(message, _):
@@ -461,6 +464,14 @@ final class TerminalSessionController {
     // which one it was is in the log.
     private func heartbeatDidTimeOut(_ reason: TerminalRecoveryReason) {
         errorMessage = "The host stopped responding. Reconnecting."
+        // Named before the cycle it causes, so the log says the handover was
+        // what this connection failed rather than an ordinary quiet host.
+        switch reason {
+        case .handoverPongMissing, .handoverSendStalled:
+            record(.handoverFailed, reason: .terminal(reason))
+        default:
+            break
+        }
         connectionEndedUnexpectedly(reason)
     }
 

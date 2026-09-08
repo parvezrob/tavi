@@ -173,11 +173,11 @@ struct TerminalHeartbeatTests {
         }
     }
 
-    // A satisfied path change restarts the heartbeat under the *same*
-    // generation. The round it superseded must stop where it is rather than
-    // arm a deadline against the live round's ping (#107).
+    // A satisfied path change asks the round already under way rather than
+    // opening a second one: one ping, one deadline, and the answer bounded
+    // by what is left of it rather than by a fresh budget (#107, #111 P2).
     @Test
-    func aRoundSupersededByAPathChangeNeverArmsAnAnswerBound() async throws {
+    func aPathChangeAsksTheRoundInFlightInsteadOfOpeningASecond() async throws {
         let transport = RecoveryTransport(hangsSends: true)
         let clock = ManualTerminalClock()
         let paths = ScriptedPathObserver()
@@ -192,11 +192,12 @@ struct TerminalHeartbeatTests {
             paths.emit(NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "pdp_ip0"))
             try await waitFor { await clock.timesScheduled(Self.sendBound) == 2 }
 
-            // The superseded round's send finally lands. It must not arm an
-            // answer bound for a ping the live round has replaced.
+            // That round's send finally lands. The answer it is still owed
+            // is bounded by the round's own deadline, not by a new one.
             await transport.releaseSend()
             await settle()
             #expect(await clock.timesScheduled(Self.answerBound) == 0)
+            #expect(await transport.pingIdentifiers.count == 1)
             #expect(controller.connectionState == .connected)
         }
     }

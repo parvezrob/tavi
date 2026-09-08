@@ -163,6 +163,15 @@ actor RecoveryTransport: TerminalTransporting {
         }.first
     }
 
+    // Every ping this transport was handed, so a test can say that a path
+    // change asked the round in flight rather than opening another one.
+    var pingIdentifiers: [String] {
+        sentMessages.compactMap { message in
+            if case let .ping(identifier) = message { return identifier }
+            return nil
+        }
+    }
+
     var inputMessages: [String] {
         sentMessages.compactMap { message in
             if case let .input(value) = message { return value }

@@ -7,6 +7,11 @@ struct HeartbeatPolicy: Sendable, Equatable {
     // How long the outbound queue has to put that ping on the wire: a queue
     // that never drains is as dead as a silent host (#107).
     let sendTimeout: Duration
+    // One absolute deadline measured from a network path change, covering
+    // the challenge round's send *and* the host's answer together. A handover
+    // that broke the socket has to be found faster than the ordinary budgets
+    // would find it, and the person is already waiting (#111 P2).
+    let handover: Duration
 
     static let terminalDefault = HeartbeatPolicy(
         interval: .seconds(10),
@@ -16,11 +21,13 @@ struct HeartbeatPolicy: Sendable, Equatable {
     init(
         interval: Duration,
         timeout: Duration,
-        sendTimeout: Duration = .seconds(5)
+        sendTimeout: Duration = .seconds(5),
+        handover: Duration = .seconds(2)
     ) {
         self.interval = interval
         self.timeout = timeout
         self.sendTimeout = sendTimeout
+        self.handover = handover
     }
 }
 
