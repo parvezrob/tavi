@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import os
 
 // How the phone is doing against one paired computer right now (#50).
 // Reported per host so one computer being asleep never hides another.
@@ -35,7 +34,6 @@ enum HostConnectionEvent {
 @MainActor
 @Observable
 final class HostConnection {
-    static let logger = Logger(subsystem: "com.farfield.tavi", category: "agents.directory")
     private static let eventsProtocol = "tavi.events.v1"
     // Retry cadence for the events stream. A computer that is asleep or off
     // the tailnet is dialled again at 2, 4, 8, then every 10 s — not every
@@ -106,8 +104,8 @@ final class HostConnection {
     // Unstructured on purpose, since the redial must never wait for a probe;
     // the link owns each by name and `stop()` ends them all (#108).
     var connectDeadlineTask: Task<Void, Never>?
-    var firstFrameLatencyTask: Task<Void, Never>?
-    var reachabilityTask: Task<Void, Never>?
+    private var firstFrameLatencyTask: Task<Void, Never>?
+    private var reachabilityTask: Task<Void, Never>?
     var consecutiveFailedDials = 0
     var streamConnectedAt: ContinuousClock.Instant?
     // Two fences (#108). A measurement (round trip, path) belongs to the dial
@@ -123,14 +121,12 @@ final class HostConnection {
     var watchdogPing: Task<Void, Never>?
     var watchdogPingGeneration = 0
     // The handover check, in its own slot so a stalled watchdog send can
-    // never suppress it (#111): the outstanding challenge, the send it owns
-    // until that send returns or the socket is cancelled, and the one 2 s
-    // deadline that judges both.
+    // never suppress it (#111): the challenge, the send it owns until that
+    // send returns or the socket is cancelled, and the deadline judging both.
     var handover: HandoverChallenge?
     var handoverSend: Task<Void, Never>?
     var handoverDeadline: Task<Void, Never>?
-    // What the phone's own network is doing, which no socket reports: a
-    // changed interface is when to challenge, a restored one when to dial.
+    // What no socket reports: the phone's own network moving.
     private let pathWatch: NetworkPathWatch
 
     // Tests hand in their own transport, socket and schedule so no unit test
@@ -227,8 +223,7 @@ final class HostConnection {
         var handshake = client.request(eventsURL, timeout: 8)
         handshake.setValue(Self.eventsProtocol, forHTTPHeaderField: "Sec-WebSocket-Protocol")
         isRunning = true
-        // The watch outlives any one dial: it is what tells this link that
-        // the interface under its socket changed (#111).
+        // The watch outlives any one dial (#111).
         pathWatch.start { [weak self] event in self?.pathChanged(event) }
         // A foreground is a fresh start (#86, owner 2026-09-03 01:10: "the
         // reconnection took a while" after the phone had been idle): the
@@ -271,7 +266,8 @@ final class HostConnection {
         }
     }
 
-    // P2 wires the path watch to this; nothing in production calls it yet.
+    // Ends the delay the link is sitting out, so a network that came back
+    // dials now; the path watch is what calls it (#111).
     func wakeRetry() {
         retryWait.wake(dial: epoch)
     }
@@ -291,7 +287,13 @@ final class HostConnection {
         pathWatch.stop()
         latencyTask?.cancel()
         latencyTask = nil
-        cancelProbes()
+        reachability.cancel()
+        connectDeadlineTask?.cancel()
+        connectDeadlineTask = nil
+        firstFrameLatencyTask?.cancel()
+        firstFrameLatencyTask = nil
+        reachabilityTask?.cancel()
+        reachabilityTask = nil
         isRunning = false
         // Whatever we show next launch/foreground is last-known until the
         // stream confirms otherwise.
@@ -300,9 +302,8 @@ final class HostConnection {
 
     // What one text frame does to the link, and whether it was the agents
     // snapshot this dial was waiting for (`measured`). Out of line because
-    // `streamOnce` is at its complexity bound, and here rather than beside
-    // the dial because this is the only part of a dial that writes what the
-    // home reads.
+    // `streamOnce` is at its complexity bound; here rather than beside the
+    // dial because it is the only part of one that writes what the home reads.
     func apply(_ text: String, dial: Int, attempt: Int, measured: inout Bool, dialledAt: ContinuousClock.Instant) throws {
         let snapshot = try JSONDecoder().decode(AgentsSnapshotMessage.self, from: Data(text.utf8))
         guard snapshot.type == "agents" else { return }

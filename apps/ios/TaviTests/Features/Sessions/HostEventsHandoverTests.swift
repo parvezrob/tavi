@@ -165,11 +165,66 @@ struct HostEventsHandoverTests {
         await scene.moveTo(EventsScene.wifi)
 
         try await waitFor { scene.socket.goingAwayCancels == 1 }
+        #expect(scene.events(.cycling).last?.reason == .pathRestored)
         // The redial runs on the wake, not on the schedule: nothing here
         // resumes a retry delay.
         try await waitFor { scene.socket.resumes == 2 }
         #expect(scene.link.isRunning)
         #expect(scene.link.reconnectAttempt == 1)
+    }
+
+    // The host closes the socket while a challenge is outstanding, with its
+    // send still hanging. One redial follows; the replacement dial is not
+    // touched by the dead dial's deadline, and the old send returning after
+    // the replacement is live changes nothing. The schedule is the wide one
+    // so that resuming the dead dial's 2 s cannot be confused with resuming
+    // the delay before the redial.
+    @Test
+    func aCloseMidChallengeRedialsOnceAndLeavesTheReplacementAlone() async throws {
+        let scene = try EventsScene(pingSuspends: true, schedule: EventsLinkDefaults.wideSchedule)
+        defer { scene.tearDown() }
+        try await scene.establish()
+        _ = try await challenge(scene)
+
+        scene.socket.failReceive(at: scene.now)
+        try await releaseRetryDelay(scene, EventsLinkDefaults.wideFirstDelay, untilDials: 2)
+        scene.socket.deliver(Fixtures.agentsFrame(), at: scene.now)
+        try await waitForAnswer { scene.link.isStale == false }
+
+        // The dead dial's 2 s, and its send, both land after the fact.
+        scene.clock.advance(by: .seconds(3))
+        try? await scene.clock.resumeAll(for: HostConnection.handoverDeadline)
+        scene.socket.releasePings()
+        await settle()
+
+        #expect(scene.socket.resumes == 2)
+        #expect(scene.socket.goingAwayCancels == 0)
+        #expect(scene.events(.handoverFailed).isEmpty)
+        #expect(scene.events(.handoverChecked).isEmpty)
+    }
+
+    // Stopping is the link letting go of everything it owns, a challenge in
+    // flight included: nothing it started may still fire afterwards.
+    @Test
+    func aStopDuringAChallengeLetsNothingFireAfterwards() async throws {
+        let scene = try EventsScene(pingSuspends: true)
+        defer { scene.tearDown() }
+        try await scene.establish()
+        _ = try await challenge(scene)
+
+        scene.link.stop()
+        let cancelsAtStop = scene.socket.goingAwayCancels
+        let recorded = scene.recovery.ring.count
+
+        scene.clock.advance(by: .seconds(3))
+        try? await scene.clock.resumeAll(for: HostConnection.handoverDeadline)
+        scene.socket.releasePings()
+        await settle()
+
+        #expect(scene.socket.goingAwayCancels == cancelsAtStop)
+        #expect(scene.recovery.ring.count == recorded)
+        #expect(scene.events(.handoverFailed).isEmpty)
+        #expect(scene.events(.handoverChecked).isEmpty)
     }
 
     // With no path of its own the phone knows nothing about the computer, so

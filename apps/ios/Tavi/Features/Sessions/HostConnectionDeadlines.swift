@@ -24,6 +24,7 @@ struct HostWatchdogPolicy: Sendable, Equatable {
 // `HostConnection` unchanged (#111 P2): the link owns its published state and
 // its schedule, this owns the dial and the deadlines that cut it.
 extension HostConnection {
+    static let logger = Logger(subsystem: "com.farfield.tavi", category: "agents.directory")
     static let stableStreamInterval: Duration = .seconds(30)
     // From dial start, covering TCP, TLS, the upgrade and the wait for the
     // first agents frame.
@@ -40,13 +41,11 @@ extension HostConnection {
         recovery?.tally(.dial, source: .events)
         let socket = makeSocket(handshake)
         self.socket = socket
-        // A pong is how a handover challenge finds its own answer; the
-        // payload is this link's own bytes and goes nowhere else (#111).
-        socket.onPong { [weak self] payload in
-            Task { @MainActor in self?.pongArrived(payload, dial: dial) }
-        }
+        let pongs = readPongs(from: socket, dial: dial)
         socket.resume()
         defer {
+            pongs.sink.finish()
+            pongs.reader.cancel()
             socket.cancel(with: .normalClosure, reason: nil)
             if self.socket === socket { self.socket = nil }
         }
@@ -109,14 +108,19 @@ extension HostConnection {
         verifyReachability(dial)
     }
 
-    func cancelProbes() {
-        reachability.cancel()
-        connectDeadlineTask?.cancel()
-        connectDeadlineTask = nil
-        firstFrameLatencyTask?.cancel()
-        firstFrameLatencyTask = nil
-        reachabilityTask?.cancel()
-        reachabilityTask = nil
+    // The pongs one dial is answered with, read on this actor for as long as
+    // that dial lasts: the socket delivers them from its own queue, so this
+    // is where they cross back, and the dial is what ends the reader (#111).
+    private func readPongs(
+        from socket: any HostEventsSocketing,
+        dial: Int
+    ) -> (reader: Task<Void, Never>, sink: AsyncStream<Data>.Continuation) {
+        let (stream, sink) = AsyncStream<Data>.makeStream()
+        socket.onPong { payload in sink.yield(payload) }
+        let reader = Task { [weak self] in
+            for await payload in stream { self?.pongArrived(payload, dial: dial) }
+        }
+        return (reader, sink)
     }
 
     // A snapshot is worth recording only when it ended a drop. Both of these

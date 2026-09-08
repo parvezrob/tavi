@@ -31,10 +31,9 @@ extension HostConnection {
             // The retained socket is waiting on a path that is gone: cut it
             // and dial now rather than sit out the rest of a ten second
             // delay. The attempt count and the epoch are kept — this is the
-            // same outage, caught early, not a fresh start. `.none` is the
-            // honest cause: nothing failed, the link chose to.
+            // same outage, caught early, not a fresh start.
             if let socket {
-                cycleSocket(socket, reason: .none, dial: epoch, attempt: reconnectAttempt, since: timing.now())
+                cycleSocket(socket, reason: .pathRestored, dial: epoch, attempt: reconnectAttempt, since: timing.now())
             }
             wakeRetry()
         case .lost:
@@ -57,7 +56,10 @@ extension HostConnection {
         // Owned, not awaited: a send that never returns is what
         // `handover-send-stalled` names, and awaiting it here would hide the
         // deadline behind it (#107's defect). Cancelling the socket is what
-        // releases a real one.
+        // releases a real one; any send still here belongs to a challenge
+        // already judged, and our claim on it ends now, so one challenge
+        // owns one send.
+        handoverSend?.cancel()
         handoverSend = Task { [weak self, weak socket] in
             try? await socket?.ping(payload: payload)
             guard let self, handover?.payload == payload else { return }

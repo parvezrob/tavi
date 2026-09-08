@@ -236,16 +236,20 @@ final class HeldEventsSocket: HostEventsSocketing, @unchecked Sendable {
     }
 
     private let lock = NSLock()
+    private let now: @Sendable () -> ContinuousClock.Instant
     private var script: [Line]
     private var holds: [CheckedContinuation<Void, Never>] = []
     private var normalCloseCount = 0
 
-    init(_ script: Line...) {
+    // A suite with a clock of its own hands it in: a socket whose "now" is
+    // the wall's would age against a link that is being aged by hand.
+    init(now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock().now }, _ script: Line...) {
+        self.now = now
         self.script = script
     }
 
-    var lastActivity: ContinuousClock.Instant { ContinuousClock().now }
-    var lastFrameAt: ContinuousClock.Instant { ContinuousClock().now }
+    var lastActivity: ContinuousClock.Instant { now() }
+    var lastFrameAt: ContinuousClock.Instant { now() }
 
     // Closing the socket the ordinary way is the last thing `streamOnce`
     // does, so this is a test's proof that a dial has fully unwound —

@@ -37,7 +37,7 @@ struct HostConnectionRetryWakeTests {
     // count stays, so the dial after it is still the second in the schedule.
     @Test func aWakeDuringTheRetryDelayDialsNowAndKeepsTheAttemptCount() async throws {
         let clock = ManualTerminalClock()
-        let sockets = HeldEventsSockets(HeldEventsSocket(.drop), HeldEventsSocket(.drop))
+        let sockets = HeldEventsSockets(HeldEventsSocket(now: clock.timing.now, .drop), HeldEventsSocket(now: clock.timing.now, .drop))
         let connection = try link(sockets, clock)
         defer {
             connection.stop()
@@ -52,7 +52,7 @@ struct HostConnectionRetryWakeTests {
 
     @Test func aDelayNobodyWakesDialsAgainWhenItElapses() async throws {
         let clock = ManualTerminalClock()
-        let sockets = HeldEventsSockets(HeldEventsSocket(.drop))
+        let sockets = HeldEventsSockets(HeldEventsSocket(now: clock.timing.now, .drop))
         let connection = try link(sockets, clock)
         defer {
             connection.stop()
@@ -67,7 +67,7 @@ struct HostConnectionRetryWakeTests {
 
     @Test func stoppingDuringTheRetryDelayNeverDialsAgain() async throws {
         let clock = ManualTerminalClock()
-        let sockets = HeldEventsSockets(HeldEventsSocket(.drop))
+        let sockets = HeldEventsSockets(HeldEventsSocket(now: clock.timing.now, .drop))
         let connection = try link(sockets, clock)
         defer { sockets.releaseHolds() }
 
@@ -82,7 +82,7 @@ struct HostConnectionRetryWakeTests {
     // the previous one dies with it rather than dialling it once more.
     @Test func reconfiguringDuringTheRetryDelayEndsTheOldWait() async throws {
         let clock = ManualTerminalClock()
-        let sockets = HeldEventsSockets(HeldEventsSocket(.drop), HeldEventsSocket(.hold))
+        let sockets = HeldEventsSockets(HeldEventsSocket(now: clock.timing.now, .drop), HeldEventsSocket(now: clock.timing.now, .hold))
         let connection = try link(sockets, clock)
         defer {
             connection.stop()
@@ -100,7 +100,7 @@ struct HostConnectionRetryWakeTests {
     // and waits its own delay out.
     @Test func aWakeBeforeTheWaitRegistersSkipsThatDialsDelayOnly() async throws {
         let clock = ManualTerminalClock()
-        let sockets = HeldEventsSockets(HeldEventsSocket(.hold, .drop), HeldEventsSocket(.hold, .drop))
+        let sockets = HeldEventsSockets(HeldEventsSocket(now: clock.timing.now, .hold, .drop), HeldEventsSocket(now: clock.timing.now, .hold, .drop))
         let connection = try link(sockets, clock)
         defer {
             connection.stop()

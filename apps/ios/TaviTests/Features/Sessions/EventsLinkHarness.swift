@@ -24,6 +24,16 @@ enum EventsLinkDefaults {
         multiplier: 2,
         connectDeadline: .seconds(5)
     )
+    // A first step nowhere near the 2 s handover budget, for the one test
+    // that has to tell a dead dial's deadline from the delay before its
+    // replacement.
+    static let wideSchedule = ReconnectPolicy(
+        initialDelay: .seconds(6),
+        maximumDelay: .seconds(10),
+        multiplier: 2,
+        connectDeadline: .seconds(60)
+    )
+    static let wideFirstDelay = Duration.milliseconds(4_800)...Duration.seconds(6)
     // The schedule's first three steps, less up to 20 % of jitter: which one
     // the link is sitting out is how a test reads its attempt count.
     static let firstDelay = Duration.milliseconds(1_600)...Duration.seconds(2)
@@ -110,13 +120,34 @@ func eventsLink(
 }
 
 // Some of what these suites wait for crosses an actor hop to the stub host
-// and back — a probe answer, the verdict behind it — and yielding alone does
-// not always give that time. The condition is still the fact under test; only
-// the waiting is by the clock on the wall.
+// and back — a probe answer, the verdict behind it — and `waitFor`'s budget
+// of yields can be spent before the hop has been scheduled at all, since a
+// yield costs no time. Only the polling is by the wall clock here: every
+// deadline the link is under is still crossed on `ConnectionTiming`, and the
+// condition is still the fact under test.
 @MainActor
 func waitForAnswer(_ condition: () async -> Bool) async throws {
     for _ in 0..<600 {
         if await condition() { return }
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    throw TerminalTestFailure()
+}
+
+// The retry delay a dial is sitting out, released once it is really there.
+// A challenge deadline can be the same length as the first step of the
+// schedule, and it may still be on the clock when the dial that armed it
+// ends — so the test releases until the redial happens rather than assuming
+// which wait it found.
+@MainActor
+func releaseRetryDelay(
+    _ scene: EventsScene,
+    _ window: ClosedRange<Duration>,
+    untilDials dials: Int
+) async throws {
+    for _ in 0..<600 {
+        if scene.socket.resumes >= dials { return }
+        try? await scene.clock.resumeAll(within: window)
         try await Task.sleep(for: .milliseconds(5))
     }
     throw TerminalTestFailure()

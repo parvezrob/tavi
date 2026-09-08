@@ -148,14 +148,18 @@ final class FakeEventsSocket: HostEventsSocketing, @unchecked Sendable {
     }
 
     private let lock = NSLock()
+    private let now: @Sendable () -> ContinuousClock.Instant
     private var script: [Line]
 
-    init(_ script: Line...) {
+    // A suite with a clock of its own hands it in, so the socket ages with
+    // the link rather than with the wall.
+    init(now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock().now }, _ script: Line...) {
+        self.now = now
         self.script = script
     }
 
-    var lastActivity: ContinuousClock.Instant { ContinuousClock().now }
-    var lastFrameAt: ContinuousClock.Instant { ContinuousClock().now }
+    var lastActivity: ContinuousClock.Instant { now() }
+    var lastFrameAt: ContinuousClock.Instant { now() }
 
     func resume() {}
 

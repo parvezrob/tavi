@@ -67,6 +67,8 @@ final class RecoveryLog {
         case firstFrameDeadline
         // The 2 s challenge after a network path change went unanswered.
         case handover(HandoverMiss)
+        // A path that came back cut the socket waiting on the old one.
+        case pathRestored
         case none
     }
 

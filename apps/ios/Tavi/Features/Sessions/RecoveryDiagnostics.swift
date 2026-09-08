@@ -209,6 +209,7 @@
             case .watchdog: "watchdog"
             case .firstFrameDeadline: "first-frame-deadline"
             case let .handover(miss): miss.rawValue
+            case .pathRestored: "path-restored"
             case .none: "none"
             }
         }
