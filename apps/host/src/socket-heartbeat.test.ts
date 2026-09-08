@@ -426,6 +426,7 @@ test("the log names the heartbeat terminate, and carries no token or frame", { t
     const closed = line(written, "socket closed");
     assert.match(closed, /^tavi info socket: socket closed kind="events"/);
     assert.match(closed, /code=1006/);
+    assert.match(closed, /reason="abnormal"/);
     assert.match(closed, /byHost=true/);
     assert.ok(!written.includes(config.token), "the credential must never reach the log");
   } finally {
@@ -433,7 +434,7 @@ test("the log names the heartbeat terminate, and carries no token or frame", { t
   }
 });
 
-test("the log names a phone's own close, with its code, reason and how long it was open", async () => {
+test("the log names a phone's own close by the host's own reason code, never the phone's words", async () => {
   const harness = new TerminalHarness();
   const server = await harness.startServer();
 
@@ -441,25 +442,58 @@ test("the log names a phone's own close, with its code, reason and how long it w
     const written = await hostLog(async () => {
       const websocket = openEvents(server, { autoPong: true });
       await once(websocket, "open");
-      websocket.close(4000, "phone went to sleep");
+      // A close code the host has no name for, carrying text a buggy — or
+      // hostile — phone could have put anything in, including its own
+      // credential. The words must not reach the log at any length.
+      websocket.close(4000, `phone went to sleep ${config.token}`);
       await once(websocket, "close");
       await settle();
     });
 
     const opened = line(written, "socket opened");
     assert.match(opened, /^tavi info socket: socket opened kind="events"/);
-    assert.match(opened, /path="\/api\/events"/);
     assert.match(opened, /protocol="tavi\.events\.v1"/);
+    assert.ok(!opened.includes("path="), "the request's own path is not the host's to log");
 
     const closed = line(written, "socket closed");
     assert.match(closed, /code=4000/);
-    assert.match(closed, /reason="phone went to sleep"/);
+    assert.match(closed, /reason="other"/, "an unknown code is named `other` and keeps its number");
+    assert.ok(!closed.includes("phone went to sleep"), "the peer's close text never reaches the log");
     assert.match(closed, /byHost=false/, "a close the phone chose is not the host's");
     assert.match(closed, /openMs=\d+/);
 
     // Nothing that identifies the person or repeats what crossed the wire.
     assert.ok(!written.includes(config.token), "the credential must never reach the log");
     assert.ok(!written.includes('"type":"agents"'), "no frame body belongs in the log");
+  } finally {
+    await close(server);
+  }
+});
+
+test("every close code the host names has one fixed word for it", async () => {
+  const harness = new TerminalHarness();
+  const server = await harness.startServer();
+  const named: Array<[number, string]> = [
+    [1000, "normal"],
+    [1001, "going-away"],
+    [1008, "policy"],
+    [1011, "internal"],
+  ];
+
+  try {
+    for (const [code, reason] of named) {
+      const written = await hostLog(async () => {
+        const websocket = openEvents(server, { autoPong: true });
+        await once(websocket, "open");
+        websocket.close(code, "whatever the peer felt like saying");
+        await once(websocket, "close");
+        await settle();
+      });
+      const closed = line(written, "socket closed");
+      assert.match(closed, new RegExp(`code=${code} `), `code ${code}`);
+      assert.match(closed, new RegExp(`reason="${reason}"`), `code ${code}`);
+      assert.ok(!closed.includes("whatever the peer"), `code ${code} must drop the peer's text`);
+    }
   } finally {
     await close(server);
   }

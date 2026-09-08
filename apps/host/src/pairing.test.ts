@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -17,6 +17,17 @@ const DEVICES_FILE = "devices.json";
 
 function scratch(): string {
   return mkdtempSync(path.join(tmpdir(), "tavi-pairing-"));
+}
+
+// The registry's own default signature, so a test that injects the stat seam
+// still answers what an uninjected one would everywhere it is not interfering.
+function fileSignature(file: string): string {
+  try {
+    const status = statSync(file);
+    return `${status.mtimeMs}:${status.size}:${status.ino}`;
+  } catch {
+    return "";
+  }
 }
 
 test("a paired phone's credential authorizes it and nothing else does", () => {
@@ -261,7 +272,7 @@ test("a write this host makes is built on the file, so another process's changes
   assert.ok(other.authorize(kept.credential), "the other process's phone must survive");
 });
 
-test("a writer that does not take the lock cannot undo a revoke, and both intents survive (#68)", () => {
+test("a revoke that lands between a write's read and its rename keeps the credential dead (#68)", () => {
   const stateDir = scratch();
   const devices = path.join(stateDir, DEVICES_FILE);
   const tick = 0;
@@ -271,111 +282,156 @@ test("a writer that does not take the lock cannot undo a revoke, and both intent
     () => {},
   );
   const revoked = registry.add("revoked");
-  const kept = registry.add("kept");
-  assert.equal(registry.revoke(revoked.device.id), true);
+  registry.add("kept");
 
-  // A writer that ignores the lock — an older `tavi`, or someone editing the
-  // file — lands between this registry's read and its rename. A second
-  // `DeviceRegistry` could no longer do this: it would wait for the lock.
+  // The interleaving a lock was supposed to prevent and could not: this
+  // writer has already read [revoked, kept] and computed [revoked, kept,
+  // added] when another process revokes. Its stat is the seam — the second
+  // one it makes is the check `writeStateFile` runs immediately before the
+  // rename, so a foreign write performed there lands exactly between the read
+  // this write was computed from and the swap that would resurrect it.
+  let stats = 0;
   let interleaved = false;
-  const interleaving = new DeviceRegistry(
+  const writer = new DeviceRegistry(
     stateDir,
     () => new Date(tick),
     () => {},
     readStateFile,
     (file) => {
-      if (!interleaved && file === devices && existsSync(`${devices}.lock`)) {
+      stats += 1;
+      if (file === devices && stats === 2) {
         interleaved = true;
-        const current = JSON.parse(readFileSync(devices, "utf8")) as { version: number; devices: unknown[] };
-        writeStateFile(devices, { ...current, devices: [...current.devices, { intruder: true }] });
+        assert.equal(registry.revoke(revoked.device.id), true, "the foreign revoke must itself land");
       }
-      try {
-        const status = statSync(file);
-        return `${status.mtimeMs}:${status.size}:${status.ino}`;
-      } catch {
-        return "";
-      }
+      return fileSignature(file);
     },
   );
-  interleaving.add("added");
+  writer.add("added");
 
-  assert.ok(interleaved, "the test must actually have written between the read and the rename");
-  assert.equal(registry.authorize(revoked.credential), undefined, "the revoked credential must stay revoked");
-  assert.ok(registry.authorize(kept.credential), "the phone nobody touched must survive");
+  assert.ok(interleaved, "the test must actually have revoked between the read and the rename");
+  assert.equal(
+    new DeviceRegistry(
+      stateDir,
+      () => new Date(tick),
+      () => {},
+    ).authorize(revoked.credential),
+    undefined,
+    "the revoked credential must stay revoked, however the write that raced it finished",
+  );
   assert.deepEqual(
-    registry
+    writer
       .list()
       .map((entry) => entry.name)
       .sort(),
     ["added", "kept"],
-    "the file is the union of both intents, not one of them",
+    "and the retry rebuilds on the file the revoke left, so both intents survive",
   );
 });
 
-test("a write holds the device-list lock for its whole read-modify-write and releases it after (#68)", () => {
+test("a write that keeps losing the race gives up with an error instead of looping (#68)", () => {
   const stateDir = scratch();
-  const lock = `${path.join(stateDir, DEVICES_FILE)}.lock`;
+  const devices = path.join(stateDir, DEVICES_FILE);
   const tick = 0;
-  const held: boolean[] = [];
   const registry = new DeviceRegistry(
     stateDir,
     () => new Date(tick),
     () => {},
+  );
+  const { credential } = registry.add("phone");
+  const before = readFileSync(devices, "utf8");
+
+  // A file that moves under every single attempt. Three of those is a
+  // permanent failure, not a reason to keep trying.
+  let swaps = 0;
+  const loser = new DeviceRegistry(
+    stateDir,
+    () => new Date(tick),
+    () => {},
+    readStateFile,
     (file) => {
-      held.push(existsSync(lock));
-      return readStateFile(file);
+      if (file === devices && swaps < 100) {
+        swaps += 1;
+        writeStateFile(devices, JSON.parse(readFileSync(devices, "utf8")) as unknown);
+      }
+      return fileSignature(file);
     },
   );
 
-  const { credential } = registry.add("phone");
-  assert.deepEqual(held, [true], "the read a write is computed from happens inside the lock");
-  assert.equal(existsSync(lock), false, "and the lock is gone once the write is done");
-
-  // A read path is not a writer and must never queue behind one.
-  held.length = 0;
-  assert.ok(registry.authorize(credential));
-  assert.deepEqual(held, [false]);
+  assert.throws(() => loser.add("never lands"), /another process changed it during each of 3 attempts/);
+  assert.ok(swaps < 100, "it stopped on its own rather than being stopped by the counter");
+  assert.deepEqual(
+    registry.list().map((entry) => entry.name),
+    ["phone"],
+    "and wrote nothing: the list is the one the winners left",
+  );
+  assert.ok(registry.authorize(credential), "the phone nobody touched must survive a write that gave up");
+  assert.equal(readFileSync(devices, "utf8"), before, "byte for byte the file it started from");
 });
 
-test("a lock left behind by a process that died is taken over, not waited on for ever (#68)", () => {
+test("no lock file is taken, waited on or left behind, and a stale one from an older Tavi stops nothing (#68)", () => {
   const stateDir = scratch();
+  const devices = path.join(stateDir, DEVICES_FILE);
   const tick = 0;
   const registry = new DeviceRegistry(
     stateDir,
     () => new Date(tick),
     () => {},
   );
-  const { device, credential } = registry.add("phone");
-  const lock = `${path.join(stateDir, DEVICES_FILE)}.lock`;
+  const first = registry.add("first");
+  const second = registry.add("second");
 
-  // Eleven seconds old: no write takes that long, so whoever wrote it is gone.
-  writeFileSync(lock, `999999 ${Date.now() - 11_000}\n`, "utf8");
-  assert.equal(registry.revoke(device.id), true);
-  assert.equal(registry.authorize(credential), undefined);
-  assert.equal(existsSync(lock), false, "the taken-over lock is released like any other");
-});
-
-test("a lock a live process is holding is waited for, then refused rather than forced (#68)", () => {
-  const stateDir = scratch();
-  const tick = 0;
-  const registry = new DeviceRegistry(
-    stateDir,
-    () => new Date(tick),
-    () => {},
-  );
-  const { device, credential } = registry.add("phone");
-  const lock = `${path.join(stateDir, DEVICES_FILE)}.lock`;
-  writeFileSync(lock, `${process.pid} ${Date.now()}\n`, "utf8");
+  // Exactly what an older Tavi holding the lock looked like: fresh, so the
+  // stale takeover would not have fired, and owned by a pid that is not ours.
+  // A host that still waited for this would stall every mutation for seconds
+  // and then refuse; this one must not notice it at all.
+  writeFileSync(`${devices}.lock`, `999999 ${Date.now()}\n`, "utf8");
 
   const startedAt = Date.now();
-  assert.throws(() => registry.revoke(device.id), /another Tavi process is holding it/);
-  const waited = Date.now() - startedAt;
-  assert.ok(waited >= 2_000, `gave up after ${waited} ms without waiting out the bound`);
+  assert.equal(registry.revoke(first.device.id), true, "a revoke must not wait for anyone's lock");
+  registry.add("third");
+  assert.equal(registry.authorize(first.credential), undefined);
+  assert.ok(registry.authorize(second.credential));
+  assert.equal(registry.list().length, 2);
+  const elapsed = Date.now() - startedAt;
+  assert.ok(elapsed < 1_000, `waited ${elapsed} ms — something is still sleeping on a lock`);
 
-  // Refusing is not the same as damaging: the list is untouched and the read
-  // paths never noticed, because they never wanted the lock.
-  assert.ok(registry.authorize(credential));
-  assert.equal(registry.list().length, 1);
+  // And nothing of our own was created beside the list: no lock to leak, and
+  // no temporary file left over from an abandoned swap.
+  assert.deepEqual(
+    readdirSync(stateDir)
+      .filter((name) => name !== DEVICES_FILE && name !== `${DEVICES_FILE}.lock`)
+      .sort(),
+    [],
+    "a mutation leaves nothing beside devices.json",
+  );
+});
+
+test("authorize and list never write the device list and never wait on one (#68)", () => {
+  const stateDir = scratch();
+  const devices = path.join(stateDir, DEVICES_FILE);
+  let tick = 0;
+  const registry = new DeviceRegistry(
+    stateDir,
+    () => new Date(tick),
+    () => {},
+  );
+  const { credential } = registry.add("phone");
+  const before = fileSignature(devices);
+
+  // The 2 s credential recheck, a few hundred times over, plus the listing a
+  // person asks for. Read paths were never writers and must never become
+  // them, whatever the state of the directory around them.
+  writeFileSync(`${devices}.lock`, `999999 ${Date.now()}\n`, "utf8");
+  const startedAt = Date.now();
+  for (let i = 0; i < 300; i += 1) {
+    tick += 2_000;
+    assert.ok(registry.authorize(credential));
+    assert.equal(registry.list().length, 1);
+  }
+  const elapsed = Date.now() - startedAt;
+
+  assert.equal(fileSignature(devices), before, "not one read path wrote the file that decides access");
+  assert.ok(elapsed < 1_000, `600 reads took ${elapsed} ms — a read is blocking on something`);
 });
 
 test("a read that fails once is not cached: the next recheck tries again (#68)", () => {

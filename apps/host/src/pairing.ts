@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { statSync } from "node:fs";
 import path from "node:path";
-import { withDeviceListLock, readLastSeen, writeLastSeen } from "./devices-file.js";
+import { readLastSeen, writeLastSeen } from "./devices-file.js";
 import { log } from "./log.js";
 import { readStateFile, type StateFileRead, writeStateFile } from "./state-file.js";
 
@@ -203,11 +203,15 @@ export class DeviceRegistry {
     }
   }
 
+  // Read-modify-write made safe by comparison, not by exclusion: read fresh,
+  // compute from what the file holds, and swap only if it is still the file
+  // that was read — so a `tavi devices revoke` landing between the two makes
+  // this attempt abandon its rename and start again from the list that revoke
+  // left, and the revoked credential stays dead. No lock: a lock has states of
+  // its own to get wrong (a dead holder, an unreadable file, an ownerless one
+  // a failed write left) and something has to wait on it. Losing every attempt
+  // is an error a person is told, never a loop.
   private mutate(change: (devices: StoredDevice[]) => StoredDevice[] | undefined): void {
-    withDeviceListLock(this.file, () => this.mutateLocked(change));
-  }
-
-  private mutateLocked(change: (devices: StoredDevice[]) => StoredDevice[] | undefined): void {
     for (let attempt = 0; attempt < WRITE_ATTEMPT_LIMIT; attempt += 1) {
       const signature = this.stat(this.file);
       const devices = this.reload(this.now().getTime(), signature);
@@ -220,7 +224,8 @@ export class DeviceRegistry {
       if (next === undefined) return;
       if (this.save(next, signature)) return;
     }
-    throw new Error(`Tavi could not update the paired devices (${this.file}): the file kept changing underneath it.`);
+    const kept = `another process changed it during each of ${WRITE_ATTEMPT_LIMIT} attempts, so nothing was written`;
+    throw new Error(`Tavi could not update the paired devices (${this.file}): ${kept}. Try again.`);
   }
 
   private get file(): string {

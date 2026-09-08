@@ -10,14 +10,39 @@ import { log } from "./log.js";
 // is read over someone's shoulder and pasted into issues. Nothing here fires
 // per frame; the only recurring line is the census, and its caller gates it to
 // once a minute.
+//
+// Nothing the peer chose the text of is ever written. A close frame's reason
+// and a request's path are both strings the other side composes, and a phone
+// with a bug — or a phone that is not ours — can put a credential in either;
+// truncating such a string only shortens the credential. So a close is logged
+// as one of the reason codes below, chosen by the host from the numeric code,
+// and a socket is named by the route the host matched it to (`kind`), never by
+// the path the request asked for. `protocol` is safe for the same reason: the
+// server's `handleProtocols` answers with one of its own constants or refuses
+// the handshake, so it is never the peer's string either.
 
 export type SocketKind = "events" | "terminal";
 
 const COMPONENT = "socket";
-// A close reason is the peer's own text. It is bounded to 123 bytes on the
-// wire and cut further here: the log wants to know why, not to carry a string
-// somebody else chose the length of.
-const MAX_REASON_CHARACTERS = 80;
+
+// The host's own vocabulary for why a socket closed. The numeric code is
+// logged beside it, so `other` still says exactly which code arrived — it just
+// never carries the words that came with it.
+const CLOSE_REASONS = new Map<number, string>([
+  [1000, "normal"],
+  [1001, "going-away"],
+  [1002, "protocol-error"],
+  [1005, "no-status"],
+  [1006, "abnormal"],
+  [1008, "policy"],
+  [1009, "too-large"],
+  [1011, "internal"],
+  [4401, "revoked"],
+]);
+
+function closeReason(code: number): string {
+  return CLOSE_REASONS.get(code) ?? "other";
+}
 
 const openedAt = new WeakMap<WebSocket, number>();
 const deviceOf = new WeakMap<WebSocket, string>();
@@ -29,26 +54,25 @@ let lastCensus = "";
 export function socketOpened(
   websocket: WebSocket,
   kind: SocketKind,
-  details: { device: string; path: string; protocol: string },
+  details: { device: string; protocol: string },
 ): void {
   openedAt.set(websocket, Date.now());
   deviceOf.set(websocket, details.device);
-  log.info(COMPONENT, "socket opened", {
-    kind,
-    device: details.device,
-    path: details.path,
-    protocol: details.protocol,
-  });
+  // `kind` is the route: the host matched the upgrade to one of exactly two
+  // handlers, and that is the whole of what the request's path could have
+  // told anyone here.
+  log.info(COMPONENT, "socket opened", { kind, device: details.device, protocol: details.protocol });
 }
 
-export function socketClosed(websocket: WebSocket, kind: SocketKind, code: number, reason: string): void {
+/** `code` is the peer's close code; the words it sent with it are dropped. */
+export function socketClosed(websocket: WebSocket, kind: SocketKind, code: number): void {
   const opened = openedAt.get(websocket);
   openedAt.delete(websocket);
   log.info(COMPONENT, "socket closed", {
     kind,
     device: deviceOf.get(websocket) ?? "unknown",
     code,
-    reason: reason.slice(0, MAX_REASON_CHARACTERS),
+    reason: closeReason(code),
     openMs: opened === undefined ? 0 : Date.now() - opened,
     byHost: endedByHost.has(websocket),
   });

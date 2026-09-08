@@ -153,14 +153,10 @@ export async function createTaviServer(options: TaviServerOptions) {
     // The device's public id, never its credential. The host's own token is a
     // person at a terminal, not a paired phone, and says so.
     const device = devices.authorize(token ?? "")?.id ?? (isAuthorized(token, config.token) ? "host-token" : "unknown");
-    socketOpened(websocket, kind, {
-      device,
-      // Path only: a terminal's query carries its resume epoch, which is
-      // nobody's business in a log.
-      path: (request.url ?? "").split("?")[0] ?? "",
-      protocol: websocket.protocol,
-    });
-    websocket.once("close", (code: number, reason: Buffer) => socketClosed(websocket, kind, code, reason.toString()));
+    // No part of `request.url` goes to the log: the path is the phone's own
+    // string, and `kind` already says which of the host's two routes answered.
+    socketOpened(websocket, kind, { device, protocol: websocket.protocol });
+    websocket.once("close", (code: number) => socketClosed(websocket, kind, code));
     const timer = setInterval(() => {
       if (credentialAuthorized(token)) return;
       clearInterval(timer);
