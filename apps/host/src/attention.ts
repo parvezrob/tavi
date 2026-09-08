@@ -218,6 +218,10 @@ export class AttentionReconciler {
 export class AttentiveAgentEvents implements AgentEventSource {
   private readonly listeners = new Set<AgentsListener>();
   private detach: (() => void) | undefined;
+  // The last merged snapshot and the exact text it was sent as, so a phone
+  // arriving later is replayed that text rather than a fresh serialization
+  // of the same thing.
+  private published: { snapshot: HerdrAgentsSnapshot; frame: string } | undefined;
 
   constructor(
     private readonly inner: AgentEventSource,
@@ -225,6 +229,7 @@ export class AttentiveAgentEvents implements AgentEventSource {
   ) {}
 
   get latest(): HerdrAgentsSnapshot | undefined {
+    if (this.published) return this.published.snapshot;
     const snapshot = this.inner.latest;
     return snapshot ? this.merge(snapshot) : undefined;
   }
@@ -239,16 +244,17 @@ export class AttentiveAgentEvents implements AgentEventSource {
 
   // One inner subscription for every phone, not one each: this wrapper merges
   // and serializes once per snapshot it publishes, never once per socket
-  // (#68 finding 2). The feed underneath serializes its own pre-merge frame
-  // for change detection, so a snapshot costs two envelopes in production —
-  // two publishers, not two phones.
+  // (#68 finding 2), and a phone that arrives later is replayed that same
+  // text. The feed underneath serializes its own pre-merge frame for change
+  // detection, so a snapshot costs two envelopes in production — two
+  // publishers, not two phones.
   subscribe(listener: AgentsListener): () => void {
     // Attach before the listener joins, so the inner feed's replay lands on
     // nobody and every subscriber is replayed the same way, right below.
     if (this.detach === undefined) this.attach();
     this.listeners.add(listener);
-    const snapshot = this.latest;
-    if (snapshot) listener(snapshot, agentsFrame(snapshot));
+    const published = this.published ?? this.rememberLatest();
+    if (published) listener(published.snapshot, published.frame);
     return () => {
       this.listeners.delete(listener);
       if (this.listeners.size > 0) return;
@@ -270,9 +276,23 @@ export class AttentiveAgentEvents implements AgentEventSource {
   }
 
   private fanOut(snapshot: HerdrAgentsSnapshot): void {
-    if (this.listeners.size === 0) return;
+    if (this.listeners.size === 0) {
+      // Nobody to send to, and maybe nobody ever: the envelope this would
+      // build is left to the first subscriber that actually needs one.
+      this.published = undefined;
+      return;
+    }
     const frame = agentsFrame(snapshot);
+    this.published = { snapshot, frame };
     for (const listener of [...this.listeners]) listener(snapshot, frame);
+  }
+
+  private rememberLatest(): { snapshot: HerdrAgentsSnapshot; frame: string } | undefined {
+    const snapshot = this.inner.latest;
+    if (!snapshot) return undefined;
+    const merged = this.merge(snapshot);
+    this.published = { snapshot: merged, frame: agentsFrame(merged) };
+    return this.published;
   }
 
   merge(snapshot: HerdrAgentsSnapshot): HerdrAgentsSnapshot {

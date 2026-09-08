@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { statSync } from "node:fs";
 import path from "node:path";
+import { withDeviceListLock, readLastSeen, writeLastSeen } from "./devices-file.js";
 import { log } from "./log.js";
 import { readStateFile, type StateFileRead, writeStateFile } from "./state-file.js";
 
@@ -10,6 +11,11 @@ import { readStateFile, type StateFileRead, writeStateFile } from "./state-file.
 // revoked on the host without touching any other phone.
 
 const DEVICES_FILE_NAME = "devices.json";
+// Last-seen lives in its own file (#68). It is the only thing a *read* path
+// ever wanted to write, and writing it into the device list meant a phone
+// connecting could rewrite the list — undoing a revoke another process had
+// just made. Nothing on the authorize path reads this file.
+const SEEN_FILE_NAME = "devices-seen.json";
 const IDENTITY_FILE_NAME = "identity.json";
 const DEVICES_SCHEMA_VERSION = 1;
 const IDENTITY_SCHEMA_VERSION = 1;
@@ -34,6 +40,11 @@ const LAST_SEEN_WRITE_INTERVAL_MILLISECONDS = 60_000;
 // share it — so size and inode ride along, and the list is re-read anyway
 // this often, which bounds any signal all three could still miss.
 const DEVICE_REREAD_INTERVAL_MILLISECONDS = 30_000;
+// How many times a read-modify-write retries when the file moved underneath
+// it. Three is generous: the only other writer is a `tavi devices` command a
+// person typed, so a second collision is already a surprise and a third is a
+// reason to stop rather than to loop.
+const WRITE_ATTEMPT_LIMIT = 3;
 
 interface DeviceCache {
   devices: StoredDevice[];
@@ -93,6 +104,7 @@ function fileSignature(file: string): string {
 // The persisted set of phones allowed in, and the host's identity key.
 export class DeviceRegistry {
   private lastSeenWrittenAt = new Map<string, number>();
+  private readonly lastSeen = new Map<string, string>();
   private cache: DeviceCache | undefined;
 
   constructor(
@@ -121,8 +133,16 @@ export class DeviceRegistry {
     return { fingerprint: fingerprintOf(key) };
   }
 
+  // The only place last-seen is joined back on: a list is asked for by a
+  // person, not by a socket on a 2 s clock.
   list(): PairedDevice[] {
-    return this.load().map(({ credentialHash: _hash, ...device }) => device);
+    const seen = readLastSeen(this.seenFile);
+    return this.load().map(({ credentialHash: _hash, ...device }) => {
+      // Newest first: this process, then the file, then the stamp an older
+      // Tavi left inside the device list itself.
+      const lastSeenAt = this.lastSeen.get(device.id) ?? seen[device.id] ?? device.lastSeenAt;
+      return lastSeenAt === undefined ? device : { ...device, lastSeenAt };
+    });
   }
 
   // The device a credential belongs to, or undefined. Constant-time on the
@@ -141,7 +161,6 @@ export class DeviceRegistry {
   // Mints and stores a credential for a newly paired phone. The credential
   // is returned exactly once; only its hash is kept.
   add(name: string): { device: PairedDevice; credential: string } {
-    const devices = this.reload();
     const credential = randomBytes(32).toString("base64url");
     const stored: StoredDevice = {
       id: randomBytes(6).toString("hex"),
@@ -149,7 +168,7 @@ export class DeviceRegistry {
       pairedAt: this.now().toISOString(),
       credentialHash: hashCredential(credential),
     };
-    this.save([...devices, stored]);
+    this.mutate((devices) => [...devices, stored]);
     const { credentialHash: _hash, ...device } = stored;
     return { device, credential };
   }
@@ -157,29 +176,59 @@ export class DeviceRegistry {
   // Revoke by id or (unique) name. Returns false if nothing matched, so the
   // CLI can say so instead of pretending.
   revoke(idOrName: string): boolean {
-    const devices = this.reload();
-    const kept = devices.filter((device) => device.id !== idOrName && device.name !== idOrName);
-    if (kept.length === devices.length) return false;
-    this.save(kept);
-    return true;
+    let removed = false;
+    this.mutate((devices) => {
+      const kept = devices.filter((device) => device.id !== idOrName && device.name !== idOrName);
+      removed = kept.length !== devices.length;
+      return removed ? kept : undefined;
+    });
+    return removed;
   }
 
+  // In memory always, on disk at most once a minute per device, and never in
+  // devices.json — so the busiest path in the host has stopped being a writer
+  // of the file that decides who gets in.
   private touch(id: string): void {
     const nowMs = this.now().getTime();
+    this.lastSeen.set(id, new Date(nowMs).toISOString());
     const last = this.lastSeenWrittenAt.get(id) ?? 0;
     if (nowMs - last < LAST_SEEN_WRITE_INTERVAL_MILLISECONDS) return;
     this.lastSeenWrittenAt.set(id, nowMs);
-    const devices = this.reload();
-    const fresh = devices.find((device) => device.id === id);
-    // Gone from the file since the check above: a last-seen stamp must never
-    // be what puts a revoked phone back.
-    if (!fresh) return;
-    fresh.lastSeenAt = new Date(nowMs).toISOString();
-    this.save(devices);
+    try {
+      writeLastSeen(this.seenFile, { ...readLastSeen(this.seenFile), ...Object.fromEntries(this.lastSeen) });
+    } catch (error) {
+      // Informational, and nothing decides access on it: a phone gets in even
+      // when the stamp cannot be written.
+      this.report(`Tavi could not record when a phone was last seen (${this.seenFile}): ${describe(error)}.`);
+    }
+  }
+
+  private mutate(change: (devices: StoredDevice[]) => StoredDevice[] | undefined): void {
+    withDeviceListLock(this.file, () => this.mutateLocked(change));
+  }
+
+  private mutateLocked(change: (devices: StoredDevice[]) => StoredDevice[] | undefined): void {
+    for (let attempt = 0; attempt < WRITE_ATTEMPT_LIMIT; attempt += 1) {
+      const signature = this.stat(this.file);
+      const devices = this.reload(this.now().getTime(), signature);
+      // A list nobody could read is not a list to compute a write from:
+      // appending to it would drop every device the file actually holds.
+      if (devices === undefined) {
+        throw new Error(`Tavi could not read the paired devices (${this.file}), so it did not write them either.`);
+      }
+      const next = change(devices);
+      if (next === undefined) return;
+      if (this.save(next, signature)) return;
+    }
+    throw new Error(`Tavi could not update the paired devices (${this.file}): the file kept changing underneath it.`);
   }
 
   private get file(): string {
     return path.join(this.stateDir, DEVICES_FILE_NAME);
+  }
+
+  private get seenFile(): string {
+    return path.join(this.stateDir, SEEN_FILE_NAME);
   }
 
   // The paired list, from memory when the file is provably the one already
@@ -192,7 +241,7 @@ export class DeviceRegistry {
     if (cached && cached.signature === signature && nowMs - cached.readAtMs < DEVICE_REREAD_INTERVAL_MILLISECONDS) {
       return cached.devices;
     }
-    return this.reload(nowMs, signature);
+    return this.reload(nowMs, signature) ?? [];
   }
 
   // The list as the file has it, cache or no cache. Every mutation starts
@@ -203,18 +252,21 @@ export class DeviceRegistry {
   // The signature is taken before the read, so a write landing between the
   // two is cached under the older signature and re-read on the next call —
   // never the other way round.
-  private reload(nowMs = this.now().getTime(), signature = this.stat(this.file)): StoredDevice[] {
+  // Undefined when the file could not be read at all — which is not the same
+  // answer as "no devices", and callers that write must tell them apart.
+  private reload(nowMs = this.now().getTime(), signature = this.stat(this.file)): StoredDevice[] | undefined {
     const read = this.read(this.file);
     if (read.status === "unreadable") {
       // Failing closed here would lock every phone out because of a disk
       // hiccup; failing open would let anyone in. Neither: no devices
       // authorize until the file is readable again, and the log says why.
-      // Not cached either — one transient EIO must not lock every phone out
-      // until something else happens to change the file.
+      // Whatever was cached goes with it: keeping a warm list behind a failed
+      // read would answer from a list this registry can no longer confirm.
+      this.cache = undefined;
       this.report(
         `Tavi could not read the paired devices (${this.file}): ${read.reason}. No paired phone can connect until this is fixed.`,
       );
-      return [];
+      return undefined;
     }
     const devices = read.status === "missing" ? [] : this.parse(read.value);
     this.cache = { devices, readAtMs: nowMs, signature };
@@ -240,14 +292,22 @@ export class DeviceRegistry {
     );
   }
 
-  private save(devices: StoredDevice[]): void {
+  // Swaps the new list in only if the file is still the one `expected`
+  // describes. False means somebody else got there first and the caller must
+  // recompute; the file is untouched.
+  private save(devices: StoredDevice[], expected: string): boolean {
     try {
-      writeStateFile(this.file, { version: DEVICES_SCHEMA_VERSION, devices });
+      const written = writeStateFile(
+        this.file,
+        { version: DEVICES_SCHEMA_VERSION, devices },
+        () => this.stat(this.file) === expected,
+      );
       // Dropped, not replaced. A signature taken after the write cannot tell
       // this host's write from a foreign one that landed in the same window,
       // and caching the list under it would hide that foreign write for a
       // whole re-read interval. The next check pays one read instead.
       this.cache = undefined;
+      return written;
     } catch (error) {
       this.report(`Tavi could not save the paired devices (${this.file}): ${describe(error)}.`);
       throw error;

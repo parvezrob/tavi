@@ -31,6 +31,16 @@ function settle(): Promise<unknown> {
   return new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
 }
 
+// Resolves once the host has handled everything this client sent before the
+// call. Frames on one connection are ordered and the host auto-pongs a client
+// ping, so a completed round trip is proof the earlier frame was processed —
+// which a sleep only ever guessed at.
+async function handled(websocket: WebSocket): Promise<void> {
+  const answered = once(websocket, "pong");
+  websocket.ping();
+  await answered;
+}
+
 // A phone that answers no ping by itself, so the host's own count is what the
 // test measures.
 function openEvents(server: Server, options: WebSocket.ClientOptions = {}): WebSocket {
@@ -99,7 +109,6 @@ test("the events socket is pinged every 15 s and terminated after two unanswered
     // the socket is still up, because one missed ping is a slow network.
     clock.advance(INTERVAL);
     await waitUntil(() => pings === 2);
-    await settle();
     assert.equal(websocket.readyState, WebSocket.OPEN);
 
     // 45 s: the second miss. A terminate sends no close frame at all, which is
@@ -131,21 +140,22 @@ test("a pong resets the count, and one arriving at 44 s keeps the socket", { tim
     clock.advance(INTERVAL);
     await waitUntil(() => pings === 2);
 
-    // 44 s — one second before the terminate would land. The host has to see
-    // it, so the assertion below waits for the frame rather than the clock.
+    // 44 s: fourteen seconds after the miss and one before the terminate would
+    // land. The pong has to be in the host before the tick, so the round trip
+    // below is the barrier rather than a sleep.
+    clock.advance(INTERVAL - 1_000);
     websocket.pong();
-    await settle();
+    await handled(websocket);
 
-    clock.advance(INTERVAL);
+    // 45 s. It pings rather than terminating, so the outstanding ping is gone.
+    clock.advance(1_000);
     await waitUntil(() => pings === 3);
-    await settle();
     assert.equal(websocket.readyState, WebSocket.OPEN, "a pong at 44 s must have cleared both the miss and the count");
 
     // And the count really is back to zero: it takes two more silent intervals
     // to terminate, not one.
     clock.advance(INTERVAL);
     await waitUntil(() => pings === 4);
-    await settle();
     assert.equal(websocket.readyState, WebSocket.OPEN);
 
     const closed = once(websocket, "close");
@@ -391,23 +401,7 @@ test("a snapshot is serialized once per publisher, never once per phone, and eve
   const harness = new TerminalHarness();
   harness.agentEvents = new AttentiveAgentEvents(inner, new AttentionOverlay());
   const server = await harness.startServer();
-  const snapshot = (id: string) => ({
-    available: true,
-    agents: [
-      {
-        id,
-        agent: "claude",
-        status: "idle",
-        cwd: "/work",
-        title: "",
-        workspaceId: "wB",
-        tabId: "wB:t1",
-        focused: false,
-        revision: 1,
-        authority: "herdr",
-      },
-    ],
-  });
+  const snapshot = (id: string) => ({ available: true, agents: [{ id }] });
 
   try {
     const first: string[] = [];

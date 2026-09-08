@@ -32,7 +32,16 @@ export function readStateFile(file: string): StateFileRead {
   }
 }
 
-export function writeStateFile(file: string, value: unknown): void {
+/**
+ * Writes `value` to `file` through a temporary file and one atomic rename.
+ *
+ * `beforeSwap` is the last thing consulted before the rename, and returning
+ * false abandons the write (the temporary file is removed, the target is left
+ * alone). It is how a caller doing a read-modify-write can refuse to swap in a
+ * list computed from a version of the file somebody else has since replaced.
+ * Returns whether the swap happened.
+ */
+export function writeStateFile(file: string, value: unknown, beforeSwap?: () => boolean): boolean {
   const directory = path.dirname(file);
   const temporary = path.join(
     directory,
@@ -46,7 +55,9 @@ export function writeStateFile(file: string, value: unknown): void {
     fsyncSync(descriptor);
     closeSync(descriptor);
     descriptor = undefined;
+    if (beforeSwap && !beforeSwap()) return false;
     renameSync(temporary, file);
+    return true;
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
     try {

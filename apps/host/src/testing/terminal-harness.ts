@@ -13,7 +13,7 @@ import type { HerdrAgentSource } from "../herdr-types.js";
 import { EVENTS_PROTOCOL, OUTPUT_FRAME_HEADER_BYTES, OUTPUT_FRAME_TYPE, TERMINAL_PROTOCOL_V2 } from "../protocol.js";
 import { ProjectHistory } from "../projects.js";
 import { createTaviServer, type TaviServerOptions } from "../server.js";
-import type { ServerTerminalMessage } from "../types.js";
+import type { HerdrAgentInfo, ServerTerminalMessage } from "../types.js";
 import { testConfig } from "./config.js";
 
 // The real host on loopback with a fake pty behind it: what `server.v2.test.ts`
@@ -106,6 +106,24 @@ function fixtureHerdr(): HerdrAgentSource {
   };
 }
 
+// A published agent, with everything a test does not care about already
+// filled in — so a suite says `{ id: "wB:p1" }` and still hands the host a
+// real `HerdrAgentInfo`.
+export function fakeAgent(overrides: Partial<HerdrAgentInfo> & { id: string }): HerdrAgentInfo {
+  return {
+    agent: "claude",
+    status: "idle",
+    cwd: "/work",
+    title: "",
+    workspaceId: "wB",
+    tabId: "wB:t1",
+    focused: false,
+    revision: 1,
+    authority: "herdr",
+    ...overrides,
+  };
+}
+
 // An events feed a test publishes into by hand. It builds the wire frame the
 // way the real feed does, so a suite never re-states the envelope's shape.
 export class FakeAgentEvents implements AgentEventSource {
@@ -126,8 +144,12 @@ export class FakeAgentEvents implements AgentEventSource {
     return this.listeners.size;
   }
 
-  publish(snapshot: { available: boolean; reason?: string; agents: unknown[] }): void {
-    const published = snapshot as HerdrAgentsSnapshot;
+  publish(snapshot: {
+    available: boolean;
+    reason?: string;
+    agents: Array<Partial<HerdrAgentInfo> & { id: string }>;
+  }): void {
+    const published: HerdrAgentsSnapshot = { ...snapshot, agents: snapshot.agents.map(fakeAgent) };
     this.latest = published;
     const frame = agentsFrame(published);
     for (const listener of [...this.listeners]) listener(published, frame);

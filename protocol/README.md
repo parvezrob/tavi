@@ -311,9 +311,25 @@ frame that never arrived can leave nothing stale on screen. A decoder must read 
 | `agents` | array | the agents, empty when `available` is `false` |
 | `reason` | string, optional | why the list is unavailable, in words a person can read |
 
-`agents` entries carry the fields `GET /api/agents` documents above. Unknown fields are additive: decode the
-three named here, keep what you understand, and ignore the rest. A client sends nothing on this socket; a text
-or binary frame larger than 64 KiB closes it with `1009`.
+Each entry in `agents` is one herdr pane:
+
+| field | type | meaning |
+|---|---|---|
+| `id` | string | the herdr pane id, and the `{paneId}` the terminal WebSocket below takes |
+| `agent` | string | the agent kind herdr has for the pane (`claude`, `codex`, `shell`, …) |
+| `status` | string | herdr's verdict for the pane, or the agent's own when a hook asserted it |
+| `cwd` | string | the pane's working directory |
+| `title` | string | the pane title herdr reports |
+| `workspaceId`, `tabId` | string | where the pane sits in the tree `GET /api/herdr/tree` returns |
+| `tabLabel` | string, optional | the tab's current name, when it has one (see `PATCH /api/herdr/tabs/{tabId}`) |
+| `focused` | boolean | whether herdr has this pane in front on the Mac |
+| `revision` | number | herdr's revision for the pane |
+| `authority` | string | `herdr` for screen detection, `claude-hook` when the agent's own hooks asserted the status (#22) |
+| `sessionRef` | string, optional | the agent's own session id when herdr knows it |
+| `detectedAgent` | string, optional | what herdr's detection sees when it differs from `agent` (#66) |
+
+Unknown fields are additive: decode the ones you need, keep what you understand, and ignore the rest. A client
+sends nothing on this socket; a text or binary frame larger than 64 KiB closes it with `1009`.
 
 ### Liveness · host unreleased
 
@@ -457,7 +473,7 @@ The next protocol version adds a handshake, stable machine identity, per-device 
 
 Versions are the npm package `tavi-host`; a route is listed under the release that first shipped it (`git log -- apps/host/package.json` against the publish dates). Only releases that changed this document are listed — the others were host-side fixes.
 
-- **Unreleased** (renamed to the version it ships in at the next publish) — the events WebSocket is documented above for the first time, and gained a server heartbeat (#111, #68): the host pings every 15 s and terminates a socket after two unanswered pings, and the events server now refuses a client frame over 64 KiB with `1009`. Nothing on the wire changed for a phone that answers pings — which every WebSocket stack does by default — and the snapshot frame is unchanged. Two idle costs went with it: the 2 s credential recheck an open socket makes is answered from an in-memory device list that is re-read from `devices.json` only when the file itself changed, so every revocation — `DELETE /api/devices/{id}`, `DELETE /api/devices/me`, or `tavi devices revoke` in a separate process — still cuts a live socket off within one 2 s recheck; and one agents snapshot is serialized once per publisher instead of once per connected phone. Unchanged from the earlier Unreleased work — no read path reports a number git did not produce (#98, #103): `GET /api/repos` worktrees and `GET /api/worktrees/status` gained `aheadBehindFailed`, `GET /api/repos` worktrees also gained `dirtyFailed`, `GET /api/worktrees/pull-request` gained `unpushedFailed`, `POST /api/worktrees` gained `setupFilesFailed`, `POST /api/worktrees/commit` / `commit-message` answer `503` rather than "Nothing is staged" when `diff --cached` failed, and `POST /api/worktrees/pull-request` answers `503` naming the created pull request's link instead of inventing one numbered `0` when the read-back fails. Every new field is additive and optional, and the counts it qualifies keep their old zeros, so a phone built against 0.1.17 decodes the answers unchanged. `GET /api/herdr/tree` is now documented above as the route it has been since 0.1.0.
+- **Unreleased** (renamed to the version it ships in at the next publish) — the events WebSocket is documented above for the first time, and gained a server heartbeat (#111, #68): the host pings every 15 s and terminates a socket after two unanswered pings, and the events server now refuses a client frame over 64 KiB with `1009`. Nothing on the wire changed for a phone that answers pings — which every WebSocket stack does by default — and the snapshot frame is unchanged. Two idle costs went with it: the 2 s credential recheck an open socket makes is answered from an in-memory device list — every check stats `devices.json`, and the list is re-read when the file changed, after every write this host makes, and at least every 30 s regardless — so every revocation, `DELETE /api/devices/{id}` and `DELETE /api/devices/me` and `tavi devices revoke` alike, cuts a live socket off within one 2 s recheck. Every process that changes `devices.json` now does so under a lock file beside it and re-reads inside that lock, so two of them can no longer each write back what the other removed, and a phone's last-seen stamp moved out of `devices.json` into `devices-seen.json` — it was the one thing a read path ever wrote, and writing it could undo a revocation made meanwhile. One agents snapshot is serialized once per publisher instead of once per connected phone. Unchanged from the earlier Unreleased work — no read path reports a number git did not produce (#98, #103): `GET /api/repos` worktrees and `GET /api/worktrees/status` gained `aheadBehindFailed`, `GET /api/repos` worktrees also gained `dirtyFailed`, `GET /api/worktrees/pull-request` gained `unpushedFailed`, `POST /api/worktrees` gained `setupFilesFailed`, `POST /api/worktrees/commit` / `commit-message` answer `503` rather than "Nothing is staged" when `diff --cached` failed, and `POST /api/worktrees/pull-request` answers `503` naming the created pull request's link instead of inventing one numbered `0` when the read-back fails. Every new field is additive and optional, and the counts it qualifies keep their old zeros, so a phone built against 0.1.17 decodes the answers unchanged. `GET /api/herdr/tree` is now documented above as the route it has been since 0.1.0.
 - **0.1.17** (2026-09-03) — `POST /api/files/upload` (#88); `GET /api/host` gained `connection`, the caller's Tailscale path (#86, #84); `GET /api/repos` gained `truncated`, `error`, and per-worktree `withinRoots`, `/api/worktrees/pull-base` gained `fetched` and `from`, and `GET /api/worktrees/removal` gained `alsoClosed` (#83, #82).
 - **0.1.16** (2026-09-02) — `DELETE /api/worktrees` takes `unlock` so a locked worktree can be removed.
 - **0.1.15** (2026-09-02) — Source Control: `GET /api/repos` (#59a) carrying each branch's pull request (#74), `POST /api/worktrees` (#75), `status`/`stage`/`unstage`/`commit`/`commit-message` (#77), `log`/`push`/`pull-base` (#78), `pull-request` and `/api/repos/issues` (#79), `removal` and `DELETE /api/worktrees` (#81).

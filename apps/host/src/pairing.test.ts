@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -11,7 +11,7 @@ import {
   PAIRING_SECRET_TTL_MILLISECONDS,
   PairingSessions,
 } from "./pairing.js";
-import { readStateFile } from "./state-file.js";
+import { readStateFile, writeStateFile } from "./state-file.js";
 
 const DEVICES_FILE = "devices.json";
 
@@ -55,24 +55,41 @@ test("revoking one phone leaves the others paired", () => {
   assert.deepEqual(registry.list(), []);
 });
 
-test("last-seen is recorded but not on every request", () => {
+test("last-seen never touches the device list: current in memory, its own file at most once a minute (#68)", () => {
+  const stateDir = scratch();
   let tick = 0;
   const registry = new DeviceRegistry(
-    scratch(),
+    stateDir,
     () => new Date(1_700_000_000_000 + tick),
     () => {},
   );
-  const { credential } = registry.add("phone");
+  const { device, credential } = registry.add("phone");
+  const devices = path.join(stateDir, DEVICES_FILE);
+  const written = readFileSync(devices, "utf8");
+  const onDisk = () => {
+    const seen = readFileSync(path.join(stateDir, "devices-seen.json"), "utf8");
+    return (JSON.parse(seen) as { seen: Record<string, string> }).seen[device.id];
+  };
 
   registry.authorize(credential);
   const first = registry.list()[0]?.lastSeenAt;
   assert.ok(first);
+  assert.equal(onDisk(), first);
+
+  // What a person is shown is always current; the disk is what is rationed.
   tick = 10_000;
   registry.authorize(credential);
-  assert.equal(registry.list()[0]?.lastSeenAt, first);
+  assert.notEqual(registry.list()[0]?.lastSeenAt, first);
+  assert.equal(onDisk(), first, "ten seconds in, the file has not been rewritten");
+
   tick = 70_000;
   registry.authorize(credential);
-  assert.notEqual(registry.list()[0]?.lastSeenAt, first);
+  assert.notEqual(onDisk(), first);
+
+  // The point of the move: nothing a phone does on the authorize path rewrites
+  // the file that decides who gets in.
+  assert.equal(readFileSync(devices, "utf8"), written, "devices.json must be byte-identical after all of that");
+  assert.ok(!written.includes("lastSeenAt"), "and it never held a last-seen stamp at all");
 });
 
 // The disk seams, counted apart: a stat is the cheap thing every recheck may
@@ -104,7 +121,7 @@ function countingRegistry(
   );
 }
 
-test("150 credential rechecks in a minute stat the file every time and read it five times (#68)", () => {
+test("150 credential rechecks in a minute stat the file every time and read it three times (#68)", () => {
   let tick = 0;
   const counts = { reads: 0, stats: 0 };
   const registry = countingRegistry(scratch(), () => tick, counts);
@@ -113,14 +130,14 @@ test("150 credential rechecks in a minute stat the file every time and read it f
   counts.stats = 0;
 
   // Five phones holding a socket open, each re-checking on the host's 2 s
-  // clock. Nothing moves the file, so all five reads are structural: the
-  // first check after `add` dropped the cache, the 30 s floor at 30 s and at
-  // 60 s, and the last-seen write the minute mark earns — its own re-read,
-  // then one more because writing drops the cache again.
+  // clock. Nothing moves the file, so all three reads are structural: the
+  // first check after `add` dropped the cache, then the 30 s floor at 30 s and
+  // at 60 s. The last-seen write the minute mark earns goes to another file
+  // entirely and costs this one nothing.
   for (tick = 0; tick <= 60_000; tick += 2_000) {
     for (let socket = 0; socket < 5; socket += 1) assert.ok(registry.authorize(credential));
   }
-  assert.equal(counts.reads, 5, `the device list was read ${counts.reads} times in a minute of rechecks`);
+  assert.equal(counts.reads, 3, `the device list was read ${counts.reads} times in a minute of rechecks`);
   assert.ok(counts.stats >= 150, `only ${counts.stats} stats for 155 rechecks — a check that skips the file is stale`);
 });
 
@@ -242,6 +259,123 @@ test("a write this host makes is built on the file, so another process's changes
   );
   assert.equal(registry.authorize(credential), undefined, "the revoked credential must stay revoked");
   assert.ok(other.authorize(kept.credential), "the other process's phone must survive");
+});
+
+test("a writer that does not take the lock cannot undo a revoke, and both intents survive (#68)", () => {
+  const stateDir = scratch();
+  const devices = path.join(stateDir, DEVICES_FILE);
+  const tick = 0;
+  const registry = new DeviceRegistry(
+    stateDir,
+    () => new Date(tick),
+    () => {},
+  );
+  const revoked = registry.add("revoked");
+  const kept = registry.add("kept");
+  assert.equal(registry.revoke(revoked.device.id), true);
+
+  // A writer that ignores the lock — an older `tavi`, or someone editing the
+  // file — lands between this registry's read and its rename. A second
+  // `DeviceRegistry` could no longer do this: it would wait for the lock.
+  let interleaved = false;
+  const interleaving = new DeviceRegistry(
+    stateDir,
+    () => new Date(tick),
+    () => {},
+    readStateFile,
+    (file) => {
+      if (!interleaved && file === devices && existsSync(`${devices}.lock`)) {
+        interleaved = true;
+        const current = JSON.parse(readFileSync(devices, "utf8")) as { version: number; devices: unknown[] };
+        writeStateFile(devices, { ...current, devices: [...current.devices, { intruder: true }] });
+      }
+      try {
+        const status = statSync(file);
+        return `${status.mtimeMs}:${status.size}:${status.ino}`;
+      } catch {
+        return "";
+      }
+    },
+  );
+  interleaving.add("added");
+
+  assert.ok(interleaved, "the test must actually have written between the read and the rename");
+  assert.equal(registry.authorize(revoked.credential), undefined, "the revoked credential must stay revoked");
+  assert.ok(registry.authorize(kept.credential), "the phone nobody touched must survive");
+  assert.deepEqual(
+    registry
+      .list()
+      .map((entry) => entry.name)
+      .sort(),
+    ["added", "kept"],
+    "the file is the union of both intents, not one of them",
+  );
+});
+
+test("a write holds the device-list lock for its whole read-modify-write and releases it after (#68)", () => {
+  const stateDir = scratch();
+  const lock = `${path.join(stateDir, DEVICES_FILE)}.lock`;
+  const tick = 0;
+  const held: boolean[] = [];
+  const registry = new DeviceRegistry(
+    stateDir,
+    () => new Date(tick),
+    () => {},
+    (file) => {
+      held.push(existsSync(lock));
+      return readStateFile(file);
+    },
+  );
+
+  const { credential } = registry.add("phone");
+  assert.deepEqual(held, [true], "the read a write is computed from happens inside the lock");
+  assert.equal(existsSync(lock), false, "and the lock is gone once the write is done");
+
+  // A read path is not a writer and must never queue behind one.
+  held.length = 0;
+  assert.ok(registry.authorize(credential));
+  assert.deepEqual(held, [false]);
+});
+
+test("a lock left behind by a process that died is taken over, not waited on for ever (#68)", () => {
+  const stateDir = scratch();
+  const tick = 0;
+  const registry = new DeviceRegistry(
+    stateDir,
+    () => new Date(tick),
+    () => {},
+  );
+  const { device, credential } = registry.add("phone");
+  const lock = `${path.join(stateDir, DEVICES_FILE)}.lock`;
+
+  // Eleven seconds old: no write takes that long, so whoever wrote it is gone.
+  writeFileSync(lock, `999999 ${Date.now() - 11_000}\n`, "utf8");
+  assert.equal(registry.revoke(device.id), true);
+  assert.equal(registry.authorize(credential), undefined);
+  assert.equal(existsSync(lock), false, "the taken-over lock is released like any other");
+});
+
+test("a lock a live process is holding is waited for, then refused rather than forced (#68)", () => {
+  const stateDir = scratch();
+  const tick = 0;
+  const registry = new DeviceRegistry(
+    stateDir,
+    () => new Date(tick),
+    () => {},
+  );
+  const { device, credential } = registry.add("phone");
+  const lock = `${path.join(stateDir, DEVICES_FILE)}.lock`;
+  writeFileSync(lock, `${process.pid} ${Date.now()}\n`, "utf8");
+
+  const startedAt = Date.now();
+  assert.throws(() => registry.revoke(device.id), /another Tavi process is holding it/);
+  const waited = Date.now() - startedAt;
+  assert.ok(waited >= 2_000, `gave up after ${waited} ms without waiting out the bound`);
+
+  // Refusing is not the same as damaging: the list is untouched and the read
+  // paths never noticed, because they never wanted the lock.
+  assert.ok(registry.authorize(credential));
+  assert.equal(registry.list().length, 1);
 });
 
 test("a read that fails once is not cached: the next recheck tries again (#68)", () => {
