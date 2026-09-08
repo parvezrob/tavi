@@ -174,7 +174,7 @@ final class TerminalHeartbeat {
         sendBound = nil
         onSent?()
         guard round?.isPongOutstanding == true else {
-            round = nil
+            if round?.identifier == identifier { round = nil }
             return
         }
         armPongBound(generation: generation, identifier: identifier)
