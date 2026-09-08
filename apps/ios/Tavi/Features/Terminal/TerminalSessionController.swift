@@ -5,7 +5,7 @@ import os
 @MainActor
 @Observable
 final class TerminalSessionController {
-    private static let logger = Logger(subsystem: "com.farfield.tavi", category: "terminal.connection")
+    static let logger = Logger(subsystem: "com.farfield.tavi", category: "terminal.connection")
 
     private(set) var connectionState: TerminalConnectionState = .idle
     private(set) var errorMessage: String?
@@ -24,7 +24,7 @@ final class TerminalSessionController {
     let bridge = TerminalIOBridge()
 
     private let client: any TerminalTransporting
-    private let heartbeat: TerminalHeartbeat
+    let heartbeat: TerminalHeartbeat
     private let mentioned = MentionedPorts()
     private let grid = TerminalGridSync()
     private let outbound: TerminalOutbound
@@ -32,9 +32,9 @@ final class TerminalSessionController {
     private let reconnectPolicy: ReconnectPolicy
     private let timing: ConnectionTiming
 
-    private var configuration: TerminalConnectionConfiguration?
+    var configuration: TerminalConnectionConfiguration?
     private var connectDeadlineTask: Task<Void, Never>?
-    private var connectionGeneration = 0
+    var connectionGeneration = 0
     private var disconnectTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
     private var isSceneActive = true
@@ -45,7 +45,7 @@ final class TerminalSessionController {
     private var reconnectTask: Task<Void, Never>?
     // Where this terminal's recoveries are recorded (#111); nil records nothing.
     private var recovery: RecoveryLog?
-    private var shouldReconnect = false
+    var shouldReconnect = false
     // The log's accepted offset is `resumePoint` and nothing else, so every
     // place it moves or is dropped says so once; `requestedResume` is what the
     // dial asked for, so a `ready` at another point is caught even when output
@@ -227,7 +227,7 @@ final class TerminalSessionController {
         }
     #endif
 
-    private func beginConnection() {
+    func beginConnection() {
         guard shouldReconnect, let configuration else { return }
         eventTask?.cancel()
         heartbeat.stop()
@@ -392,7 +392,7 @@ final class TerminalSessionController {
         beginConnection()
     }
 
-    private func connectionEndedUnexpectedly(_ reason: TerminalRecoveryReason) {
+    func connectionEndedUnexpectedly(_ reason: TerminalRecoveryReason) {
         guard shouldReconnect, connectionState != .suspended, connectionState != .ended else {
             return
         }
@@ -438,43 +438,6 @@ final class TerminalSessionController {
             reconnectTask = nil
             beginConnection()
         }
-    }
-
-    private func handlePath(_ event: NetworkPathWatch.Event) {
-        guard configuration != nil, shouldReconnect, connectionState != .suspended else { return }
-
-        switch event {
-        case .lost:
-            Self.logger.info("network path lost: generation=\(self.connectionGeneration)")
-            transition(.networkLost)
-            // Keep the retry loop alive so recovery never depends on the
-            // monitor delivering a satisfied event later.
-            connectionEndedUnexpectedly(.networkPathLost)
-        case let .restored(from, to):
-            logPath(from: from, to: to)
-            // A network that comes back is a real signal: dial now rather
-            // than waiting out the retry. The attempt count stays.
-            if connectionState == .connected { askHeartbeat() } else { beginConnection() }
-        case let .changed(from, to):
-            logPath(from: from, to: to)
-            // Only ask: an interface change is chatter, and a dial in
-            // progress keeps its ready budget — restarting it on every
-            // change never let a slow host finish (#107).
-            if connectionState == .connected { askHeartbeat() }
-        }
-    }
-
-    private func logPath(from: NetworkPathSnapshot, to: NetworkPathSnapshot) {
-        Self.logger.info(
-            "network path restored or changed (\(from.interfaceIdentity) -> \(to.interfaceIdentity))"
-        )
-    }
-
-    // A socket is judged by its own heartbeat (#86, PRD §7.13): most cellular
-    // handovers leave a working socket working, so it is asked rather than
-    // torn down.
-    private func askHeartbeat() {
-        heartbeat.start(generation: connectionGeneration, immediately: true)
     }
 
     private func startConnectDeadline(generation: Int) {
@@ -545,7 +508,7 @@ final class TerminalSessionController {
         )
     }
 
-    private func transition(_ action: TerminalConnectionAction) {
+    func transition(_ action: TerminalConnectionAction) {
         connectionState = TerminalConnectionReducer.reduce(connectionState, action: action)
     }
 
