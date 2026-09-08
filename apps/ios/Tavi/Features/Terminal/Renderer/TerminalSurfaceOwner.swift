@@ -1,3 +1,4 @@
+import os
 import UIKit
 
 // The Ghostty surface belongs to the pane, not to the SwiftUI view that
@@ -19,6 +20,11 @@ import UIKit
 // escape sequence may cross over, #108) and the screen actually leaving.
 @MainActor
 final class TerminalSurfaceOwner {
+    // Under the same category as the grid lines, so one Console filter shows
+    // how often the phone rebuilds the container and that it now costs
+    // nothing: the trigger itself is still unidentified (#111).
+    private static let logger = Logger(subsystem: "com.farfield.tavi", category: "terminal.surface")
+
     private let bridge: TerminalIOBridge
     private(set) var surface: GhosttyTerminalSurfaceView?
     // The bridge epoch this surface was installed under. It is held here
@@ -45,6 +51,9 @@ final class TerminalSurfaceOwner {
         guard self.sessionID == sessionID else {
             release()
             return nil
+        }
+        if surface != nil {
+            Self.logger.info("container rebuilt; surface kept")
         }
         return surface
     }
@@ -89,6 +98,7 @@ final class TerminalSurfaceOwner {
         pendingRelease?.cancel()
         pendingRelease = nil
         guard let surface else { return }
+        Self.logger.info("surface released")
         self.surface = nil
         sessionID = nil
         isActive = nil
