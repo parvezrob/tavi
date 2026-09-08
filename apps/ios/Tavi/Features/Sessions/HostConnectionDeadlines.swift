@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // How often the events watchdog looks at its socket, and the two idle marks
 // it acts on (#86, #107). Tests cross the same marks on a manual clock.
@@ -39,6 +40,11 @@ extension HostConnection {
         recovery?.tally(.dial, source: .events)
         let socket = makeSocket(handshake)
         self.socket = socket
+        // A pong is how a handover challenge finds its own answer; the
+        // payload is this link's own bytes and goes nowhere else (#111).
+        socket.onPong { [weak self] payload in
+            Task { @MainActor in self?.pongArrived(payload, dial: dial) }
+        }
         socket.resume()
         defer {
             socket.cancel(with: .normalClosure, reason: nil)
@@ -51,9 +57,12 @@ extension HostConnection {
         let watchdog = startWatchdog(for: socket, dial: dial, attempt: attempt, since: dialledAt)
         defer {
             watchdog.cancel()
-            // Only this dial's challenge: the `self.socket` defer above runs
+            // Only this dial's challenges: the `self.socket` defer above runs
             // after this one, so the identity check still holds here.
-            if self.socket === socket { cancelWatchdogPing() }
+            if self.socket === socket {
+                cancelWatchdogPing()
+                cancelHandover()
+            }
         }
 
         var measured = false
@@ -87,6 +96,27 @@ extension HostConnection {
             // Before the `defer` closes the socket: the cause is this stream's (#111).
             noteStreamEnded(error, dial: dial, attempt: attempt, since: dialledAt)
         }
+    }
+
+    // The end of a dial: what happened, then the last known agents kept on
+    // screen explicitly stale, then the question of whether the computer
+    // answers at all.
+    func noteStreamEnded(_ error: Error, dial: Int, attempt: Int, since: ContinuousClock.Instant) {
+        let failure = SocketFailure(error)
+        Self.logger.info("events stream ended: reason=\(failure.tag.rawValue, privacy: .public) code=\(failure.code) priorFailedDials=\(self.consecutiveFailedDials)")
+        recordStreamEnd(failure, dial: dial, attempt: attempt, since: since)
+        markStale()
+        verifyReachability(dial)
+    }
+
+    func cancelProbes() {
+        reachability.cancel()
+        connectDeadlineTask?.cancel()
+        connectDeadlineTask = nil
+        firstFrameLatencyTask?.cancel()
+        firstFrameLatencyTask = nil
+        reachabilityTask?.cancel()
+        reachabilityTask = nil
     }
 
     // A snapshot is worth recording only when it ended a drop. Both of these

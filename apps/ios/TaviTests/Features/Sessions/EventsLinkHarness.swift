@@ -16,6 +16,76 @@ enum EventsLinkDefaults {
         multiplier: 2,
         connectDeadline: .seconds(60)
     )
+    // The production connect deadline, for the suites that are about what
+    // the deadline task does rather than about the socket under it.
+    static let probing = ReconnectPolicy(
+        initialDelay: .seconds(2),
+        maximumDelay: .seconds(10),
+        multiplier: 2,
+        connectDeadline: .seconds(5)
+    )
+    // The schedule's first three steps, less up to 20 % of jitter: which one
+    // the link is sitting out is how a test reads its attempt count.
+    static let firstDelay = Duration.milliseconds(1_600)...Duration.seconds(2)
+    static let secondDelay = Duration.milliseconds(3_200)...Duration.seconds(4)
+    static let thirdDelay = Duration.milliseconds(6_400)...Duration.seconds(8)
+}
+
+// A link with everything a P2 test needs around it: the clock, the socket,
+// the path the phone is on, and the log to read the verdicts out of.
+@MainActor
+final class EventsScene {
+    static let wifi = NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "en0")
+    static let cellular = NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "pdp_ip0")
+    static let otherWiFi = NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "en1")
+    static let noPath = NetworkPathSnapshot(isSatisfied: false, interfaceIdentity: "none")
+
+    let clock: ManualTerminalClock
+    let socket: WatchdogSocket
+    let paths = ScriptedPathObserver()
+    let recovery: RecoveryLog
+    let link: HostConnection
+
+    // The log gets its own observer: one scripted stream has one consumer,
+    // and the log's diagnostic stamp must not eat the link's path events.
+    init(
+        pingSuspends: Bool = false,
+        schedule: ReconnectPolicy = EventsLinkDefaults.schedule,
+        host: StubHost = StubHost(.silence)
+    ) throws {
+        let clock = ManualTerminalClock()
+        self.clock = clock
+        socket = WatchdogSocket(lastActivity: clock.timing.now(), pingSuspends: pingSuspends)
+        recovery = RecoveryLog(timing: clock.timing, pathObserver: ScriptedPathObserver())
+        link = try eventsLink(socket, clock, recovery: recovery, schedule: schedule, paths: paths, host: host)
+    }
+
+    var now: ContinuousClock.Instant { clock.timing.now() }
+
+    // What a handover check needs before it can happen: a dial that has
+    // delivered a frame, and a path baseline, so the next snapshot is a
+    // change and not a first sighting.
+    func establish() async throws {
+        socket.deliver(Fixtures.agentsFrame(), at: now)
+        try await waitFor { self.link.hasLoaded }
+        paths.emit(Self.wifi)
+        await settle()
+    }
+
+    func moveTo(_ snapshot: NetworkPathSnapshot) async {
+        paths.emit(snapshot)
+        await settle()
+    }
+
+    // What the log was told about the events link, in order.
+    func events(_ kind: RecoveryLog.Kind) -> [RecoveryEvent] {
+        recovery.ring.filter { $0.source == .events && $0.kind == kind }
+    }
+
+    func tearDown() {
+        link.stop()
+        socket.releasePings()
+    }
 }
 
 @MainActor
@@ -24,6 +94,7 @@ func eventsLink(
     _ clock: ManualTerminalClock,
     recovery: RecoveryLog? = nil,
     schedule: ReconnectPolicy = EventsLinkDefaults.schedule,
+    paths: ScriptedPathObserver = ScriptedPathObserver(),
     host: StubHost = StubHost(.silence)
 ) throws -> HostConnection {
     let connection = HostConnection(
@@ -31,10 +102,24 @@ func eventsLink(
         makeSocket: { _ in socket },
         watchdogPolicy: EventsLinkDefaults.policy,
         reconnectPolicy: schedule,
-        timing: clock.timing
+        timing: clock.timing,
+        pathObserver: paths
     )
     connection.configure(host: try Fixtures.hostEndpoint(), credential: "secret", recovery: recovery) { _ in }
     return connection
+}
+
+// Some of what these suites wait for crosses an actor hop to the stub host
+// and back — a probe answer, the verdict behind it — and yielding alone does
+// not always give that time. The condition is still the fact under test; only
+// the waiting is by the clock on the wall.
+@MainActor
+func waitForAnswer(_ condition: () async -> Bool) async throws {
+    for _ in 0..<600 {
+        if await condition() { return }
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    throw TerminalTestFailure()
 }
 
 // One turn of the watchdog loop, released and then waited out: the loop has
@@ -71,6 +156,7 @@ final class WatchdogSocket: HostEventsSocketing, @unchecked Sendable {
     // under it.
     private var readers: [CheckedContinuation<String?, Never>] = []
     private var isCancelled = false
+    private var resumeCount = 0
     private var pongHandler: (@Sendable (Data) -> Void)?
 
     init(lastActivity: ContinuousClock.Instant, pingSuspends: Bool = false) {
@@ -80,6 +166,9 @@ final class WatchdogSocket: HostEventsSocketing, @unchecked Sendable {
     }
 
     var pings: Int { lock.withLock { pingPayloads.count } }
+    // One per dial: the link resumes each socket it opens, so on a socket
+    // handed to every dial this is how many dials there have been.
+    var resumes: Int { lock.withLock { resumeCount } }
     var goingAwayCancels: Int { lock.withLock { goingAwayCount } }
     // What each challenge carried, in order: a test answers one of them, or
     // deliberately answers with bytes nobody sent.
@@ -146,7 +235,14 @@ final class WatchdogSocket: HostEventsSocketing, @unchecked Sendable {
     var lastActivity: ContinuousClock.Instant { lock.withLock { activity } }
     var lastFrameAt: ContinuousClock.Instant { lock.withLock { frameActivity } }
 
-    func resume() {}
+    // A dial opens the socket it was handed. One double serves every dial,
+    // so it is open again here, as a fresh one would be.
+    func resume() {
+        lock.withLock {
+            resumeCount += 1
+            isCancelled = false
+        }
+    }
 
     func onPong(_ handler: @escaping @Sendable (Data) -> Void) {
         lock.withLock { pongHandler = handler }

@@ -35,7 +35,7 @@ enum HostConnectionEvent {
 @MainActor
 @Observable
 final class HostConnection {
-    private static let logger = Logger(subsystem: "com.farfield.tavi", category: "agents.directory")
+    static let logger = Logger(subsystem: "com.farfield.tavi", category: "agents.directory")
     private static let eventsProtocol = "tavi.events.v1"
     // Retry cadence for the events stream. A computer that is asleep or off
     // the tailnet is dialled again at 2, 4, 8, then every 10 s — not every
@@ -106,8 +106,8 @@ final class HostConnection {
     // Unstructured on purpose, since the redial must never wait for a probe;
     // the link owns each by name and `stop()` ends them all (#108).
     var connectDeadlineTask: Task<Void, Never>?
-    private var firstFrameLatencyTask: Task<Void, Never>?
-    private var reachabilityTask: Task<Void, Never>?
+    var firstFrameLatencyTask: Task<Void, Never>?
+    var reachabilityTask: Task<Void, Never>?
     var consecutiveFailedDials = 0
     var streamConnectedAt: ContinuousClock.Instant?
     // Two fences (#108). A measurement (round trip, path) belongs to the dial
@@ -122,6 +122,16 @@ final class HostConnection {
     // The watchdog's one outstanding challenge to a quiet socket (#107).
     var watchdogPing: Task<Void, Never>?
     var watchdogPingGeneration = 0
+    // The handover check, in its own slot so a stalled watchdog send can
+    // never suppress it (#111): the outstanding challenge, the send it owns
+    // until that send returns or the socket is cancelled, and the one 2 s
+    // deadline that judges both.
+    var handover: HandoverChallenge?
+    var handoverSend: Task<Void, Never>?
+    var handoverDeadline: Task<Void, Never>?
+    // What the phone's own network is doing, which no socket reports: a
+    // changed interface is when to challenge, a restored one when to dial.
+    private let pathWatch: NetworkPathWatch
 
     // Tests hand in their own transport, socket and schedule so no unit test
     // opens a real socket or waits out a real redial (#99).
@@ -130,7 +140,8 @@ final class HostConnection {
         makeSocket: @escaping @Sendable (URLRequest) -> any HostEventsSocketing = { NetworkWebSocketTask(request: $0) },
         watchdogPolicy: HostWatchdogPolicy = .live,
         reconnectPolicy: ReconnectPolicy? = nil,
-        timing: ConnectionTiming = .live
+        timing: ConnectionTiming = .live,
+        pathObserver: any NetworkPathObserving = NetworkPathObserver()
     ) {
         self.transport = transport
         self.makeSocket = makeSocket
@@ -138,6 +149,7 @@ final class HostConnection {
         self.reconnectPolicy = reconnectPolicy ?? Self.eventsReconnect
         self.timing = timing
         retryWait = RetryWait(timing: timing)
+        pathWatch = NetworkPathWatch(observer: pathObserver)
         reachability = HostReachability(timing: timing)
         reachability.install(
             client: { [weak self] in self?.client },
@@ -215,6 +227,9 @@ final class HostConnection {
         var handshake = client.request(eventsURL, timeout: 8)
         handshake.setValue(Self.eventsProtocol, forHTTPHeaderField: "Sec-WebSocket-Protocol")
         isRunning = true
+        // The watch outlives any one dial: it is what tells this link that
+        // the interface under its socket changed (#111).
+        pathWatch.start { [weak self] event in self?.pathChanged(event) }
         // A foreground is a fresh start (#86, owner 2026-09-03 01:10: "the
         // reconnection took a while" after the phone had been idle): the
         // dials that count are the ones from now, so the backoff and the
@@ -272,6 +287,8 @@ final class HostConnection {
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
         cancelWatchdogPing()
+        cancelHandover()
+        pathWatch.stop()
         latencyTask?.cancel()
         latencyTask = nil
         cancelProbes()
@@ -279,16 +296,6 @@ final class HostConnection {
         // Whatever we show next launch/foreground is last-known until the
         // stream confirms otherwise.
         if hasLoaded { isStale = true }
-    }
-
-    private func cancelProbes() {
-        reachability.cancel()
-        connectDeadlineTask?.cancel()
-        connectDeadlineTask = nil
-        firstFrameLatencyTask?.cancel()
-        firstFrameLatencyTask = nil
-        reachabilityTask?.cancel()
-        reachabilityTask = nil
     }
 
     // What one text frame does to the link, and whether it was the agents
@@ -320,15 +327,11 @@ final class HostConnection {
         measureFirstFrameLatency(dial)
     }
 
-    // The end of a dial: what happened, and then the last known agents kept
-    // on screen explicitly stale — dropping them here made "Needs you" blink
-    // away on every network blip while the agent was still waiting.
-    func noteStreamEnded(_ error: Error, dial: Int, attempt: Int, since: ContinuousClock.Instant) {
-        let failure = SocketFailure(error)
-        Self.logger.info("events stream ended: reason=\(failure.tag.rawValue, privacy: .public) code=\(failure.code) priorFailedDials=\(self.consecutiveFailedDials)")
-        recordStreamEnd(failure, dial: dial, attempt: attempt, since: since)
+    // The last known agents stay on screen, explicitly stale — dropping them
+    // made "Needs you" blink away on every network blip while the agent was
+    // still waiting. Said by a dial that ended and by a path that is gone.
+    func markStale() {
         isStale = true
-        verifyReachability(dial)
     }
 
     // Offline is a verdict about the computer: earned and cleared once each,
@@ -336,6 +339,10 @@ final class HostConnection {
     // non-observational effect P1 has on this type: a redundant `isOffline =
     // false` no longer wakes every view observing it.
     func setOffline(_ value: Bool, dial: Int) {
+        // With no path of its own the phone knows nothing about the
+        // computer, so no new Offline is earned while it is unsatisfied
+        // (#111). One already earned is not masked, and a 401 still revokes.
+        if value, pathWatch.current?.isSatisfied == false { return }
         guard isOffline != value else { return }
         isOffline = value
         recovery?.record(value ? .offlineEntered : .offlineCleared, source: .events, generation: dial)
