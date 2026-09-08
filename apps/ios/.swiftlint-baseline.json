@@ -355,7 +355,7 @@
         "file": "Tavi/Features/Terminal/TerminalSessionController.swift",
         "character": 7
       },
-      "reason": "Class body should span 400 lines or less excluding comments and whitespace: currently spans 470 lines",
+      "reason": "Class body should span 400 lines or less excluding comments and whitespace: currently spans 472 lines",
       "ruleName": "Type Body Length"
     }
   },
@@ -381,11 +381,11 @@
       "ruleIdentifier": "file_length",
       "ruleDescription": "Files should not span too many lines.",
       "location": {
-        "line": 581,
+        "line": 587,
         "file": "Tavi/Features/Terminal/TerminalSessionController.swift",
         "character": 1
       },
-      "reason": "File should contain 400 lines or less: currently contains 581",
+      "reason": "File should contain 400 lines or less: currently contains 587",
       "ruleName": "File Length"
     }
   },
