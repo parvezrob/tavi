@@ -3,72 +3,11 @@ import Foundation
 import Testing
 
 // The 2 s handover check (#111 P2), through the real controller: an
-// interface change asks the round in flight rather than replacing it, the
-// deadline it lands on is absolute and covers send and pong together, and
-// the outcome is named in the connection log. Every wait is resumed by the
-// test; nothing here depends on elapsed time.
+// interface change asks the round in flight rather than replacing it, and
+// the deadline it lands on is absolute and covers send and pong together.
+// Every wait is resumed by the test; nothing here depends on elapsed time.
 @MainActor
 struct TerminalHandoverTests {
-    private static let interval = Duration.seconds(10)
-    private static let answerBound = Duration.seconds(5)
-    private static let sendBound = Duration.seconds(3)
-    private static let handover = Duration.seconds(2)
-    private static let wifi = NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "en0")
-    private static let cellular = NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "pdp_ip0")
-    private static let otherCellular = NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "pdp_ip1")
-
-    private func makeController(
-        _ transport: RecoveryTransport,
-        _ clock: ManualTerminalClock,
-        paths: ScriptedPathObserver,
-        recovery: RecoveryLog? = nil
-    ) -> TerminalSessionController {
-        let controller = TerminalSessionController(
-            client: transport,
-            reconnectPolicy: TerminalTestDefaults.reconnectPolicy,
-            heartbeatPolicy: HeartbeatPolicy(
-                interval: Self.interval,
-                timeout: Self.answerBound,
-                sendTimeout: Self.sendBound,
-                handover: Self.handover
-            ),
-            timing: clock.timing,
-            pathObserver: paths
-        )
-        controller.connect(
-            hostText: TerminalTestDefaults.host,
-            paneID: "fixture",
-            credential: "valid-token",
-            recovery: recovery
-        )
-        return controller
-    }
-
-    // Connected, with the monitor's first satisfied snapshot spent: that one
-    // is only the baseline, so every `changed` below is a real handover.
-    private func connect(
-        _ controller: TerminalSessionController,
-        _ transport: RecoveryTransport,
-        _ paths: ScriptedPathObserver
-    ) async throws {
-        try await waitUntilConnected(transport, controller)
-        paths.emit(Self.wifi)
-        await settle()
-    }
-
-    // An ordinary round is under way, its send still in the outbound queue.
-    private func beginRoundWithASuspendedSend(
-        _ controller: TerminalSessionController,
-        _ transport: RecoveryTransport,
-        _ clock: ManualTerminalClock,
-        _ paths: ScriptedPathObserver
-    ) async throws {
-        try await connect(controller, transport, paths)
-        try await waitFor { await clock.hasWaiter(for: Self.interval) }
-        try await clock.resumeAll(for: Self.interval)
-        try await waitFor { await clock.hasWaiter(for: Self.sendBound) }
-    }
-
     // MARK: - The send half of the budget
 
     // The check is one deadline over both halves, so a challenge whose ping
@@ -80,24 +19,26 @@ struct TerminalHandoverTests {
         let clock = ManualTerminalClock()
         let paths = ScriptedPathObserver()
         let recovery = RecoveryLog(pathObserver: ScriptedPathObserver())
-        let controller = makeController(transport, clock, paths: paths, recovery: recovery)
+        let controller = HandoverFixture.controller(transport, clock, paths: paths, recovery: recovery)
 
         try await withCleanup(controller, transport) {
-            try await beginRoundWithASuspendedSend(controller, transport, clock, paths)
+            try await HandoverFixture.beginRoundWithASuspendedSend(controller, transport, clock, paths)
 
-            paths.emit(Self.cellular)
-            try await waitFor { await clock.hasWaiter(for: Self.handover) }
-            #expect(await clock.hasWaiter(for: Self.sendBound) == false)
+            paths.emit(HandoverFixture.cellular)
+            try await waitFor { await clock.hasWaiter(for: HandoverFixture.deadline) }
+            #expect(await clock.hasWaiter(for: HandoverFixture.sendBound) == false)
 
-            try await clock.resumeAll(for: Self.handover)
+            try await clock.resumeAll(for: HandoverFixture.deadline)
             try await waitFor { controller.connectionState == .reconnecting(attempt: 1) }
 
             let failure = try #require(recovery.ring.first { $0.kind == .handoverFailed })
             #expect(failure.reason == .handover(.sendStalled))
-            // The cycle itself keeps the terminal's own token; only the
-            // handover verdict is named the way both P2 links name it.
+            // Verdict and cycle are one event class under one key, so the
+            // counters cannot split a handover across two names.
             #expect(recovery.ring.last?.kind == .cycling)
-            #expect(recovery.ring.last?.reason == .terminal(.handoverSendStalled))
+            #expect(recovery.ring.last?.reason == .handover(.sendStalled))
+            #expect(recovery.counters[.terminal]?.cycles[.handover(.sendStalled)] == 1)
+            #expect(recovery.counters[.terminal]?.cycles[.terminal(.handoverSendStalled)] == nil)
         }
     }
 
@@ -109,18 +50,18 @@ struct TerminalHandoverTests {
         let transport = RecoveryTransport(hangsSends: true)
         let clock = ManualTerminalClock()
         let paths = ScriptedPathObserver()
-        let controller = makeController(transport, clock, paths: paths)
+        let controller = HandoverFixture.controller(transport, clock, paths: paths)
 
         try await withCleanup(controller, transport) {
-            try await beginRoundWithASuspendedSend(controller, transport, clock, paths)
+            try await HandoverFixture.beginRoundWithASuspendedSend(controller, transport, clock, paths)
 
-            paths.emit(Self.cellular)
-            try await waitFor { await clock.hasWaiter(for: Self.handover) }
+            paths.emit(HandoverFixture.cellular)
+            try await waitFor { await clock.hasWaiter(for: HandoverFixture.deadline) }
 
             clock.advance(by: .milliseconds(1_900))
             await transport.releaseSend()
             try await waitFor { await clock.hasWaiter(for: .milliseconds(100)) }
-            #expect(await clock.timesScheduled(Self.answerBound) == 0)
+            #expect(await clock.timesScheduled(HandoverFixture.answerBound) == 0)
             #expect(controller.connectionState == .connected)
 
             try await clock.resumeAll(for: .milliseconds(100))
@@ -139,25 +80,25 @@ struct TerminalHandoverTests {
         let transport = RecoveryTransport(hangsSends: true)
         let clock = ManualTerminalClock()
         let paths = ScriptedPathObserver()
-        let controller = makeController(transport, clock, paths: paths)
+        let controller = HandoverFixture.controller(transport, clock, paths: paths)
 
         try await withCleanup(controller, transport) {
-            try await beginRoundWithASuspendedSend(controller, transport, clock, paths)
+            try await HandoverFixture.beginRoundWithASuspendedSend(controller, transport, clock, paths)
 
-            paths.emit(Self.cellular)
-            try await waitFor { await clock.timesScheduled(Self.handover) == 1 }
+            paths.emit(HandoverFixture.cellular)
+            try await waitFor { await clock.timesScheduled(HandoverFixture.deadline) == 1 }
 
             clock.advance(by: .milliseconds(500))
-            paths.emit(Self.otherCellular)
+            paths.emit(HandoverFixture.otherCellular)
             await settle()
             clock.advance(by: .milliseconds(500))
-            paths.emit(Self.cellular)
+            paths.emit(HandoverFixture.cellular)
             await settle()
 
-            #expect(await clock.timesScheduled(Self.handover) == 1)
+            #expect(await clock.timesScheduled(HandoverFixture.deadline) == 1)
             #expect(await transport.pingIdentifiers.count == 1)
 
-            try await clock.resumeAll(for: Self.handover)
+            try await clock.resumeAll(for: HandoverFixture.deadline)
             try await waitFor { controller.connectionState == .reconnecting(attempt: 1) }
             #expect(await transport.pingIdentifiers.count == 1)
         }
@@ -173,24 +114,25 @@ struct TerminalHandoverTests {
         let clock = ManualTerminalClock()
         let paths = ScriptedPathObserver()
         let recovery = RecoveryLog(pathObserver: ScriptedPathObserver())
-        let controller = makeController(transport, clock, paths: paths, recovery: recovery)
+        let controller = HandoverFixture.controller(transport, clock, paths: paths, recovery: recovery)
 
         try await withCleanup(controller, transport) {
-            try await connect(controller, transport, paths)
-            try await waitFor { await clock.hasWaiter(for: Self.interval) }
-            try await clock.resumeAll(for: Self.interval)
-            try await waitFor { await clock.hasWaiter(for: Self.answerBound) }
+            try await HandoverFixture.connect(controller, transport, paths)
+            try await waitFor { await clock.hasWaiter(for: HandoverFixture.interval) }
+            try await clock.resumeAll(for: HandoverFixture.interval)
+            try await waitFor { await clock.hasWaiter(for: HandoverFixture.answerBound) }
 
             clock.advance(by: .seconds(4))
-            paths.emit(Self.cellular)
+            paths.emit(HandoverFixture.cellular)
             try await waitFor { await clock.hasWaiter(for: .seconds(1)) }
-            #expect(await clock.timesScheduled(Self.handover) == 0)
+            #expect(await clock.timesScheduled(HandoverFixture.deadline) == 0)
             #expect(await transport.pingIdentifiers.count == 1)
 
             try await clock.resumeAll(for: .seconds(1))
             try await waitFor { controller.connectionState == .reconnecting(attempt: 1) }
             let failure = try #require(recovery.ring.first { $0.kind == .handoverFailed })
             #expect(failure.reason == .handover(.pongMissing))
+            #expect(recovery.counters[.terminal]?.cycles[.handover(.pongMissing)] == 1)
         }
     }
 
@@ -204,21 +146,21 @@ struct TerminalHandoverTests {
         let clock = ManualTerminalClock()
         let paths = ScriptedPathObserver()
         let recovery = RecoveryLog(pathObserver: ScriptedPathObserver())
-        let controller = makeController(transport, clock, paths: paths, recovery: recovery)
+        let controller = HandoverFixture.controller(transport, clock, paths: paths, recovery: recovery)
 
         try await withCleanup(controller, transport) {
-            try await connect(controller, transport, paths)
-            paths.emit(Self.cellular)
+            try await HandoverFixture.connect(controller, transport, paths)
+            paths.emit(HandoverFixture.cellular)
             // Both halves of the challenge are bounded by the same 2 s, so
             // the second registration is the ping being on the wire and the
             // answer's half of the deadline standing.
-            try await waitFor { await clock.timesScheduled(Self.handover) == 2 }
-            #expect(await clock.timesScheduled(Self.answerBound) == 0)
+            try await waitFor { await clock.timesScheduled(HandoverFixture.deadline) == 2 }
+            #expect(await clock.timesScheduled(HandoverFixture.answerBound) == 0)
 
             clock.advance(by: .milliseconds(1_900))
             let identifier = try #require(await transport.pingIdentifiers.last)
             await transport.emit(.message(.pong(identifier: identifier)))
-            try await waitFor { await clock.hasWaiter(for: Self.handover) == false }
+            try await waitFor { await clock.hasWaiter(for: HandoverFixture.deadline) == false }
 
             #expect(controller.connectionState == .connected)
             let checked = try #require(recovery.ring.last)
@@ -234,16 +176,16 @@ struct TerminalHandoverTests {
         let clock = ManualTerminalClock()
         let paths = ScriptedPathObserver()
         let recovery = RecoveryLog(pathObserver: ScriptedPathObserver())
-        let controller = makeController(transport, clock, paths: paths, recovery: recovery)
+        let controller = HandoverFixture.controller(transport, clock, paths: paths, recovery: recovery)
 
         try await withCleanup(controller, transport) {
-            try await connect(controller, transport, paths)
-            paths.emit(Self.cellular)
-            try await waitFor { await clock.timesScheduled(Self.handover) == 2 }
+            try await HandoverFixture.connect(controller, transport, paths)
+            paths.emit(HandoverFixture.cellular)
+            try await waitFor { await clock.timesScheduled(HandoverFixture.deadline) == 2 }
 
             let identifier = try #require(await transport.pingIdentifiers.last)
             clock.advance(by: .milliseconds(2_100))
-            try await clock.resumeAll(for: Self.handover)
+            try await clock.resumeAll(for: HandoverFixture.deadline)
             try await waitFor { controller.connectionState == .reconnecting(attempt: 1) }
 
             let failure = try #require(recovery.ring.first { $0.kind == .handoverFailed })
@@ -258,138 +200,37 @@ struct TerminalHandoverTests {
         }
     }
 
-    // MARK: - A close delivered mid-challenge
-
-    // The ordering that wedges a state machine: the socket goes away while
-    // the challenge is outstanding. One retry, the stream resumed at the
-    // byte the phone had, and the round the dead socket owned takes nothing
-    // with it — neither its late pong nor its deadline may touch the
-    // replacement's heartbeat.
+    // A pong and an expired deadline can reach the actor in either order.
+    // The deadline decides: an answer that is already late does not undo a
+    // miss just because it won that race.
     @Test
-    func aCloseMidChallengeRetriesOnceAndLeavesTheReplacementIntact() async throws {
+    func aPongPastTheDeadlineIsAMissEvenBeforeTheBoundHasFired() async throws {
         let transport = RecoveryTransport()
         let clock = ManualTerminalClock()
         let paths = ScriptedPathObserver()
         let recovery = RecoveryLog(pathObserver: ScriptedPathObserver())
-        let controller = makeController(transport, clock, paths: paths, recovery: recovery)
+        let controller = HandoverFixture.controller(transport, clock, paths: paths, recovery: recovery)
 
         try await withCleanup(controller, transport) {
-            try await connect(controller, transport, paths)
-            await transport.emit(.message(.outputChunk(offset: 0, data: Data("hello".utf8))))
-            await transport.emit(.message(.outputChunk(offset: 5, data: Data(" world".utf8))))
-            try await waitFor { recovery.counters[.terminal]?.acceptedOffset == 11 }
-
-            paths.emit(Self.cellular)
-            try await waitFor { await clock.timesScheduled(Self.handover) == 2 }
-            let stale = try #require(await transport.pingIdentifiers.last)
-
-            await transport.emit(.disconnected)
-            try await waitFor { controller.connectionState == .reconnecting(attempt: 1) }
-            // The dead socket's deadline went with it.
-            #expect(await clock.hasWaiter(for: Self.handover) == false)
-
-            try await waitFor { await clock.hasWaiter(within: TerminalTestDefaults.retryDelay) }
-            try await clock.resumeAll(within: TerminalTestDefaults.retryDelay)
-            try await waitUntilListening(transport, after: 1)
-            await transport.emit(.message(.ready(stream: "epoch-a", offset: 11, resumed: true)))
-            try await waitFor { controller.connectionState == .connected }
-
-            #expect(await transport.connectCount == 2)
-            #expect(await transport.connectResumes.last ?? nil == TerminalResumePoint(stream: "epoch-a", offset: 11))
-
-            // The old challenge's answer arrives on the new connection and
-            // is nobody's: it may not be read as a passed handover.
-            await transport.emit(.message(.pong(identifier: stale)))
-            await settle()
-            #expect(controller.connectionState == .connected)
-            #expect(recovery.ring.contains { $0.kind == .handoverChecked } == false)
-
-            // The replacement's own heartbeat is whole: its interval is
-            // waiting, and it opens an ordinary round when that elapses.
-            try await waitFor { await clock.hasWaiter(for: Self.interval) }
-            try await clock.resumeAll(for: Self.interval)
-            try await waitFor { await transport.pingIdentifiers.count == 2 }
-            try await waitFor { await clock.hasWaiter(for: Self.answerBound) }
-        }
-    }
-
-    // MARK: - A stale beat
-
-    // A hung send released long after its connection was replaced: the beat
-    // it belonged to resumes on the live round's actor and must touch none
-    // of it. Cancelling the *property* there took the replacement's send
-    // bound with it, and a replacement whose own send then stalled had
-    // nothing left to notice it — Connected, accepting keystrokes, forever.
-    @Test
-    func aSendReleasedAfterItsConnectionWasReplacedTouchesNoLiveBound() async throws {
-        let transport = RecoveryTransport(hangsSends: true)
-        let clock = ManualTerminalClock()
-        let paths = ScriptedPathObserver()
-        let controller = makeController(transport, clock, paths: paths)
-
-        try await withCleanup(controller, transport) {
-            try await beginRoundWithASuspendedSend(controller, transport, clock, paths)
-
-            // That whole connection goes away and is dialled again; the
-            // first round's send is still suspended in the old transport.
-            await transport.emit(.disconnected)
-            try await waitFor { controller.connectionState == .reconnecting(attempt: 1) }
-            try await waitFor { await clock.hasWaiter(within: TerminalTestDefaults.retryDelay) }
-            try await clock.resumeAll(within: TerminalTestDefaults.retryDelay)
-            try await waitUntilListening(transport, after: 1)
-            await transport.emit(.message(.ready(stream: "epoch-a", offset: 0, resumed: true)))
-            try await waitFor { controller.connectionState == .connected }
-
-            // The replacement opens a round of its own, and its send hangs too.
-            try await waitFor { await clock.hasWaiter(for: Self.interval) }
-            try await clock.resumeAll(for: Self.interval)
-            try await waitFor { await clock.timesScheduled(Self.sendBound) == 2 }
-
-            // Now the first connection's send finally returns.
-            await transport.releaseSend()
-            await settle()
-
-            // The replacement's bound is untouched, and still fires on time.
-            #expect(await clock.hasWaiter(for: Self.sendBound))
-            #expect(controller.connectionState == .connected)
-            try await clock.resumeAll(for: Self.sendBound)
-            try await waitFor { controller.connectionState == .reconnecting(attempt: 2) }
-        }
-    }
-
-    // MARK: - A network that came back
-
-    // `restored` on a socket that is still Connected is the same question as
-    // `changed` — the link moved while this connection was up — so it gets
-    // the same 2 s check rather than a tear-down.
-    @Test
-    func aRestoredPathOnAConnectedSocketIsAlsoAHandoverCheck() async throws {
-        let transport = RecoveryTransport()
-        let clock = ManualTerminalClock()
-        let paths = ScriptedPathObserver()
-        let recovery = RecoveryLog(pathObserver: ScriptedPathObserver())
-        let controller = makeController(transport, clock, paths: paths, recovery: recovery)
-
-        try await withCleanup(controller, transport) {
-            try await connect(controller, transport, paths)
-
-            // The link goes away and the terminal cycles; the dial that
-            // replaces it succeeds while the monitor still says nothing.
-            paths.emit(NetworkPathSnapshot(isSatisfied: false, interfaceIdentity: "none"))
-            try await waitFor { await clock.hasWaiter(within: TerminalTestDefaults.retryDelay) }
-            try await clock.resumeAll(within: TerminalTestDefaults.retryDelay)
-            try await waitUntilListening(transport, after: 1)
-            await transport.emit(.message(.ready(stream: "epoch-a", offset: 0, resumed: true)))
-            try await waitFor { controller.connectionState == .connected }
-
-            paths.emit(Self.wifi)
-            try await waitFor { await clock.timesScheduled(Self.handover) == 2 }
-            #expect(await transport.connectCount == 2)
-
+            try await HandoverFixture.connect(controller, transport, paths)
+            paths.emit(HandoverFixture.cellular)
+            try await waitFor { await clock.timesScheduled(HandoverFixture.deadline) == 2 }
             let identifier = try #require(await transport.pingIdentifiers.last)
+
+            // Past the deadline instant, with the bound's own task still
+            // parked on the clock.
+            clock.advance(by: .milliseconds(2_100))
             await transport.emit(.message(.pong(identifier: identifier)))
-            try await waitFor { recovery.ring.contains { $0.kind == .handoverChecked } }
+            await settle()
+            #expect(recovery.ring.contains { $0.kind == .handoverChecked } == false)
             #expect(controller.connectionState == .connected)
+            // The answer released nothing: the deadline is still standing.
+            #expect(await clock.hasWaiter(for: HandoverFixture.deadline))
+
+            try await clock.resumeAll(for: HandoverFixture.deadline)
+            try await waitFor { controller.connectionState == .reconnecting(attempt: 1) }
+            let failure = try #require(recovery.ring.first { $0.kind == .handoverFailed })
+            #expect(failure.reason == .handover(.pongMissing))
         }
     }
 }

@@ -428,7 +428,7 @@ final class TerminalSessionController {
         )
         // Recorded before the retry cancels anything the transport is still
         // holding: the cause belongs to the connection that had it (#111).
-        record(.cycling, reason: .terminal(reason))
+        record(.cycling, reason: recoveryReason(for: reason))
         reconnectTask = Task { [weak self] in
             do {
                 try await timing.sleep(delay)
@@ -466,16 +466,20 @@ final class TerminalSessionController {
         errorMessage = "The host stopped responding. Reconnecting."
         // Named before the cycle it causes, so the log says the handover was
         // what this connection failed rather than an ordinary quiet host.
-        // The events link records the same miss under the same case.
-        switch reason {
-        case .handoverPongMissing:
-            record(.handoverFailed, reason: .handover(.pongMissing))
-        case .handoverSendStalled:
-            record(.handoverFailed, reason: .handover(.sendStalled))
-        default:
-            break
-        }
+        let logged = recoveryReason(for: reason)
+        if case .handover = logged { record(.handoverFailed, reason: logged) }
         connectionEndedUnexpectedly(reason)
+    }
+
+    // One key per class of event in the cycle counters, under the name the
+    // events link uses for the same miss: a handover is `.handover` wherever
+    // it is recorded, and everything else is the terminal's own (#111 P2).
+    private func recoveryReason(for reason: TerminalRecoveryReason) -> RecoveryLog.Reason {
+        switch reason {
+        case .handoverPongMissing: .handover(.pongMissing)
+        case .handoverSendStalled: .handover(.sendStalled)
+        default: .terminal(reason)
+        }
     }
 
     private func deliverTerminalInput(_ data: Data, canCoalesce: Bool = true) {

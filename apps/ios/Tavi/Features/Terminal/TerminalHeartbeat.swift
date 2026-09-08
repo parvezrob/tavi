@@ -103,6 +103,10 @@ final class TerminalHeartbeat {
     // check the controller records (#111 P2).
     func pongReceived(_ identifier: String) -> Bool {
         guard var round, round.identifier == identifier, round.isPongOutstanding else { return false }
+        // An answer past the round's deadline is a miss however narrowly it
+        // beat the expired bound's handler to the actor: the connection is
+        // judged by the deadline, never by the order two tasks were run in.
+        guard timing.now() < round.deadline else { return false }
         round.isPongOutstanding = false
         self.round = round
         pongBound?.cancel()
