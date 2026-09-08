@@ -128,7 +128,7 @@ func eventsLink(
 ) throws -> HostConnection {
     let connection = HostConnection(
         transport: host.transport,
-        makeSocket: { _ in socket },
+        makeSocket: { _ in WatchdogSocketHandle(socket) },
         watchdogPolicy: EventsLinkDefaults.policy,
         reconnectPolicy: schedule,
         timing: clock.timing,
@@ -179,6 +179,45 @@ func pollWatchdog(_ clock: ManualTerminalClock) async throws {
 func releaseWatchdogPoll(_ clock: ManualTerminalClock) async throws {
     try await waitFor { await clock.hasWaiter(for: EventsLinkDefaults.policy.pollInterval) }
     try await clock.resumeAll(for: EventsLinkDefaults.policy.pollInterval)
+}
+
+// A real link opens a new socket for every dial, and the link's own "is this
+// still mine?" checks depend on it: a superseded dial holds an object the
+// replacement never uses, so the dial that unwinds last cannot clear the live
+// dial's slot or cancel its challenge. One double handed to every dial broke
+// that — the identity check matched, and a dial unwinding after its
+// replacement had started (which is what a loaded machine makes likely) took
+// the replacement's socket away with it. Each dial therefore gets its own
+// handle onto the one set of facts the test reads and writes (#111).
+final class WatchdogSocketHandle: HostEventsSocketing, Sendable {
+    private let socket: WatchdogSocket
+
+    init(_ socket: WatchdogSocket) {
+        self.socket = socket
+    }
+
+    var lastActivity: ContinuousClock.Instant { socket.lastActivity }
+    var lastFrameAt: ContinuousClock.Instant { socket.lastFrameAt }
+
+    func resume() {
+        socket.resume()
+    }
+
+    func receive() async throws -> URLSessionWebSocketTask.Message {
+        try await socket.receive()
+    }
+
+    func ping(payload: Data) async throws {
+        try await socket.ping(payload: payload)
+    }
+
+    func onPong(_ handler: @escaping @Sendable (Data) -> Void) {
+        socket.onPong(handler)
+    }
+
+    func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        socket.cancel(with: closeCode, reason: reason)
+    }
 }
 
 // An events socket whose every fact the test writes: when a frame last

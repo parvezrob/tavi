@@ -205,6 +205,22 @@ struct HostEventsHandoverTests {
 
     // With no path of its own the phone knows nothing about the computer, so
     // two unanswered questions are about the phone, not about the Mac.
+    // The invariant every identity check in the link rests on, and the one a
+    // single shared double quietly broke: a superseded dial must hold an
+    // object its replacement never uses, or the dial that unwinds last takes
+    // the live dial's socket with it (#111 — this suite was intermittent for
+    // exactly that reason).
+    @Test
+    func everyDialIsHandedItsOwnSocketObject() async throws {
+        let scene = try EventsScene()
+        defer { scene.tearDown() }
+        let request = URLRequest(url: try #require(URL(string: "wss://studio.tailnet.ts.net/events")))
+
+        let first = scene.link.makeSocket(request)
+        let second = scene.link.makeSocket(request)
+        #expect(first !== second)
+    }
+
     // The contract's ownership rule: one challenge owns one send, and only
     // the socket's cancellation ends a send that never returns. A pong that
     // answers the challenge does not release it, so the next path change
