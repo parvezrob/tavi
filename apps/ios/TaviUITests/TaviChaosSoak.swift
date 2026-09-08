@@ -184,27 +184,26 @@ final class TaviChaosSoak: XCTestCase {
     private func installFixture(_ app: XCUIApplication, paneId: String) throws {
         let surface = app.descendants(matching: .any)["terminal.surface"]
         surface.tap()
-        // One bracketed paste, the way the composer sends text, so no line of
-        // the fixture can execute on its own half-typed: a heredoc writes it
-        // to a file, `sh -n` checks it, and only then is it sourced — a
-        // syntax error is named by the shell that would have run it, in the
-        // first seconds rather than at minute three.
+        // The fixture travels as one typed line: base64 through the keyboard,
+        // decoded into a file on the host, checked by `sh -n`, and only then
+        // sourced. One line because a multi-line heredoc typed key by key
+        // executes each line as it lands, and a bracketed paste is not an
+        // option — XCUITest's `typeText` never delivers the ESC that opens
+        // one (the first run typed `[200~cat`, which zsh rejected as a glob).
+        // A syntax error is named by the shell that would have run it, in
+        // the first seconds rather than at minute three.
         let path = Self.fixturePath(paneId)
-        let install = ([
-            "cat > \(path) <<'TAVI_FIXTURE'",
-            Self.fixtureScript(paneId: paneId),
-            "TAVI_FIXTURE",
-            // Split so the shell prints a token the typed line never shows:
-            // the pane still echoes what is typed until the fixture is
-            // sourced, and `stty -echo` is inside it.
-            "sh -n \(path) && echo FIX''TURE-OK || echo FIX''TURE-BAD",
-        ] as [String]).joined(separator: "\n")
-        surface.typeText("\u{1B}[200~\(install)\u{1B}[201~\r")
-        guard waitForTranscript(of: surface, timeout: 30, until: { $0.contains("FIXTURE-OK") }) else {
+        let encoded = Data(Self.fixtureScript(paneId: paneId).utf8).base64EncodedString()
+        // Split so the shell prints a token the typed line never shows: the
+        // pane still echoes what is typed until the fixture is sourced, and
+        // `stty -echo` is inside it.
+        let install = "printf %s '\(encoded)' | base64 -d > \(path) && sh -n \(path) && echo FIX''TURE-OK || echo FIX''TURE-BAD"
+        surface.typeText(install + "\r")
+        guard waitForTranscript(of: surface, timeout: 60, until: { $0.contains("FIXTURE-OK") }) else {
             XCTFail("sh -n rejected the soak fixture, or the host never answered.")
             throw ChaosSoakFailure.fixtureRejected
         }
-        surface.typeText("\u{1B}[200~. \(path)\u{1B}[201~\r")
+        surface.typeText(". \(path)\r")
         guard waitForTranscript(of: surface, timeout: 30, until: { $0.contains("SOAK ") }) else {
             XCTFail("The fixture never started streaming.")
             throw ChaosSoakFailure.fixtureRejected
@@ -478,11 +477,14 @@ final class TaviChaosSoak: XCTestCase {
     private func sample(_ app: XCUIApplication) -> Sample {
         let status = app.descendants(matching: .any)["terminal.status"]
         let keyboard = app.buttons["terminal.keyboard"]
+        // The home phase has no surface; reading `value` on an element that
+        // is not there is a hard XCTest failure, not an empty string.
+        let surface = app.descendants(matching: .any)["terminal.surface"]
         return Sample(
             at: milliseconds(),
             terminalIsLive: keyboard.exists && !status.exists,
             status: status.exists ? status.label : nil,
-            surface: (app.descendants(matching: .any)["terminal.surface"].value as? String) ?? "",
+            surface: surface.exists ? (surface.value as? String) ?? "" : "",
             health: currentHealth(app)
         )
     }
@@ -500,6 +502,14 @@ final class TaviChaosSoak: XCTestCase {
     // the next marker.
     private func type(_ app: XCUIApplication, mark: Mark) {
         let surface = app.descendants(matching: .any)["terminal.surface"]
+        // The owner's field report (#111): reconnect loops when scrolling or
+        // typing on a good link. A healthy window scrolls the scrollback and
+        // back before it types, so a cycle caused by interaction lands in
+        // the report as a cycle inside a fault-free window.
+        if mark.window == .healthy {
+            surface.swipeUp()
+            surface.swipeDown()
+        }
         surface.tap()
         if mark.window == .healthy { surface.typeText("\r") }
         surface.typeText("MARK-\(mark.number)\r")
