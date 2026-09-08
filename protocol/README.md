@@ -287,6 +287,47 @@ An agent starts something on `localhost:<port>`; the phone shows it in a WebKit 
 
 Only the device that opened a preview can keep it alive or close it (`404` for anyone else). Every ticket lives in memory: a host restart ends every preview. Tailscale Funnel is never involved; the door is as reachable as the host's own address — from the tailnet, by ticket holders only.
 
+## Events WebSocket (`tavi.events.v1`) · host 0.1.0
+
+Connect to:
+
+```text
+wss://<tailnet-host>/api/events
+```
+
+Offer the `tavi.events.v1` subprotocol and send the credential in the standard authorization header; a request
+without it is refused with `401` before the upgrade, and one that offers no matching subprotocol with `400`. One
+socket per phone carries the whole agent list, so a phone never needs a second connection to stay current.
+
+### The text frame
+
+Every frame the host sends is UTF-8 JSON and is a **snapshot**: the full list as it stands, never a delta, so a
+frame that never arrived can leave nothing stale on screen. A decoder must read three fields and tolerate more:
+
+| field | type | meaning |
+|---|---|---|
+| `type` | string | always `"agents"` |
+| `available` | boolean | whether herdr answered at all |
+| `agents` | array | the agents, empty when `available` is `false` |
+| `reason` | string, optional | why the list is unavailable, in words a person can read |
+
+`agents` entries carry the fields `GET /api/agents` documents above. Unknown fields are additive: decode the
+three named here, keep what you understand, and ignore the rest. A client sends nothing on this socket; a text
+or binary frame larger than 64 KiB closes it with `1009`.
+
+### Liveness · unreleased
+
+The host sends a WebSocket **ping** every **15 s**. A **pong** — with any payload, or none — marks it answered.
+A ping sent while the previous one is still unanswered is a **miss**, and on the **second unanswered ping** the
+host **terminates** the socket with no close frame, which a client sees as `1006`. The wall-clock delay is
+therefore 30–45 s after the last pong (or after connect), depending on where the pong fell between ticks: the
+contract is "two unanswered pings", not a fixed number of seconds.
+
+Most WebSocket stacks answer a ping automatically; a client that handles control frames itself must reply to
+keep the socket. The client may ping the host as well, with or without a payload, and the host echoes the
+payload in its pong — the phone uses that to prove a socket survived a network path change. Nothing on this
+socket is a delta, so a terminate costs a reconnect, never a resynchronisation.
+
 ## Terminal WebSocket · host 0.1.0
 
 Connect to:
@@ -416,7 +457,7 @@ The next protocol version adds a handshake, stable machine identity, per-device 
 
 Versions are the npm package `tavi-host`; a route is listed under the release that first shipped it (`git log -- apps/host/package.json` against the publish dates). Only releases that changed this document are listed — the others were host-side fixes.
 
-- **Unreleased** (renamed to the version it ships in at the next publish) — no read path reports a number git did not produce (#98, #103): `GET /api/repos` worktrees and `GET /api/worktrees/status` gained `aheadBehindFailed`, `GET /api/repos` worktrees also gained `dirtyFailed`, `GET /api/worktrees/pull-request` gained `unpushedFailed`, `POST /api/worktrees` gained `setupFilesFailed`, `POST /api/worktrees/commit` / `commit-message` answer `503` rather than "Nothing is staged" when `diff --cached` failed, and `POST /api/worktrees/pull-request` answers `503` naming the created pull request's link instead of inventing one numbered `0` when the read-back fails. Every new field is additive and optional, and the counts it qualifies keep their old zeros, so a phone built against 0.1.17 decodes the answers unchanged. `GET /api/herdr/tree` is now documented above as the route it has been since 0.1.0.
+- **Unreleased** (renamed to the version it ships in at the next publish) — the events WebSocket is documented above for the first time, and gained a server heartbeat (#111, #68): the host pings every 15 s and terminates a socket after two unanswered pings, and the events server now refuses a client frame over 64 KiB with `1009`. Nothing on the wire changed for a phone that answers pings — which every WebSocket stack does by default — and the snapshot frame is unchanged. Two idle costs went with it: the 2 s credential recheck an open socket makes is answered from an in-memory device list rather than a read of `devices.json`, so a revoke made through this host (`DELETE /api/devices/{id}`, `DELETE /api/devices/me`) still cuts a live socket off within 2 s, while one made by a separate `tavi devices revoke` process is picked up within 30 s; and one agents snapshot is serialized once for every connected phone instead of once each. Unchanged from the earlier Unreleased work — no read path reports a number git did not produce (#98, #103): `GET /api/repos` worktrees and `GET /api/worktrees/status` gained `aheadBehindFailed`, `GET /api/repos` worktrees also gained `dirtyFailed`, `GET /api/worktrees/pull-request` gained `unpushedFailed`, `POST /api/worktrees` gained `setupFilesFailed`, `POST /api/worktrees/commit` / `commit-message` answer `503` rather than "Nothing is staged" when `diff --cached` failed, and `POST /api/worktrees/pull-request` answers `503` naming the created pull request's link instead of inventing one numbered `0` when the read-back fails. Every new field is additive and optional, and the counts it qualifies keep their old zeros, so a phone built against 0.1.17 decodes the answers unchanged. `GET /api/herdr/tree` is now documented above as the route it has been since 0.1.0.
 - **0.1.17** (2026-09-03) — `POST /api/files/upload` (#88); `GET /api/host` gained `connection`, the caller's Tailscale path (#86, #84); `GET /api/repos` gained `truncated`, `error`, and per-worktree `withinRoots`, `/api/worktrees/pull-base` gained `fetched` and `from`, and `GET /api/worktrees/removal` gained `alsoClosed` (#83, #82).
 - **0.1.16** (2026-09-02) — `DELETE /api/worktrees` takes `unlock` so a locked worktree can be removed.
 - **0.1.15** (2026-09-02) — Source Control: `GET /api/repos` (#59a) carrying each branch's pull request (#74), `POST /api/worktrees` (#75), `status`/`stage`/`unstage`/`commit`/`commit-message` (#77), `log`/`push`/`pull-base` (#78), `pull-request` and `/api/repos/issues` (#79), `removal` and `DELETE /api/worktrees` (#81).
