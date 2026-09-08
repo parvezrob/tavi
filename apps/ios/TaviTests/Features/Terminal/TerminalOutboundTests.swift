@@ -185,6 +185,87 @@ struct TerminalOutboundTests {
         Data(wheelReport(tick).utf8)
     }
 
+    // A press and its release are one gesture. Dropping the press while
+    // keeping the release leaves the application believing a button is
+    // still down — a scrollbar that keeps dragging with no finger on it.
+    private static func buttonPress(_ tick: Int) -> String {
+        "\u{1B}[<0;\(tick + 1);1M"
+    }
+
+    private static func buttonRelease(_ tick: Int) -> String {
+        "\u{1B}[<0;\(tick + 1);1m"
+    }
+
+    // Every sequence in a chunk has to be a wheel tick before any of it may
+    // go. Judging the buffer by its first and last byte called this one
+    // droppable, and the keystroke in the middle would have gone with it.
+    @Test func aChunkOfWheelReportsAroundAKeystrokeIsNeverDropped() async throws {
+        let transport = GatedTransport()
+        let (outbound, _) = Self.outbound(transport)
+        outbound.submitInput(Data("first".utf8), generation: 1, canCoalesce: false)
+        try await waitUntil { await transport.inputs.count == 1 }
+        let glued: String = Self.wheelReport(0) + "a" + Self.wheelReport(1)
+        for _ in 0..<20 {
+            outbound.submitInput(Data(glued.utf8), generation: 1, canCoalesce: false)
+        }
+        try await drain(transport, outbound)
+
+        let sent: String = await transport.inputs.joined()
+        let keystrokes: Int = sent.components(separatedBy: "a").count - 1
+        #expect(keystrokes == 20)
+    }
+
+    // Same buffer shape, different button: these are not wheel ticks, so the
+    // pair stays whole however deep the queue gets.
+    @Test func aButtonPressAndItsReleaseAreNeverDropped() async throws {
+        let transport = GatedTransport()
+        let (outbound, _) = Self.outbound(transport)
+        outbound.submitInput(Data("first".utf8), generation: 1, canCoalesce: false)
+        try await waitUntil { await transport.inputs.count == 1 }
+        for tick in 0..<20 {
+            outbound.submitInput(Data(Self.buttonPress(tick).utf8), generation: 1, canCoalesce: false)
+            outbound.submitInput(Data(Self.buttonRelease(tick).utf8), generation: 1, canCoalesce: false)
+        }
+        try await drain(transport, outbound)
+
+        let sent: String = await transport.inputs.joined()
+        let presses: Int = sent.components(separatedBy: "M").count - 1
+        let releases: Int = sent.components(separatedBy: "m").count - 1
+        #expect(presses == 20)
+        #expect(releases == 20)
+    }
+
+    // A sequence the buffer ended in the middle of is not a wheel tick and
+    // never becomes droppable by being next to ones that are.
+    @Test func aTruncatedSequenceIsNeverDropped() async throws {
+        let transport = GatedTransport()
+        let (outbound, _) = Self.outbound(transport)
+        outbound.submitInput(Data("first".utf8), generation: 1, canCoalesce: false)
+        try await waitUntil { await transport.inputs.count == 1 }
+        let cut: String = Self.wheelReport(0) + "\u{1B}[<64;9"
+        for _ in 0..<20 {
+            outbound.submitInput(Data(cut.utf8), generation: 1, canCoalesce: false)
+        }
+        try await drain(transport, outbound)
+
+        let sent: String = await transport.inputs.joined()
+        let partials: Int = sent.components(separatedBy: "\u{1B}[<64;9").count - 1
+        #expect(partials == 20)
+    }
+
+    // The priority send is in no drain order, so nothing else would ever
+    // release it: the connection that started it has to.
+    @Test func cancellingTheQueueCancelsAPriorityPingStillInFlight() async throws {
+        let transport = GatedTransport()
+        let (outbound, _) = Self.outbound(transport)
+        let ping = outbound.sendAhead(.ping(identifier: "p1"), generation: 1)
+        try await waitUntil { await transport.pings.count == 1 }
+
+        outbound.cancel()
+        #expect(ping.isCancelled)
+        await transport.release()
+    }
+
     // Releases sends until nothing more is offered, so a test can read the
     // whole scroll as the frames it actually became.
     private func drain(_ transport: GatedTransport, _ outbound: TerminalOutbound) async throws {
@@ -272,6 +353,7 @@ struct TerminalOutboundTests {
 private actor GatedTransport: TerminalTransporting {
     private(set) var inputs: [String] = []
     private(set) var resizes: [TerminalClientMessage] = []
+    private(set) var pings: [String] = []
     private var waiting: [CheckedContinuation<Void, Never>] = []
 
     func connect(configuration: TerminalConnectionConfiguration, resume: TerminalResumePoint?) {}
@@ -281,6 +363,7 @@ private actor GatedTransport: TerminalTransporting {
     func send(_ message: TerminalClientMessage) async {
         if case let .input(value) = message { inputs.append(value) }
         if case .resize = message { resizes.append(message) }
+        if case let .ping(identifier) = message { pings.append(identifier) }
         await withCheckedContinuation { continuation in
             waiting.append(continuation)
         }

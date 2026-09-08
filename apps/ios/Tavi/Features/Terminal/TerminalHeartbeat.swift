@@ -167,12 +167,20 @@ final class TerminalHeartbeat {
         // after `stop()` and a new `start()` — a hung one let go once the
         // connection was already replaced — would otherwise cancel the live
         // round's send bound and leave it with no bound at all (#107).
+        guard isCurrent?(generation) == true, let own = round,
+              own.identifier == identifier, own.isSendOutstanding else {
+            ownBound.cancel()
+            return
+        }
+        // A completion past the round's deadline is a stalled send however
+        // narrowly it beat the expired bound to the actor, and an answer
+        // already in hand does not make it one: the bound standing over this
+        // half is left to say so (#111).
+        guard timing.now() < own.deadline else { return }
         ownBound.cancel()
-        guard isCurrent?(generation) == true, round?.identifier == identifier,
-              round?.isSendOutstanding == true else { return }
-        // Past the guard this beat owns the live round, so the handle is its
-        // own bound unless a path change re-armed it; releasing the round's
-        // send half disarms whichever one is standing.
+        // Past the guards this beat owns the live round, so the handle is
+        // its own bound unless a path change re-armed it; releasing the
+        // round's send half disarms whichever one is standing.
         round?.isSendOutstanding = false
         sendBound?.cancel()
         sendBound = nil

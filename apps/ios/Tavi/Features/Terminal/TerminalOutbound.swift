@@ -31,6 +31,10 @@ final class TerminalOutbound {
     // Eight chunks is a few frames of scrolling: long enough to ride out one
     // slow send, short enough that catching up costs a shorter scroll.
     private static let maximumPendingChunks = 8
+    // The four wheel directions. A tick carrying a modifier is a different
+    // button and stays undroppable: losing one is not worth the risk of
+    // guessing wrong about what the application asked for.
+    private static let wheelButtons = 64...67
 
     // One-shot Ctrl modifier for the quick-key row.
     private(set) var controlLatchActive = false
@@ -41,6 +45,10 @@ final class TerminalOutbound {
     private var outcomeConsumer: OutcomeConsumer?
     private var task: Task<Void, Never>?
     private var taskID: UUID?
+    // The priority send, owned like every other task the connection starts:
+    // it is in no drain order, so nothing else would ever release it and a
+    // stalled one outlived the connection that asked for it (#111).
+    private var priorityTask: Task<Void, Never>?
     private var pendingInputChunks: [PendingTerminalInput] = []
     private var pendingInputByteCount = 0
     // The generation the queue was accepted under; a connection change
@@ -79,28 +87,73 @@ final class TerminalOutbound {
                 data = controlCode
             }
         }
-        let isMouseReport = Self.isMouseReport(data)
+        let isWheelReports = Self.isWheelReports(data)
         // One line per batch rather than one per wheel tick: at sixty
         // reports a second the log was itself part of the cost (#111).
-        if data.first == 0x1B, !isMouseReport {
+        if data.first == 0x1B, !isWheelReports {
             Self.logger.info("terminal-originated control sequence, \(data.count) bytes")
         }
 
         guard task == nil, pendingInputChunks.isEmpty else {
-            enqueue(data, canCoalesce: canCoalesce, isMouseReport: isMouseReport)
+            enqueue(data, canCoalesce: canCoalesce, isWheelReports: isWheelReports)
             return
         }
-        sendInput(data, isMouseReport: isMouseReport)
+        sendInput(data, isWheelReports: isWheelReports)
     }
 
-    // An SGR mouse report: ESC [ < params M or m. An agent with mouse
-    // tracking on makes Ghostty send one per wheel tick, and several arrive
-    // glued together, so the whole frame is judged by its ends (#111).
-    private static func isMouseReport(_ data: Data) -> Bool {
-        guard data.count >= 4, data.first == 0x1B, let last = data.last,
-              last == UInt8(ascii: "M") || last == UInt8(ascii: "m") else { return false }
-        let second = data.index(after: data.startIndex)
-        return data[second] == UInt8(ascii: "[") && data[data.index(after: second)] == UInt8(ascii: "<")
+    // Whether this buffer is wheel ticks and nothing else, which is the
+    // only thing that may be dropped. Judging it by its first and last byte
+    // was wrong twice: a batch with typed text glued into the middle looked
+    // droppable and would have taken keystrokes with it, and every SGR
+    // button press and release matched, so dropping a press while keeping
+    // its release left the application mid-drag. Every sequence in the
+    // buffer has to be parsed, and every one of them has to be a wheel tick
+    // (#111).
+    private static func isWheelReports(_ data: Data) -> Bool {
+        var index = data.startIndex
+        var found = 0
+        while index < data.endIndex {
+            guard let end = wheelReportEnd(of: data, from: index) else { return false }
+            index = end
+            found += 1
+        }
+        return found > 0
+    }
+
+    // Just past one complete `ESC [ < button ; column ; row M|m` whose
+    // button is a wheel tick, or nil for anything else: another button, a
+    // sequence cut short by the end of the buffer, or ordinary typed bytes.
+    private static func wheelReportEnd(of data: Data, from start: Data.Index) -> Data.Index? {
+        var index = start
+        func take(_ byte: UInt8) -> Bool {
+            guard index < data.endIndex, data[index] == byte else { return false }
+            index = data.index(after: index)
+            return true
+        }
+        func takeParameter() -> Int? {
+            var value = 0
+            var digits = 0
+            while index < data.endIndex, let digit = Self.digit(data[index]) {
+                // Longer than any coordinate a terminal reports, so it is
+                // not one.
+                guard digits < 5 else { return nil }
+                value = value * 10 + digit
+                digits += 1
+                index = data.index(after: index)
+            }
+            return digits > 0 ? value : nil
+        }
+        guard take(0x1B), take(UInt8(ascii: "[")), take(UInt8(ascii: "<")),
+              let button = takeParameter(), Self.wheelButtons.contains(button),
+              take(UInt8(ascii: ";")), takeParameter() != nil,
+              take(UInt8(ascii: ";")), takeParameter() != nil,
+              take(UInt8(ascii: "M")) || take(UInt8(ascii: "m")) else { return nil }
+        return index
+    }
+
+    private static func digit(_ byte: UInt8) -> Int? {
+        guard byte >= UInt8(ascii: "0"), byte <= UInt8(ascii: "9") else { return nil }
+        return Int(byte - UInt8(ascii: "0"))
     }
 
     @discardableResult
@@ -132,10 +185,13 @@ final class TerminalOutbound {
     // so no input can be reordered by it.
     @discardableResult
     func sendAhead(_ message: TerminalClientMessage, generation: Int) -> Task<Void, Never> {
-        Task { [weak self] in
+        priorityTask?.cancel()
+        let task = Task { [weak self] in
             guard let self, isCurrentConnection?(generation) == true else { return }
             await deliver(message, generation: generation, inputWasSubmitted: false)
         }
+        priorityTask = task
+        return task
     }
 
     // One send and the three ways it ends, shared by the queued path and the
@@ -167,16 +223,18 @@ final class TerminalOutbound {
 
     func cancel() {
         task?.cancel()
+        priorityTask?.cancel()
         task = nil
+        priorityTask = nil
         taskID = nil
         pendingInputChunks.removeAll(keepingCapacity: false)
         pendingInputByteCount = 0
     }
 
-    private func enqueue(_ data: Data, canCoalesce: Bool, isMouseReport: Bool) {
+    private func enqueue(_ data: Data, canCoalesce: Bool, isWheelReports: Bool) {
         // Wheel reports never earn a refusal: a queue too full for them
         // sheds the oldest of them below instead.
-        guard isMouseReport || pendingInputByteCount <= Self.maximumPendingInputBytes - data.count else {
+        guard isWheelReports || pendingInputByteCount <= Self.maximumPendingInputBytes - data.count else {
             outcomeConsumer?(.backedUp)
             return
         }
@@ -186,33 +244,33 @@ final class TerminalOutbound {
         if canCoalesce,
            let lastIndex = pendingInputChunks.indices.last,
            pendingInputChunks[lastIndex].canCoalesce,
-           pendingInputChunks[lastIndex].isMouseReport == isMouseReport,
+           pendingInputChunks[lastIndex].isWheelReports == isWheelReports,
            pendingInputChunks[lastIndex].data.count <= Self.maximumCoalescedInputBytes - data.count {
             pendingInputChunks[lastIndex].data.append(data)
         } else {
             pendingInputChunks.append(
-                PendingTerminalInput(data: data, canCoalesce: canCoalesce, isMouseReport: isMouseReport)
+                PendingTerminalInput(data: data, canCoalesce: canCoalesce, isWheelReports: isWheelReports)
             )
         }
         pendingInputByteCount += data.count
-        dropOldestMouseReports()
+        dropOldestWheelReports()
     }
 
     // The only input Tavi may lose, and only when the queue is already too
     // deep to be scrolling in time: a dropped tick is a shorter scroll, a
     // dropped keystroke is a lie about what was typed. Whole chunks go, so
     // nothing left behind is reordered or cut mid-sequence.
-    private func dropOldestMouseReports() {
+    private func dropOldestWheelReports() {
         while pendingInputChunks.count > Self.maximumPendingChunks,
-              let index = pendingInputChunks.firstIndex(where: \.isMouseReport) {
+              let index = pendingInputChunks.firstIndex(where: \.isWheelReports) {
             pendingInputByteCount -= pendingInputChunks[index].data.count
             pendingInputChunks.remove(at: index)
         }
     }
 
-    private func sendInput(_ data: Data, isMouseReport: Bool) {
-        if isMouseReport {
-            Self.logger.info("mouse reports batched, \(data.count) bytes")
+    private func sendInput(_ data: Data, isWheelReports: Bool) {
+        if isWheelReports {
+            Self.logger.info("wheel reports batched, \(data.count) bytes")
         }
         let value = String(decoding: data, as: UTF8.self)
         send(.input(value), generation: generation, inputWasSubmitted: true)
@@ -225,7 +283,7 @@ final class TerminalOutbound {
         guard pendingInputChunks.isEmpty else {
             let pending = pendingInputChunks.removeFirst()
             pendingInputByteCount -= pending.data.count
-            sendInput(pending.data, isMouseReport: pending.isMouseReport)
+            sendInput(pending.data, isWheelReports: pending.isWheelReports)
             return
         }
         outcomeConsumer?(.drained)
@@ -235,5 +293,5 @@ final class TerminalOutbound {
 private struct PendingTerminalInput {
     var data: Data
     let canCoalesce: Bool
-    let isMouseReport: Bool
+    let isWheelReports: Bool
 }

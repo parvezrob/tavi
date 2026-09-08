@@ -273,4 +273,44 @@ struct TerminalHeartbeatTests {
             #expect(controller.errorMessage == nil)
         }
     }
+
+    // A round is judged by its deadline on both halves. An answer at 1.9 s
+    // says the host is there; the ping that was still stuck in our own
+    // queue at 2.1 s says our side is not, and a send completion arriving
+    // after the deadline must not end the round healthy however narrowly it
+    // beat the expired bound to the actor (#111).
+    @Test
+    func aSendCompletingPastTheDeadlineIsStalledEvenWithAnAnswerInHand() async throws {
+        let transport = RecoveryTransport(hangsSends: true)
+        let clock = ManualTerminalClock()
+        let paths = ScriptedPathObserver()
+        let controller = makeController(transport, clock, paths: paths)
+
+        try await withCleanup(controller, transport) {
+            try await beginFirstRound(controller, transport, clock)
+            let identifier = try await requirePingIdentifier(transport)
+
+            // A path change makes this the handover check, on the round's
+            // own two seconds.
+            paths.emit(NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "en0"))
+            await settle()
+            paths.emit(NetworkPathSnapshot(isSatisfied: true, interfaceIdentity: "pdp_ip0"))
+            try await waitFor { await clock.timesScheduled(Self.sendBound) == 2 }
+
+            // The host answers inside the deadline; our own send does not.
+            clock.advance(by: .milliseconds(1_900))
+            await transport.emit(.message(.pong(identifier: identifier)))
+            await settle()
+            clock.advance(by: .milliseconds(200))
+            await transport.releaseSend()
+            await settle()
+
+            #expect(await clock.timesScheduled(Self.answerBound) == 0)
+            // The bound over the send is still standing, and it is what ends
+            // the round.
+            try await clock.resumeAll(for: Self.sendBound)
+            try await waitFor { controller.connectionState == .reconnecting(attempt: 1) }
+            #expect(controller.errorMessage?.contains("stopped responding") == true)
+        }
+    }
 }
