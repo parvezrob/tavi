@@ -147,9 +147,12 @@ struct TerminalHeartbeatTests {
             try await clock.resumeAll(for: Self.sendBound)
             try await waitFor { controller.connectionState == .reconnecting(attempt: 1) }
             #expect(controller.errorMessage?.contains("stopped responding") == true)
-            // Recovery is scheduled while the queued keystrokes remain unsent.
+            // Recovery is scheduled, and the keystroke is exactly as
+            // uncertain as it was: handed to the transport, never completed,
+            // never replayed. The ping holds the queue open rather than shut
+            // now (#111), so a stuck heartbeat no longer blocks typing.
             try await waitFor { await clock.hasWaiter(within: Self.retryDelay) }
-            #expect(await transport.inputMessages == [])
+            #expect(await transport.inputMessages == ["deploy\r"])
         }
     }
 
@@ -233,5 +236,41 @@ struct TerminalHeartbeatTests {
             throw TerminalTestFailure()
         }
         return identifier
+    }
+
+    // Scrolling a pane that has mouse tracking on fills the outbound path
+    // with wheel reports (#111). The ping must not queue behind them: its
+    // budget asks whether *the ping* left, and a link still carrying frames
+    // is not a link that has stopped answering — this was the owner's
+    // "reconnect loop when scrolling".
+    @Test
+    func aQueuedInputThatNeverSendsDoesNotSpendThePingsOwnBudget() async throws {
+        let transport = RecoveryTransport()
+        let clock = ManualTerminalClock()
+        let controller = makeController(transport, clock)
+
+        try await withCleanup(controller, transport) {
+            controller.connect(hostText: Self.host, paneID: "fixture", credential: "valid-token")
+            try await waitFor { await transport.connectCount == 1 }
+            await transport.emit(.message(.ready(stream: "epoch-a", offset: 0, resumed: false)))
+            try await waitFor { controller.connectionState == .connected }
+
+            // A scroll's worth of input goes on the wire and stays there.
+            await transport.hangInputSends()
+            controller.bridge.receiveTerminalInput(Data("\u{1B}[<64;10;20M".utf8))
+            try await waitFor { await transport.inputMessages.count == 1 }
+
+            try await waitFor { await clock.hasWaiter(for: Self.interval) }
+            try await clock.resumeAll(for: Self.interval)
+
+            // The ping went out on its own and the host now owes an answer:
+            // the send bound is released, not spent on the stuck frame.
+            let identifier = try await requirePingIdentifier(transport)
+            try await waitFor { await clock.hasWaiter(for: Self.answerBound) }
+            await transport.emit(.message(.pong(identifier: identifier)))
+            try await waitFor { await clock.hasWaiter(for: Self.interval) }
+            #expect(controller.connectionState == .connected)
+            #expect(controller.errorMessage == nil)
+        }
     }
 }

@@ -172,6 +172,99 @@ struct TerminalOutboundTests {
     private static func filler(_ bytes: Int) -> Data {
         Data(String(repeating: "x", count: bytes).utf8)
     }
+
+    // MARK: - Wheel reports (#111)
+
+    // An SGR mouse report, the shape Ghostty sends per wheel tick while an
+    // agent has mouse tracking on.
+    private static func wheelReport(_ tick: Int) -> String {
+        "\u{1B}[<64;\(tick % 80 + 1);\(tick % 40 + 1)M"
+    }
+
+    private static func wheelData(_ tick: Int) -> Data {
+        Data(wheelReport(tick).utf8)
+    }
+
+    // Releases sends until nothing more is offered, so a test can read the
+    // whole scroll as the frames it actually became.
+    private func drain(_ transport: GatedTransport, _ outbound: TerminalOutbound) async throws {
+        for _ in 0..<64 {
+            await transport.release()
+            for _ in 0..<50 { await Task.yield() }
+            if outbound.isIdle { return }
+        }
+        Issue.record("the outbound queue never drained")
+    }
+
+    // Scrolling a Claude Code pane put one frame on the wire per wheel tick
+    // at sixty a second, which is what queued in front of the heartbeat on
+    // cellular. The host reads a longer scroll, not more messages.
+    @Test func aScrollOfWheelReportsLeavesAsAHandfulOfFrames() async throws {
+        let transport = GatedTransport()
+        let (outbound, recorder) = Self.outbound(transport)
+        for tick in 0..<200 {
+            outbound.submitInput(Self.wheelData(tick), generation: 1, canCoalesce: true)
+        }
+        try await waitUntil { await transport.inputs.count == 1 }
+        try await drain(transport, outbound)
+
+        let frames = await transport.inputs
+        #expect(frames.count <= 3)
+        let ticks: [String] = (0..<200).map { Self.wheelReport($0) }
+        let expected: String = ticks.joined()
+        #expect(frames.joined() == expected)
+        #expect(recorder.outcomes.contains { if case .backedUp = $0 { true } else { false } } == false)
+    }
+
+    // A batch is a batch of wheel reports and nothing else: a keystroke that
+    // arrives mid-scroll keeps its place in the stream and its own frame.
+    @Test func aKeystrokeAmongWheelReportsKeepsItsOrderAndItsOwnFrame() async throws {
+        let transport = GatedTransport()
+        let (outbound, _) = Self.outbound(transport)
+        outbound.submitInput(Self.wheelData(0), generation: 1, canCoalesce: true)
+        try await waitUntil { await transport.inputs.count == 1 }
+        for tick in 1...3 {
+            outbound.submitInput(Self.wheelData(tick), generation: 1, canCoalesce: true)
+        }
+        outbound.submitInput(Data("a".utf8), generation: 1, canCoalesce: true)
+        for tick in 4...6 {
+            outbound.submitInput(Self.wheelData(tick), generation: 1, canCoalesce: true)
+        }
+        try await drain(transport, outbound)
+
+        let frames = await transport.inputs
+        #expect(frames.contains("a"))
+        let ticks: [String] = (0...6).map { Self.wheelReport($0) }
+        let before: String = ticks[0...3].joined()
+        let after: String = ticks[4...6].joined()
+        let expected: String = before + "a" + after
+        #expect(frames.joined() == expected)
+    }
+
+    // The only input Tavi may lose. A queue too deep to be scrolling in time
+    // sheds the oldest ticks; every keystroke in it survives, in order, and
+    // nothing is refused.
+    @Test func aDeepQueueDropsWheelTicksAndNeverAKeystroke() async throws {
+        let transport = GatedTransport()
+        let (outbound, recorder) = Self.outbound(transport)
+        outbound.submitInput(Data("first".utf8), generation: 1, canCoalesce: false)
+        try await waitUntil { await transport.inputs.count == 1 }
+        for tick in 0..<10 {
+            outbound.submitInput(Self.wheelData(tick), generation: 1, canCoalesce: true)
+            outbound.submitInput(Data("\(tick)".utf8), generation: 1, canCoalesce: false)
+        }
+        try await drain(transport, outbound)
+
+        let sent = await transport.inputs.joined()
+        #expect(sent.hasPrefix("first"))
+        // Every keystroke, in the order it was typed.
+        let typed = String(sent.filter(\.isNumber))
+        #expect(typed == "0123456789")
+        // And fewer wheel reports than the finger made.
+        let wheels: Int = sent.components(separatedBy: "\u{1B}[<").count - 1
+        #expect(wheels < 10)
+        #expect(recorder.outcomes.contains { if case .backedUp = $0 { true } else { false } } == false)
+    }
 }
 
 // A transport that holds every send open until the test lets it finish, so

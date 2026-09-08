@@ -77,7 +77,7 @@ final class TerminalSessionController {
         }
         heartbeat.install(
             send: { [weak self] identifier, generation in
-                self?.outbound.send(.ping(identifier: identifier), generation: generation)
+                self?.outbound.sendAhead(.ping(identifier: identifier), generation: generation)
             },
             isCurrent: { [weak self] generation in
                 guard let self else { return false }

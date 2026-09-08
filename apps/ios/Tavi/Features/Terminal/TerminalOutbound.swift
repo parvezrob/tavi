@@ -27,6 +27,10 @@ final class TerminalOutbound {
     private static let logger = Logger(subsystem: "com.farfield.tavi", category: "terminal.connection")
     private static let maximumCoalescedInputBytes = 4 * 1_024
     private static let maximumPendingInputBytes = 64 * 1_024
+    // Past this depth the outbound path is not keeping up with the pointer.
+    // Eight chunks is a few frames of scrolling: long enough to ride out one
+    // slow send, short enough that catching up costs a shorter scroll.
+    private static let maximumPendingChunks = 8
 
     // One-shot Ctrl modifier for the quick-key row.
     private(set) var controlLatchActive = false
@@ -75,15 +79,28 @@ final class TerminalOutbound {
                 data = controlCode
             }
         }
-        if data.first == 0x1B {
+        let isMouseReport = Self.isMouseReport(data)
+        // One line per batch rather than one per wheel tick: at sixty
+        // reports a second the log was itself part of the cost (#111).
+        if data.first == 0x1B, !isMouseReport {
             Self.logger.info("terminal-originated control sequence, \(data.count) bytes")
         }
 
         guard task == nil, pendingInputChunks.isEmpty else {
-            enqueue(data, canCoalesce: canCoalesce)
+            enqueue(data, canCoalesce: canCoalesce, isMouseReport: isMouseReport)
             return
         }
-        sendInput(data)
+        sendInput(data, isMouseReport: isMouseReport)
+    }
+
+    // An SGR mouse report: ESC [ < params M or m. An agent with mouse
+    // tracking on makes Ghostty send one per wheel tick, and several arrive
+    // glued together, so the whole frame is judged by its ends (#111).
+    private static func isMouseReport(_ data: Data) -> Bool {
+        guard data.count >= 4, data.first == 0x1B, let last = data.last,
+              last == UInt8(ascii: "M") || last == UInt8(ascii: "m") else { return false }
+        let second = data.index(after: data.startIndex)
+        return data[second] == UInt8(ascii: "[") && data[data.index(after: second)] == UInt8(ascii: "<")
     }
 
     @discardableResult
@@ -102,27 +119,50 @@ final class TerminalOutbound {
             }
             guard let self, isCurrentConnection?(generation) == true else { return }
             defer { finish(taskID) }
-            do {
-                if case let .input(data) = message {
-                    try await inputDelivery.submitOnce(Data(data.utf8))
-                } else {
-                    try await client.send(message)
-                }
-                // Success is fenced like failure: a resize completing after
-                // its connection was replaced would move the live one's idea
-                // of the host's grid (#107).
-                guard isCurrentConnection?(generation) == true else { return }
-                outcomeConsumer?(.sent(message))
-            } catch let error as TerminalTransportError {
-                guard isCurrentConnection?(generation) == true else { return }
-                outcomeConsumer?(.failed(error, inputWasSubmitted: inputWasSubmitted))
-            } catch {
-                guard isCurrentConnection?(generation) == true else { return }
-                outcomeConsumer?(.failed(nil, inputWasSubmitted: inputWasSubmitted))
-            }
+            await deliver(message, generation: generation, inputWasSubmitted: inputWasSubmitted)
         }
         self.task = task
         return task
+    }
+
+    // The heartbeat's ping does not queue. A pane with mouse tracking on
+    // fills the outbound path with wheel reports, and a ping behind them
+    // made the send bound measure that drain rather than the ping — the
+    // socket was answering the whole time (#111). It joins no drain order,
+    // so no input can be reordered by it.
+    @discardableResult
+    func sendAhead(_ message: TerminalClientMessage, generation: Int) -> Task<Void, Never> {
+        Task { [weak self] in
+            guard let self, isCurrentConnection?(generation) == true else { return }
+            await deliver(message, generation: generation, inputWasSubmitted: false)
+        }
+    }
+
+    // One send and the three ways it ends, shared by the queued path and the
+    // priority one.
+    private func deliver(
+        _ message: TerminalClientMessage,
+        generation: Int,
+        inputWasSubmitted: Bool
+    ) async {
+        do {
+            if case let .input(data) = message {
+                try await inputDelivery.submitOnce(Data(data.utf8))
+            } else {
+                try await client.send(message)
+            }
+            // Success is fenced like failure: a resize completing after its
+            // connection was replaced would move the live one's idea of the
+            // host's grid (#107).
+            guard isCurrentConnection?(generation) == true else { return }
+            outcomeConsumer?(.sent(message))
+        } catch let error as TerminalTransportError {
+            guard isCurrentConnection?(generation) == true else { return }
+            outcomeConsumer?(.failed(error, inputWasSubmitted: inputWasSubmitted))
+        } catch {
+            guard isCurrentConnection?(generation) == true else { return }
+            outcomeConsumer?(.failed(nil, inputWasSubmitted: inputWasSubmitted))
+        }
     }
 
     func cancel() {
@@ -133,24 +173,47 @@ final class TerminalOutbound {
         pendingInputByteCount = 0
     }
 
-    private func enqueue(_ data: Data, canCoalesce: Bool) {
-        guard pendingInputByteCount <= Self.maximumPendingInputBytes - data.count else {
+    private func enqueue(_ data: Data, canCoalesce: Bool, isMouseReport: Bool) {
+        // Wheel reports never earn a refusal: a queue too full for them
+        // sheds the oldest of them below instead.
+        guard isMouseReport || pendingInputByteCount <= Self.maximumPendingInputBytes - data.count else {
             outcomeConsumer?(.backedUp)
             return
         }
 
+        // Wheel reports merge only with wheel reports, so a batch stays one
+        // droppable unit and no keystroke is ever inside one.
         if canCoalesce,
            let lastIndex = pendingInputChunks.indices.last,
            pendingInputChunks[lastIndex].canCoalesce,
+           pendingInputChunks[lastIndex].isMouseReport == isMouseReport,
            pendingInputChunks[lastIndex].data.count <= Self.maximumCoalescedInputBytes - data.count {
             pendingInputChunks[lastIndex].data.append(data)
         } else {
-            pendingInputChunks.append(PendingTerminalInput(data: data, canCoalesce: canCoalesce))
+            pendingInputChunks.append(
+                PendingTerminalInput(data: data, canCoalesce: canCoalesce, isMouseReport: isMouseReport)
+            )
         }
         pendingInputByteCount += data.count
+        dropOldestMouseReports()
     }
 
-    private func sendInput(_ data: Data) {
+    // The only input Tavi may lose, and only when the queue is already too
+    // deep to be scrolling in time: a dropped tick is a shorter scroll, a
+    // dropped keystroke is a lie about what was typed. Whole chunks go, so
+    // nothing left behind is reordered or cut mid-sequence.
+    private func dropOldestMouseReports() {
+        while pendingInputChunks.count > Self.maximumPendingChunks,
+              let index = pendingInputChunks.firstIndex(where: \.isMouseReport) {
+            pendingInputByteCount -= pendingInputChunks[index].data.count
+            pendingInputChunks.remove(at: index)
+        }
+    }
+
+    private func sendInput(_ data: Data, isMouseReport: Bool) {
+        if isMouseReport {
+            Self.logger.info("mouse reports batched, \(data.count) bytes")
+        }
         let value = String(decoding: data, as: UTF8.self)
         send(.input(value), generation: generation, inputWasSubmitted: true)
     }
@@ -162,7 +225,7 @@ final class TerminalOutbound {
         guard pendingInputChunks.isEmpty else {
             let pending = pendingInputChunks.removeFirst()
             pendingInputByteCount -= pending.data.count
-            sendInput(pending.data)
+            sendInput(pending.data, isMouseReport: pending.isMouseReport)
             return
         }
         outcomeConsumer?(.drained)
@@ -172,4 +235,5 @@ final class TerminalOutbound {
 private struct PendingTerminalInput {
     var data: Data
     let canCoalesce: Bool
+    let isMouseReport: Bool
 }
