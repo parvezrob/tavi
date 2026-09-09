@@ -42,6 +42,10 @@ Geography is the floor: East US ↔ Southeast Asia is ~225 ms round trip, West E
 
 Bandwidth is not the cost. Workers + Durable Objects ≈ $39/month at the modelled workload if hibernation holds (≈ $700 if not); VPS relays $30–100 compute plus region-dependent egress ($50–2,300; India and Africa are 6× the US rate on Fly). Managed realtime services would be $550–9,000/month. The real cost is a person on call, monitoring, and support.
 
+## Q (2026-09-10, 01:11): I was on the phone for a while, the disconnect was happening every few minutes. Check the log or are we good?
+
+Checked. First reading blamed the Mac (closed-lid asleep on battery 22:42–01:06); wrong host, the owner was on fedora-1. fedora-1's Tailscale journal (pulled by Taildrop) shows the phone's Tailscale extension restarting 14 times between 23:18 and 00:34, twelve of them in the half hour from 00:03, each preceded by 30–60 s of fedora pushing through the relay and hearing nothing. The owner confirmed each restart was a VPN toggle to recover. fedora-1's own side was healthy throughout; the host and the app behaved correctly and redialled within seconds every time. Same bug class as the morning, faster trigger on mobile data in motion; 20 quiet minutes on the same carrier show the trigger is a transition, not cellular as such. Written up in `docs/history/2026-09-09-tailscale-stall/episode-2-evening.md`. This is the plan's case: one route, inside someone else's process, nothing in Tavi can restart it.
+
 ## What the owner said they will do
 
 "I will read the whole architectural plan when research and review is finished." Then: "I will continue on this later. This is a big read and a big decision." The five decisions are in the plan's §8 and the paper's section 15; nothing starts before they are made except phase 0.

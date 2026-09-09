@@ -1,6 +1,6 @@
 # 2026-09-09 07:00–07:07 — the phone's Tailscale extension stalled; Tavi had no other route
 
-Issue: #119. Cross-referenced on #111. Files here: `evidence.md` (the raw pack handed to the cold reviewer: host log tail, both Tailscale logs, the phone's Apple network-layer lines, Wi-Fi telemetry, LAN pings) and `astra-verdict.md` (GPT-6 Astra's cold review, `second-opinion` skill, effort xhigh).
+Issue: #119. Cross-referenced on #111. **Second episode the same night, twelve stalls in half an hour on cellular against fedora-1: `episode-2-evening.md`.** Files here: `evidence.md` (the raw pack handed to the cold reviewer: host log tail, both Tailscale logs, the phone's Apple network-layer lines, Wi-Fi telemetry, LAN pings) and `astra-verdict.md` (GPT-6 Astra's cold review, `second-opinion` skill, effort xhigh).
 
 ## What the owner saw
 
