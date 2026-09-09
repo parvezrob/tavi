@@ -1,0 +1,735 @@
+<title>Nowhere Else to Dial</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --paper:#F6F7F5; --surface:#FFFFFF; --ink:#18232C; --ink2:#4A5966; --ink3:#7A8891;
+  --line:#D9DFE2; --line2:#EDF0EF; --fill:#EEF1F0; --code:#EDF0EF;
+  --accent:#0B6E6A; --accent-soft:#D7ECEA; --warn:#B8651B; --warn-soft:#F6E7D6; --bad:#B0413E; --bad-soft:#F4DEDD;
+  --display:"Bricolage Grotesque","Helvetica Neue",Arial,sans-serif;
+  --body:"Newsreader",Georgia,"Times New Roman",serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0E1417; --surface:#151D22; --ink:#E7ECEE; --ink2:#A3B2BB; --ink3:#7B8B95;
+    --line:#2A353C; --line2:#1E282E; --fill:#1B252B; --code:#121A1F;
+    --accent:#4FC1BC; --accent-soft:#143633; --warn:#E39A52; --warn-soft:#3A2A18; --bad:#E06B67; --bad-soft:#3E1F1E;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0E1417; --surface:#151D22; --ink:#E7ECEE; --ink2:#A3B2BB; --ink3:#7B8B95;
+  --line:#2A353C; --line2:#1E282E; --fill:#1B252B; --code:#121A1F;
+  --accent:#4FC1BC; --accent-soft:#143633; --warn:#E39A52; --warn-soft:#3A2A18; --bad:#E06B67; --bad-soft:#3E1F1E;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--body);font-size:18px;line-height:1.55;font-optical-sizing:auto}
+a{color:var(--accent);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--accent) 40%,transparent)}
+a:hover{border-bottom-color:var(--accent)}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3,h4{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.1;letter-spacing:-0.01em}
+h1{font-size:clamp(40px,6vw,72px);font-weight:800;line-height:.98;letter-spacing:-0.025em}
+h2{font-size:30px;font-weight:700;margin-top:64px;padding-top:24px;border-top:1px solid var(--line)}
+h3{font-size:21px;font-weight:700;margin-top:32px}
+h4{font-size:17px;font-weight:700;margin-top:20px}
+p{margin:14px 0;max-width:68ch}
+ul,ol{max-width:68ch;padding-left:22px}
+li{margin:6px 0}
+strong{font-weight:500;color:var(--ink)}
+em{font-style:italic}
+code,kbd{font-family:var(--mono);font-size:.82em;background:var(--code);padding:1px 5px;border-radius:3px}
+pre{font-family:var(--mono);font-size:13px;line-height:1.5;background:var(--code);border:1px solid var(--line);padding:14px 16px;border-radius:6px;overflow-x:auto;max-width:100%}
+.eyebrow{font-family:var(--display);font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink2)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+/* page frame */
+.frame{max-width:1240px;margin:0 auto;padding:40px 24px 96px}
+.masthead{display:grid;gap:22px;padding-bottom:36px;border-bottom:2px solid var(--ink)}
+.masthead .dek{font-size:22px;line-height:1.35;max-width:52ch;color:var(--ink2)}
+.meta{display:flex;flex-wrap:wrap;gap:10px 28px;font-family:var(--display);font-size:13px;color:var(--ink2)}
+.meta b{color:var(--ink);font-weight:700}
+.layout{display:grid;grid-template-columns:1fr;gap:40px;margin-top:8px}
+@media (min-width:1100px){.layout{grid-template-columns:230px minmax(0,1fr)}}
+nav.toc{position:sticky;top:20px;align-self:start;font-family:var(--display);font-size:13.5px;line-height:1.35;display:none}
+@media (min-width:1100px){nav.toc{display:block}}
+nav.toc ol{list-style:none;padding:0;margin:0;display:grid;gap:8px}
+nav.toc a{color:var(--ink2);border:0;display:grid;grid-template-columns:22px 1fr;gap:6px}
+nav.toc a:hover{color:var(--ink)}
+nav.toc .n{color:var(--ink3);font-family:var(--mono);font-size:12px}
+article{min-width:0}
+.lede{font-size:21px;line-height:1.45;max-width:62ch}
+.lede:first-letter{font-family:var(--display);font-weight:800;font-size:2.3em;line-height:.9;float:left;padding:6px 8px 0 0;color:var(--accent)}
+/* key numbers */
+.keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin:28px 0}
+.keys div{background:var(--surface);padding:16px 18px}
+.keys .v{font-family:var(--display);font-size:32px;font-weight:800;letter-spacing:-0.02em;line-height:1}
+.keys .v small{font-size:15px;font-weight:700;color:var(--ink2);margin-left:4px}
+.keys .l{font-family:var(--display);font-size:12.5px;color:var(--ink2);margin-top:8px;line-height:1.3}
+/* figures */
+figure{margin:32px 0;padding:0}
+figure.wide{margin-left:0;margin-right:0}
+@media (min-width:1100px){figure.wide{margin-right:-20px}}
+figure .art{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:16px;overflow-x:auto}
+figure svg{display:block;width:100%;height:auto;font-family:var(--display)}
+figcaption{font-family:var(--display);font-size:13.5px;line-height:1.4;color:var(--ink2);margin-top:10px;max-width:80ch}
+figcaption b{color:var(--ink);font-weight:700}
+/* svg classes */
+.bx{fill:var(--surface);stroke:var(--line);stroke-width:1.2}
+.bx-fill{fill:var(--fill);stroke:var(--line);stroke-width:1.2}
+.bx-acc{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.4}
+.bx-warn{fill:var(--warn-soft);stroke:var(--warn);stroke-width:1.4}
+.bx-bad{fill:var(--bad-soft);stroke:var(--bad);stroke-width:1.4}
+.ln{stroke:var(--ink2);stroke-width:1.4;fill:none}
+.ln-acc{stroke:var(--accent);stroke-width:1.8;fill:none}
+.ln-warn{stroke:var(--warn);stroke-width:1.8;fill:none}
+.ln-bad{stroke:var(--bad);stroke-width:1.8;fill:none}
+.ln-dash{stroke-dasharray:5 4}
+.t{fill:var(--ink);font-size:13px;font-weight:700}
+.t2{fill:var(--ink2);font-size:11.5px;font-weight:500}
+.t3{fill:var(--ink3);font-size:10.5px;font-weight:500}
+.tm{fill:var(--ink);font-family:var(--mono);font-size:11px;font-weight:500}
+.tacc{fill:var(--accent);font-size:11.5px;font-weight:700}
+.twarn{fill:var(--warn);font-size:11.5px;font-weight:700}
+.tbad{fill:var(--bad);font-size:11.5px;font-weight:700}
+.tw{fill:#fff;font-size:12px;font-weight:700}
+.env{fill:none;stroke:var(--accent);stroke-width:1.6;stroke-dasharray:7 5}
+.bar-acc{fill:var(--accent)}
+.bar-warn{fill:var(--warn)}
+.bar-bad{fill:var(--bad)}
+.bar-mute{fill:var(--ink3)}
+.grid{stroke:var(--line);stroke-width:1}
+/* tables */
+.tbl{overflow-x:auto;margin:22px 0;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-family:var(--display);font-size:14px;line-height:1.35}
+th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--line2)}
+th{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);background:var(--fill);font-weight:700;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13px}
+.pill{display:inline-block;font-family:var(--display);font-size:11.5px;font-weight:700;letter-spacing:.03em;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--ink2);white-space:nowrap}
+.pill.yes{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+.pill.no{color:var(--bad);border-color:var(--bad);background:var(--bad-soft)}
+.pill.part{color:var(--warn);border-color:var(--warn);background:var(--warn-soft)}
+/* callouts */
+.note{border-left:3px solid var(--accent);background:var(--surface);padding:14px 18px;margin:22px 0;max-width:72ch;font-size:17px}
+.note.warn{border-left-color:var(--warn)}
+.note.bad{border-left-color:var(--bad)}
+.note .eyebrow{margin-bottom:6px}
+.quote{font-size:19px;font-style:italic;color:var(--ink2);border-left:2px solid var(--line);padding-left:18px;margin:20px 0;max-width:60ch}
+.quote cite{display:block;font-style:normal;font-family:var(--display);font-size:12.5px;margin-top:6px;color:var(--ink3)}
+/* decisions */
+.decisions{counter-reset:d;display:grid;gap:12px;margin:22px 0;padding:0;list-style:none;max-width:78ch}
+.decisions li{counter-increment:d;display:grid;grid-template-columns:44px 1fr;gap:14px;background:var(--surface);border:1px solid var(--line);padding:16px 18px;border-radius:6px}
+.decisions li::before{content:counter(d);font-family:var(--display);font-size:28px;font-weight:800;color:var(--accent);line-height:1}
+.decisions b{font-family:var(--display);font-weight:700;display:block;margin-bottom:4px}
+.decisions p{margin:0;font-size:16.5px}
+/* phases */
+.phases{display:grid;gap:1px;background:var(--line);border:1px solid var(--line);margin:22px 0}
+.phase{background:var(--surface);display:grid;grid-template-columns:64px 1fr;gap:14px;padding:14px 16px}
+.phase .k{font-family:var(--display);font-weight:800;font-size:26px;color:var(--ink3);line-height:1}
+.phase .k.now{color:var(--accent)}
+.phase b{font-family:var(--display);font-weight:700}
+.phase .exit{font-family:var(--display);font-size:13.5px;color:var(--ink2);margin-top:6px}
+.phase .exit::before{content:"Exit test · ";font-weight:700;color:var(--ink3)}
+.sources{font-family:var(--display);font-size:14px;color:var(--ink2);columns:2;column-gap:32px;max-width:100%}
+.sources li{break-inside:avoid;margin:4px 0}
+@media (max-width:700px){.sources{columns:1} body{font-size:17px} .lede{font-size:19px}}
+.small{font-family:var(--display);font-size:13.5px;color:var(--ink2)}
+hr{border:0;border-top:1px solid var(--line);margin:40px 0}
+@media (prefers-reduced-motion: no-preference){a{transition:border-color .15s}}
+</style>
+
+<div class="frame">
+<header class="masthead">
+  <div class="eyebrow">Tavi · connection research · 9 September 2026</div>
+  <h1>Nowhere Else to Dial</h1>
+  <p class="dek">Why the phone lost the Mac for four minutes, what the best remote-control products actually do, and the architecture that gives Tavi an A+ connection.</p>
+  <div class="meta">
+    <span><b>Status</b> plan for the owner's decision, not locked</span>
+    <span><b>Evidence</b> five research reports, primary sources</span>
+    <span><b>Review</b> three cold GPT‑6 Astra rounds, six seats, 76 findings folded</span>
+    <span><b>Repo</b> <code>docs/CONNECTION_ARCHITECTURE.md</code> · issue #119</span>
+  </div>
+</header>
+
+<div class="layout">
+<nav class="toc" aria-label="Contents">
+  <ol>
+    <li><a href="#s1"><span class="n">01</span><span>Summary</span></a></li>
+    <li><a href="#s2"><span class="n">02</span><span>The four minutes</span></a></li>
+    <li><a href="#s3"><span class="n">03</span><span>Why it is structural</span></a></li>
+    <li><a href="#s4"><span class="n">04</span><span>Today's architecture</span></a></li>
+    <li><a href="#s5"><span class="n">05</span><span>What the field does</span></a></li>
+    <li><a href="#s6"><span class="n">06</span><span>What "A+" means</span></a></li>
+    <li><a href="#s7"><span class="n">07</span><span>Options evaluated</span></a></li>
+    <li><a href="#s8"><span class="n">08</span><span>Proposal A · relay + pinned TLS</span></a></li>
+    <li><a href="#s9"><span class="n">09</span><span>Proposal B · iroh</span></a></li>
+    <li><a href="#s10"><span class="n">10</span><span>The session layer</span></a></li>
+    <li><a href="#s11"><span class="n">11</span><span>Latency and feel</span></a></li>
+    <li><a href="#s12"><span class="n">12</span><span>Cost and operations</span></a></li>
+    <li><a href="#s13"><span class="n">13</span><span>Phases</span></a></li>
+    <li><a href="#s14"><span class="n">14</span><span>The review record</span></a></li>
+    <li><a href="#s15"><span class="n">15</span><span>Decisions</span></a></li>
+    <li><a href="#s16"><span class="n">16</span><span>Sources</span></a></li>
+  </ol>
+</nav>
+
+<article>
+
+<h2 id="s1" style="border-top:0;margin-top:0;padding-top:0">1 · Summary</h2>
+<p class="lede">On the morning of 9 September the owner was working in a terminal on the MacBook Air from the phone. At 07:00 the app showed "Reconnecting", then "MacBook Air isn't answering", then a blank screen. Force-quitting twice did nothing. Wi‑Fi and cellular behaved the same. At 07:47 the owner turned Tailscale off and on in the phone's VPN settings and it came back instantly. Nothing in Tavi or on the Mac had changed.</p>
+<p>The cause is a known, open bug class in Tailscale's iPhone client: a socket swap during a network change kills its packet-reading loop and nothing restarts it. Tavi had exactly one route to the computer, and it ran through that loop. This paper records what was found, what comparable products do, and proposes an architecture with two independent routes to every host, end-to-end encryption that no relay can read, and a session layer that turns a dropped route into a stutter instead of a blank screen.</p>
+
+<div class="keys">
+  <div><div class="v num">4<small>min</small></div><div class="l">the terminal was dead, with the phone on Wi‑Fi and on LTE</div></div>
+  <div><div class="v num">3</div><div class="l">open Tailscale iOS issues with this exact signature (#19504, #18889, #15271)</div></div>
+  <div><div class="v num">8<small>/ 8</small></div><div class="l">coding-agent products use an outbound relay; none hole-punches</div></div>
+  <div><div class="v num">2</div><div class="l">independently operated routes to every host in the proposal</div></div>
+  <div><div class="v num">76</div><div class="l">review findings from six cold seats, all folded into the plan</div></div>
+</div>
+
+<h2 id="s2">2 · The four minutes</h2>
+<p>Everything below is from the phone's own log archive (read over the cable with <code>log collect --device</code>), the Mac's <code>tailscaled.log</code>, and the host log. The app's own reason codes were not in the archive because they are logged at <code>.info</code>, which iOS keeps in memory only; Apple's network-layer lines were the substitute.</p>
+
+<figure class="wide">
+<div class="art">
+<svg viewBox="0 0 1000 250" role="img" aria-label="Timeline of the outage from 07:00 to 07:50">
+  <!-- axis -->
+  <line x1="60" y1="150" x2="940" y2="150" class="ln"/>
+  <g class="tm">
+    <text x="60" y="172" text-anchor="middle">07:00</text>
+    <text x="236" y="172" text-anchor="middle">07:10</text>
+    <text x="412" y="172" text-anchor="middle">07:20</text>
+    <text x="588" y="172" text-anchor="middle">07:30</text>
+    <text x="764" y="172" text-anchor="middle">07:40</text>
+    <text x="940" y="172" text-anchor="middle">07:50</text>
+  </g>
+  <g class="grid"><line x1="236" y1="144" x2="236" y2="156"/><line x1="412" y1="144" x2="412" y2="156"/><line x1="588" y1="144" x2="588" y2="156"/><line x1="764" y1="144" x2="764" y2="156"/></g>
+  <!-- dead band -->
+  <rect x="72" y="136" width="68" height="14" class="bar-bad" opacity=".85"/>
+  <rect x="155" y="136" width="732" height="14" class="bar-bad" opacity=".85"/>
+  <rect x="140" y="136" width="15" height="14" class="bar-acc"/>
+  <text x="500" y="128" class="tbad" text-anchor="middle">no route to the Mac (every dial timed out at its 10 s budget)</text>
+  <!-- events above -->
+  <g>
+    <line x1="72" y1="60" x2="72" y2="136" class="ln ln-dash"/>
+    <text x="72" y="40" class="tm" text-anchor="start">07:00:40</text>
+    <text x="72" y="54" class="t2" text-anchor="start">first dial times out</text>
+  </g>
+  <g>
+    <line x1="114" y1="88" x2="114" y2="136" class="ln ln-dash"/>
+    <text x="118" y="78" class="tm">07:03:03</text>
+    <text x="118" y="92" class="twarn">Tailscale on the phone: udp=false</text>
+    <text x="118" y="105" class="t2">screen goes blank at "Connecting"</text>
+  </g>
+  <g>
+    <line x1="887" y1="60" x2="887" y2="136" class="ln ln-dash"/>
+    <text x="880" y="40" class="tm" text-anchor="end">07:47</text>
+    <text x="880" y="54" class="tacc" text-anchor="end">owner toggles Tailscale off and on · fixed instantly</text>
+  </g>
+  <!-- events below -->
+  <g>
+    <line x1="137" y1="150" x2="137" y2="196" class="ln ln-dash"/>
+    <text x="137" y="210" class="tm" text-anchor="middle">07:04:24</text>
+    <text x="137" y="224" class="t2" text-anchor="middle">force-quit → ~30 s connected (direct path 07:04:32–07:05:25)</text>
+  </g>
+  <g>
+    <line x1="173" y1="150" x2="173" y2="182" class="ln ln-dash"/>
+    <text x="330" y="196" class="tm" text-anchor="middle">07:05:25 udp=false again · 07:06:26 second force-quit · 07:07 owner gives up</text>
+  </g>
+  <text x="60" y="20" class="t3">Earlier: 06:23 the phone lost its Wi‑Fi route and moved to LTE; 07:03:19 it came back to Wi‑Fi. Both transitions are the kind of socket swap that triggers the bug.</text>
+</svg>
+</div>
+<figcaption><b>Fig. 1 · The outage, from the logs.</b> Red is the window in which every dial to the Mac timed out. The green sliver is the thirty seconds after the first force-quit when a direct path briefly existed. The fix at 07:47 touched neither the app nor the Mac.</figcaption>
+</figure>
+
+<p>Three things were ruled out with evidence, so nobody chases them again: the second computer being offline (the owner had shut it down, unrelated), the Mac's load and its Xcode debug daemons (busy, not causal, and the failure recurred on LTE), and the phone's memory (the Tailscale extension stayed a single process at 27–33 MB of its 50 MB cap and was never killed). What remained was a process that was alive and no longer reading packets.</p>
+
+<h2 id="s3">3 · Why it is structural, not bad luck</h2>
+<p>The research found the same signature reported repeatedly against Tailscale's iOS client, with the reporters doing exactly what Tavi does: interactive terminals from a phone.</p>
+<div class="tbl"><table>
+<thead><tr><th>Issue</th><th>Opened</th><th>State</th><th>What it says</th></tr></thead>
+<tbody>
+<tr><td class="num">tailscale#19504</td><td class="num">2026‑04‑23</td><td><span class="pill no">open</span></td><td>"MagicSock ReceiveIPv4 goroutine stops, data plane dies while control plane stays up." Wi‑Fi and cellular "same result on both." A third-party root-cause post (2026‑08‑21): the receive closure gets ENOTCONN during a socket rebind, WireGuard treats it as fatal, nothing restarts the loop. Reporters: SSH/tmux "every 2–3 minutes"; Belay Mobile: "an interactive SSH terminal reliably exposes it; toggling Tailscale restores connectivity immediately."</td></tr>
+<tr><td class="num">tailscale#15271</td><td class="num">2025‑03‑10</td><td><span class="pill no">open</span></td><td>"iOS MagicSock fails. UDP/DERP fails." Status when failing: <code>UDP = No</code>, the same <code>udp=false</code> in our phone log. "Toggling TS on/off will typically but not always reestablish the connection."</td></tr>
+<tr><td class="num">tailscale#18889</td><td class="num">2026‑03‑05</td><td><span class="pill no">open</span></td><td>Connectivity fails shortly after connecting on iOS 26.4; toggling helps briefly.</td></tr>
+<tr><td class="num">tailscale#15776</td><td class="num">2025‑04‑23</td><td><span class="pill no">open · P1</span></td><td>Clients do not promptly notice losing their DERP relay; keepalives are one-way. This is the likeliest reason the relay did not carry the session either.</td></tr>
+</tbody></table></div>
+<p>Two facts make it Tavi's problem rather than Tailscale's. First, no public iOS API lets one app observe or restart another vendor's VPN extension; Tavi can only see that the internet works and the computer does not. Second, App Store Review Guideline 4.2.3(i) says an app "should work on its own without requiring installation of another app to function." A Tailscale-only transport is a review risk on top of a reliability one.</p>
+<div class="note warn"><div class="eyebrow">Why it feels sudden, then persistent</div>The trigger is a network transition, not time. Hours of perfect use, then one socket swap lands in the wrong window and the reading loop dies. Force-quitting Tavi cannot help because the dead loop lives in Tailscale's process. Only recreating the VPN recreates the loop.</div>
+
+<h2 id="s4">4 · Today's architecture</h2>
+<p>Tavi today is a Swift app talking to a small Node host over two WebSockets (events and terminal) and a set of HTTP routes. The only way from the phone to the host is the tailnet: the phone's Tailscale VPN extension, WireGuard or a DERP relay, the computer's <code>tailscaled</code>, and <code>tailscale serve</code>, which terminates TLS and forwards plain HTTP to the host on loopback.</p>
+
+<figure class="wide">
+<div class="art">
+<svg viewBox="0 0 1000 300" role="img" aria-label="Current architecture: one route through the phone's Tailscale extension">
+  <!-- columns -->
+  <text x="20" y="24" class="eyebrow" style="fill:var(--ink3);font-size:11px;letter-spacing:.12em">PHONE</text>
+  <text x="400" y="24" class="eyebrow" style="fill:var(--ink3);font-size:11px;letter-spacing:.12em">INTERNET</text>
+  <text x="640" y="24" class="eyebrow" style="fill:var(--ink3);font-size:11px;letter-spacing:.12em">THE COMPUTER (MAC OR VPS)</text>
+  <!-- phone -->
+  <rect x="20" y="40" width="330" height="230" rx="8" class="bx-fill"/>
+  <rect x="40" y="60" width="130" height="64" rx="6" class="bx"/>
+  <text x="105" y="86" class="t" text-anchor="middle">Tavi app</text>
+  <text x="105" y="104" class="t2" text-anchor="middle">events WS · terminal WS · HTTP</text>
+  <rect x="200" y="60" width="130" height="64" rx="6" class="bx-bad"/>
+  <text x="265" y="82" class="t" text-anchor="middle">Tailscale VPN</text>
+  <text x="265" y="98" class="t2" text-anchor="middle">NetworkExtension</text>
+  <text x="265" y="113" class="tbad" text-anchor="middle">50 MB cap · stalled here</text>
+  <line x1="170" y1="92" x2="200" y2="92" class="ln"/>
+  <text x="185" y="150" class="t2" text-anchor="start">The app cannot see inside this box, cannot restart it,</text>
+  <text x="185" y="166" class="t2" text-anchor="start">and has no other box to dial.</text>
+  <rect x="40" y="200" width="290" height="50" rx="6" class="bx"/>
+  <text x="185" y="221" class="t2" text-anchor="middle">one route · pairing requires Tailscale on both ends</text>
+  <text x="185" y="238" class="t2" text-anchor="middle">bearer credential sent inside HTTPS to <tspan class="tm">name.ts.net</tspan></text>
+  <!-- internet -->
+  <rect x="380" y="70" width="200" height="48" rx="6" class="bx"/>
+  <text x="480" y="90" class="t" text-anchor="middle">WireGuard direct (UDP)</text>
+  <text x="480" y="106" class="t2" text-anchor="middle">when hole punching works</text>
+  <rect x="380" y="140" width="200" height="48" rx="6" class="bx"/>
+  <text x="480" y="160" class="t" text-anchor="middle">DERP relay (TCP 443)</text>
+  <text x="480" y="176" class="t2" text-anchor="middle">Tailscale's, 23 regions</text>
+  <line x1="330" y1="92" x2="380" y2="94" class="ln-warn"/>
+  <line x1="330" y1="92" x2="380" y2="164" class="ln-warn"/>
+  <!-- computer -->
+  <rect x="620" y="40" width="360" height="230" rx="8" class="bx-fill"/>
+  <rect x="640" y="60" width="110" height="64" rx="6" class="bx"/>
+  <text x="695" y="86" class="t" text-anchor="middle">tailscaled</text>
+  <text x="695" y="104" class="t2" text-anchor="middle">daemon</text>
+  <rect x="770" y="60" width="90" height="64" rx="6" class="bx-warn"/>
+  <text x="815" y="82" class="t" text-anchor="middle">serve</text>
+  <text x="815" y="98" class="twarn" text-anchor="middle">TLS ends</text>
+  <text x="815" y="112" class="twarn" text-anchor="middle">here</text>
+  <rect x="880" y="60" width="90" height="64" rx="6" class="bx"/>
+  <text x="925" y="82" class="t" text-anchor="middle">tavi-host</text>
+  <text x="925" y="98" class="t2" text-anchor="middle">Node · :8787</text>
+  <text x="925" y="112" class="t2" text-anchor="middle">plain HTTP</text>
+  <line x1="580" y1="94" x2="640" y2="92" class="ln-warn"/>
+  <line x1="580" y1="164" x2="640" y2="100" class="ln-warn"/>
+  <line x1="750" y1="92" x2="770" y2="92" class="ln"/>
+  <line x1="860" y1="92" x2="880" y2="92" class="ln"/>
+  <rect x="640" y="150" width="330" height="44" rx="6" class="bx"/>
+  <text x="805" y="169" class="t" text-anchor="middle">herdr · PTYs · Claude Code / Codex</text>
+  <text x="805" y="185" class="t2" text-anchor="middle">terminal state lives here and survives the phone</text>
+  <line x1="925" y1="124" x2="925" y2="150" class="ln"/>
+  <rect x="640" y="210" width="330" height="40" rx="6" class="bx"/>
+  <text x="805" y="227" class="t2" text-anchor="middle">host identity = 32 random bytes; the fingerprint is a truncated hash</text>
+  <text x="805" y="242" class="t2" text-anchor="middle">there is no public key and the host has no TLS of its own</text>
+</svg>
+</div>
+<figcaption><b>Fig. 2 · Today: one route, and it runs through a box Tavi cannot see into.</b> Two further facts matter for what follows: TLS terminates at Tailscale's <code>serve</code>, not at the host, and the host's "fingerprint" is a hash of a random secret, not a public key. Any end-to-end design has to give the host a real key first.</figcaption>
+</figure>
+
+<p>What already works well and is kept: the terminal protocol resumes from a byte offset inside a 1 MiB ring the host keeps for two minutes after a drop, with a full repaint from herdr when the ring is missed; the events stream sends full snapshots so it is self-resuming; the phone's WebSockets run on Network.framework with a path monitor and an honest "Offline" verdict; pairing mints a per-device credential that the host can revoke within two seconds.</p>
+
+<h2 id="s5">5 · What the field does</h2>
+<p>Thirty-odd products were surveyed from their own documentation, source code and issue trackers. The pattern splits cleanly by what the product carries.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>Product</th><th>Class</th><th>Transport</th><th>NAT traversal</th><th>Relay</th><th>E2E</th><th>Survives a network switch</th></tr></thead>
+<tbody>
+<tr><td>Claude Code Remote Control</td><td>coding agent</td><td>outbound HTTPS, streaming</td><td>none</td><td>Anthropic</td><td><span class="pill no">no</span> transcript stored server-side "so the session can reconnect"</td><td>queue + reconnect, ~10 min</td></tr>
+<tr><td>Codex Remote · Cursor self-hosted · VS Code Tunnels · Omnara</td><td>coding agent</td><td>long-lived outbound HTTPS/WS</td><td>none</td><td>vendor</td><td>VS Code: SSH inside the tunnel; others <span class="pill no">no</span></td><td>reconnect</td></tr>
+<tr><td>Happy Coder</td><td>coding agent</td><td>Socket.IO outbound</td><td>none</td><td>vendor, self-hostable</td><td><span class="pill yes">yes</span> AES‑256‑GCM, QR carries the key</td><td>per-user sequence + cursor refetch</td></tr>
+<tr><td>Parsec</td><td>remote desktop</td><td>UDP + DTLS (BUD)</td><td>STUN + hole punch, 97 % claimed</td><td><span class="pill no">none</span></td><td><span class="pill yes">yes</span></td><td><span class="pill no">no</span> 60 s "on the same IP"</td></tr>
+<tr><td>Jump Desktop</td><td>remote desktop</td><td>WebRTC (Fluid)</td><td>ICE</td><td>vendor TURN, global, free</td><td><span class="pill yes">yes</span></td><td>reconnect</td></tr>
+<tr><td>Chrome Remote Desktop</td><td>remote desktop</td><td>WebRTC data channels</td><td>ICE</td><td>Google TURN</td><td><span class="pill yes">yes</span> SPAKE2 + signed SDP</td><td>ICE restart without re-auth, 10 s</td></tr>
+<tr><td>RustDesk</td><td>remote desktop</td><td>custom, TCP/UDP</td><td>own probe; WebRTC merged 2026‑09‑05</td><td>self-hostable</td><td>NaCl, if configured</td><td>reconnect</td></tr>
+<tr><td>Screens (Edovia)</td><td>remote desktop</td><td>VNC over TCP</td><td>router port mapping only</td><td><span class="pill no">none</span> after 15 years</td><td>optional SSH</td><td><span class="pill no">no</span></td></tr>
+<tr><td>Tailscale SSH</td><td>terminal</td><td>WireGuard</td><td>birthday-paradox punch, >90 % direct</td><td>DERP</td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span> outer-IP rebind</td></tr>
+<tr><td>Mosh · Blink · Prompt 3</td><td>terminal</td><td>UDP state sync</td><td>none (needs a reachable port)</td><td><span class="pill no">none</span></td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span> highest-sequence datagram rebinds</td></tr>
+<tr><td>Eternal Terminal</td><td>terminal</td><td>TCP 2022</td><td>none</td><td><span class="pill no">none</span></td><td>libsodium, no forward secrecy</td><td>sequence numbers + 64 MB catch-up</td></tr>
+</tbody></table></div>
+
+<p>Six patterns carry the weight of the argument:</p>
+<ul>
+<li><strong>Every coding-agent product uses one outbound connection to a vendor relay and sells "no inbound ports" as the security feature. None hole-punches.</strong> Remote-desktop products punch because video needs UDP throughput; a terminal at 1–5 KB/s does not.</li>
+<li><strong>The products with the worst "works at home, fails remotely" reputations are the ones with no relay</strong> (Screens, Moonlight, Parsec on carrier-grade NAT). RustDesk merged WebRTC this week because "ICE covers a strictly larger connectivity set."</li>
+<li><strong>Roaming without re-authentication exists in four designs</strong>: Mosh, WireGuard, QUIC, and Chrome Remote Desktop's ICE restart. Plain WebSocket products drop on handover and re-dial.</li>
+<li><strong>Heartbeats converge on 3–5 seconds</strong> (Mosh 3, Tailscale 3, Eternal Terminal 5), because UDP NAT mappings expire around 30 seconds and a dead link must be noticed fast. Tavi's events heartbeat is 15 s × 2.</li>
+<li><strong>The outages customers experience as "your machine is offline" are control-plane outages</strong>: Jump Desktop's 24-hour message-bus partition, Happy's ~20-hour relay degradation, Tailscale Funnel dying silently this month while reporting healthy.</li>
+<li><strong>On iOS, every terminal app accepts that the process is suspended 20–30 s after backgrounding.</strong> Blink serialises mosh's state and rehydrates it on return. No transport changes this; a VPN keeps the tunnel up, not the app's socket.</li>
+</ul>
+<p class="quote">"All connections traveling through Parsec are peer-to-peer. They never transit Parsec's infrastructure." — and Parsec fails outright when both ends are behind carrier NAT.<cite>Parsec security page, read beside its error 12007 documentation</cite></p>
+
+<h2 id="s6">6 · What "A+" has to mean</h2>
+<p>No app can promise 99.99 % of wall-clock time; the phone's radio and ISP are outside every SLA on earth (Cloudflare's, AWS's and Ably's all exclude them). What Tavi can promise is behaviour under a stated condition, measured as two different things, because "attempts that succeed" and "minutes a live session is broken" have different denominators.</p>
+<div class="tbl"><table>
+<thead><tr><th>Indicator</th><th>Definition</th><th>Target</th></tr></thead>
+<tbody>
+<tr><td><b>Attempt success</b></td><td>Opening the app or a terminal ends with an <em>authenticated</em> connection and the <em>current</em> state rendered within 5 s. A socket alone does not count.</td><td class="num">≥ 99.9 % at launch → ≥ 99.99 %</td></tr>
+<tr><td><b>Session interruption</b></td><td>A foreground session is available while the last authenticated liveness proof is under 10 s old <em>and</em> the screen is current. Interruption runs from the last good observation to the first current screen after a fault. Heartbeat spacing never counts; a heartbeat answered while the screen is broken is not availability.</td><td class="num">99.9 % (≈ 6 min / 100 h) at launch → 99.99 % (36 s / 100 h)</td></tr>
+<tr><td><b>Detection of a silent stall</b></td><td>Peer stops answering with no error → fault detected. Absolute bound, not a percentile.</td><td class="num">≤ 10 s</td></tr>
+<tr><td><b>Recovery after detection</b></td><td>Warm alternate route: about three round trips plus render. New connection on the surviving interface: about five.</td><td class="num">≈ 0.5 s home · ≈ 1 s intercontinental · ≤ 3 s cold</td></tr>
+<tr><td><b>Screen</b></td><td>A non-empty stale frame is never replaced by an empty live surface, except by a repaint that delivered content or by the user's own keystroke.</td><td>invariant</td></tr>
+<tr><td><b>Input</b></td><td>Ordered, duplicate-free across route changes within one live session. When that session's state is lost, the app says delivery is uncertain and asks; it never replays on its own.</td><td>invariant</td></tr>
+</tbody></table></div>
+<p>The condition: the phone has working internet to at least one relay provider, and the host process is up with a working uplink. The measurement: opt-in client counters and the chaos harness from #111, per release, over the first thirty days of that release's fleet. Until there is a fleet, four nines is a design target, not a marketing claim.</p>
+<div class="note bad"><div class="eyebrow">A single vendor cannot carry the target</div>Cloudflare had a ~6-hour global outage on 18 November 2025 and a 6-hour partial one on 20 February 2026. Fly.io had a 7-hour global outage in October 2024. Any one of those alone blows a year's four-nines budget. Two independently operated routes to every host, and a session that survives moving between them, is the whole design.</div>
+
+<h2 id="s7">7 · Options evaluated</h2>
+<div class="tbl"><table>
+<thead><tr><th>Option</th><th>Hole punch</th><th>Relay</th><th>Wi‑Fi → LTE</th><th>Phone needs a VPN</th><th>New dependencies</th><th>Verdict</th></tr></thead>
+<tbody>
+<tr><td><b>A · Tailscale VPN only</b> (today)</td><td>via Tailscale</td><td>DERP</td><td>when the extension works</td><td><span class="pill no">yes</span></td><td>none</td><td><span class="pill no">fails the brief</span></td></tr>
+<tr><td><b>B · Cloudflare Tunnel</b> beside the host</td><td>no</td><td>Cloudflare edge</td><td>reconnect + resume</td><td><span class="pill yes">no</span></td><td>cloudflared, per-host hostname on our zone</td><td><span class="pill part">prototype only</span> TLS ends at Cloudflare; WebSockets cut on deploys; cloudflared#1652 open</td></tr>
+<tr><td><b>C · Own dumb relay + end-to-end TLS inside it</b>, Cloudflare Workers + Durable Objects</td><td>no</td><td>edge</td><td>reconnect + resume</td><td><span class="pill yes">no</span></td><td>one Worker; a local proxy in the app; TLS on the host</td><td><span class="pill yes">Proposal A · primary route</span></td></tr>
+<tr><td><b>C′ · The same relay on VPSes</b></td><td>no</td><td>2–3 regions</td><td>same</td><td><span class="pill yes">no</span></td><td>same code</td><td><span class="pill yes">second provider; self-host answer</span></td></tr>
+<tr><td><b>D · Direct pinned TLS</b> to a public host (VPS)</td><td>n/a</td><td>none</td><td>reconnect + resume</td><td><span class="pill yes">no</span></td><td>host TLS (same as C)</td><td><span class="pill yes">route for VPS customers</span></td></tr>
+<tr><td><b>E · iroh</b> embedded both ends</td><td>yes</td><td>n0 or self-hosted</td><td><span class="pill yes">best</span> one QUIC connection holds relay + direct paths</td><td><span class="pill yes">no</span></td><td>Rust FFI in the app, native addon in the host</td><td><span class="pill part">Proposal B · bake-off</span></td></tr>
+<tr><td><b>F · TailscaleKit</b> in-process</td><td>via magicsock</td><td>DERP</td><td>yes</td><td>no, but a Tailscale account</td><td>experimental Swift layer</td><td><span class="pill part">later, for "Tailscale mode"</span></td></tr>
+<tr><td><b>G · WebRTC + TURN</b></td><td>yes</td><td>Cloudflare TURN</td><td>ICE restart</td><td><span class="pill yes">no</span></td><td>libwebrtc, the largest binary</td><td>dominated by E</td></tr>
+<tr><td><b>H · MPTCP · raw QUIC · WebTransport</b></td><td>no</td><td>no</td><td>partial</td><td>—</td><td>—</td><td><span class="pill no">rejected</span> macOS cannot serve MPTCP; Node QUIC experimental; Apple's QUIC server blocked</td></tr>
+<tr><td><b>I · Mosh itself</b></td><td>no</td><td>no</td><td>UDP roaming</td><td>—</td><td>C++</td><td><span class="pill no">rejected</span> needs a reachable UDP port; borrow its ideas</td></tr>
+</tbody></table></div>
+
+<h2 id="s8">8 · Proposal A · a dumb relay with end-to-end TLS inside it</h2>
+<p>The app's whole surface is HTTP and WebSockets. If the relay is a dumb byte pipe and the <em>host itself</em> terminates TLS 1.3 with a key the phone pinned at pairing, then everything the app already does works unchanged through the relay: every API route, both WebSockets, uploads, the preview page. The bearer credential never leaves the encrypted channel. Revocation keeps working exactly as today. The relay operator sees ciphertext and connection metadata, nothing else. This is the model of Tailscale Funnel, the only hosted design in the survey where the provider cannot read the traffic.</p>
+
+<figure class="wide">
+<div class="art">
+<svg viewBox="0 0 1000 470" role="img" aria-label="Proposal A: phone, two relay providers, host, with end-to-end TLS spanning phone to host">
+  <text x="20" y="22" style="fill:var(--ink3);font-size:11px;font-weight:700;letter-spacing:.12em">PHONE</text>
+  <text x="400" y="22" style="fill:var(--ink3);font-size:11px;font-weight:700;letter-spacing:.12em">ROUTES · TWO INDEPENDENT PROVIDERS</text>
+  <text x="720" y="22" style="fill:var(--ink3);font-size:11px;font-weight:700;letter-spacing:.12em">THE COMPUTER</text>
+  <!-- phone box -->
+  <rect x="20" y="36" width="320" height="330" rx="8" class="bx-fill"/>
+  <rect x="40" y="56" width="280" height="86" rx="6" class="bx"/>
+  <text x="180" y="78" class="t" text-anchor="middle">Tavi app · unchanged networking code</text>
+  <text x="180" y="98" class="t2" text-anchor="middle">URLSession · WKWebView (preview) · NWConnection (terminal)</text>
+  <text x="180" y="116" class="t2" text-anchor="middle">each stack verifies the host certificate</text>
+  <text x="180" y="132" class="tacc" text-anchor="middle">against the pinned host key</text>
+  <line x1="180" y1="142" x2="180" y2="170" class="ln"/>
+  <rect x="40" y="170" width="280" height="76" rx="6" class="bx-acc"/>
+  <text x="180" y="192" class="t" text-anchor="middle">Local proxy (CONNECT / SOCKS on loopback)</text>
+  <text x="180" y="210" class="t2" text-anchor="middle">interactive port · bulk port (uploads, preview assets)</text>
+  <text x="180" y="228" class="t2" text-anchor="middle">dials every route in parallel · keeps one warm</text>
+  <!-- outer connections -->
+  <rect x="40" y="270" width="130" height="40" rx="6" class="bx"/>
+  <text x="105" y="287" class="t2" text-anchor="middle">outer WebSocket</text><text x="105" y="301" class="t2" text-anchor="middle">to relay-cf</text>
+  <rect x="190" y="270" width="130" height="40" rx="6" class="bx"/>
+  <text x="255" y="287" class="t2" text-anchor="middle">outer WebSocket</text><text x="255" y="301" class="t2" text-anchor="middle">to relay-vps</text>
+  <rect x="40" y="318" width="130" height="40" rx="6" class="bx"/>
+  <text x="105" y="335" class="t2" text-anchor="middle">direct TLS</text><text x="105" y="349" class="t2" text-anchor="middle">public host (VPS)</text>
+  <rect x="190" y="318" width="130" height="40" rx="6" class="bx"/>
+  <text x="255" y="335" class="t2" text-anchor="middle">tailnet (optional)</text><text x="255" y="349" class="t2" text-anchor="middle">to the host's TLS port</text>
+  <line x1="105" y1="246" x2="105" y2="270" class="ln"/><line x1="255" y1="246" x2="255" y2="270" class="ln"/>
+  <line x1="60" y1="246" x2="60" y2="318" class="ln"/><line x1="300" y1="246" x2="300" y2="318" class="ln"/>
+  <!-- providers -->
+  <rect x="380" y="56" width="290" height="110" rx="6" class="bx"/>
+  <text x="525" y="78" class="t" text-anchor="middle">relay-cf · Cloudflare Workers + Durable Objects</text>
+  <text x="525" y="96" class="t2" text-anchor="middle">one object per host, named from the host key</text>
+  <text x="525" y="112" class="t2" text-anchor="middle">hibernating WebSockets · 348-city edge</text>
+  <text x="525" y="128" class="t2" text-anchor="middle">forwards opaque frames per channel, in order</text>
+  <text x="525" y="150" class="tacc" text-anchor="middle">sees ciphertext + metadata only</text>
+  <rect x="380" y="186" width="290" height="110" rx="6" class="bx"/>
+  <text x="525" y="208" class="t" text-anchor="middle">relay-vps · the same program in Node</text>
+  <text x="525" y="226" class="t2" text-anchor="middle">Singapore · Europe · US (Hetzner / Fly)</text>
+  <text x="525" y="242" class="t2" text-anchor="middle">phone tries all ≤ 4 in parallel; the one holding</text>
+  <text x="525" y="258" class="t2" text-anchor="middle">the host's registration answers · self-hostable</text>
+  <text x="525" y="280" class="tacc" text-anchor="middle">independent DNS zone, deploy keys, provider</text>
+  <rect x="380" y="316" width="290" height="50" rx="6" class="bx"/>
+  <text x="525" y="336" class="t2" text-anchor="middle">no directory, no account database</text>
+  <text x="525" y="352" class="t2" text-anchor="middle">the host key is the address; live registrations are the only state</text>
+  <line x1="170" y1="290" x2="380" y2="111" class="ln-acc"/>
+  <line x1="320" y1="290" x2="380" y2="241" class="ln-acc"/>
+  <!-- host -->
+  <rect x="700" y="36" width="280" height="330" rx="8" class="bx-fill"/>
+  <rect x="720" y="56" width="240" height="70" rx="6" class="bx-acc"/>
+  <text x="840" y="78" class="t" text-anchor="middle">Host key pair · TLS 1.3 server</text>
+  <text x="840" y="96" class="t2" text-anchor="middle">self-signed, pinned by the phone from the QR</text>
+  <text x="840" y="112" class="t2" text-anchor="middle">registered on both relays, always</text>
+  <rect x="720" y="146" width="240" height="60" rx="6" class="bx"/>
+  <text x="840" y="168" class="t" text-anchor="middle">tavi-host · HTTP + WebSockets</text>
+  <text x="840" y="186" class="t2" text-anchor="middle">bearer check every 2 s, as today</text>
+  <line x1="840" y1="126" x2="840" y2="146" class="ln"/>
+  <rect x="720" y="226" width="240" height="56" rx="6" class="bx"/>
+  <text x="840" y="248" class="t" text-anchor="middle">herdr · PTYs · agents</text>
+  <text x="840" y="266" class="t2" text-anchor="middle">session state lives here</text>
+  <line x1="840" y1="206" x2="840" y2="226" class="ln"/>
+  <rect x="720" y="302" width="240" height="48" rx="6" class="bx"/>
+  <text x="840" y="322" class="t2" text-anchor="middle">Mac behind home NAT: relays only</text>
+  <text x="840" y="338" class="t2" text-anchor="middle">VPS with a public IP: direct route too</text>
+  <line x1="670" y1="111" x2="720" y2="86" class="ln-acc"/>
+  <line x1="670" y1="241" x2="720" y2="96" class="ln-acc"/>
+  <line x1="170" y1="338" x2="720" y2="104" class="ln-acc ln-dash"/>
+  <!-- envelope -->
+  <path d="M40 388 H960" class="env"/>
+  <text x="500" y="410" class="tacc" text-anchor="middle">TLS 1.3 pinned to the host key runs end to end, from the app's own networking stack to the host process</text>
+  <text x="500" y="428" class="t2" text-anchor="middle">relays, Cloudflare, a hostile Wi‑Fi, or a stalled VPN see only ciphertext · the bearer credential never leaves the channel</text>
+  <text x="500" y="456" class="t3" text-anchor="middle">Admission: a phone proves possession of its device key against the list the host published with its registration; first pairing uses a separate admission token so a malicious relay never sees the pairing secret</text>
+</svg>
+</div>
+<figcaption><b>Fig. 3 · Proposal A.</b> The phone's existing networking code talks to a local proxy, which dials every configured route in parallel and keeps one warm. Both relays are dumb byte pipes on independent providers. TLS is terminated by the host itself, so the same code path serves a Mac behind NAT through a relay and a VPS directly.</figcaption>
+</figure>
+
+<h3>What the phone does on a fault</h3>
+<p>Every liveness check is an authenticated challenge <em>inside</em> TLS, never an outer WebSocket ping: Cloudflare answers those itself without touching the host, so a pong proves only that the relay is alive. A challenge goes out every 5 s with a 5 s deadline; a route is dead when 10 s have passed since its last authenticated response. Path events come from the outer transport, because the loopback leg always looks healthy.</p>
+
+<figure class="wide">
+<div class="art">
+<svg viewBox="0 0 1000 260" role="img" aria-label="Two failover sequences: a silent stall and an explicit close">
+  <!-- axis -->
+  <g class="tm">
+    <text x="80" y="238" text-anchor="middle">0 s</text><text x="280" y="238" text-anchor="middle">5 s</text><text x="480" y="238" text-anchor="middle">10 s</text><text x="680" y="238" text-anchor="middle">15 s</text><text x="880" y="238" text-anchor="middle">20 s</text>
+  </g>
+  <g class="grid"><line x1="80" y1="40" x2="80" y2="222"/><line x1="280" y1="40" x2="280" y2="222"/><line x1="480" y1="40" x2="480" y2="222"/><line x1="680" y1="40" x2="680" y2="222"/><line x1="880" y1="40" x2="880" y2="222"/></g>
+  <!-- lane 1: silent stall -->
+  <text x="20" y="66" class="t">Silent stall</text>
+  <text x="20" y="82" class="t3">(host leg blackholed)</text>
+  <rect x="80" y="52" width="400" height="26" class="bar-bad" opacity=".85"/>
+  <text x="280" y="70" class="tw" text-anchor="middle">detection: two 5 s challenges miss · absolute bound 10 s</text>
+  <rect x="480" y="52" width="60" height="26" class="bar-acc"/>
+  <text x="510" y="70" class="tw" text-anchor="middle">≈ 3 RTT</text>
+  <rect x="540" y="52" width="16" height="26" class="bar-mute"/>
+  <text x="570" y="70" class="t2">render · live</text>
+  <line x1="80" y1="40" x2="80" y2="52" class="ln-bad"/><text x="84" y="46" class="tbad">fault</text>
+  <!-- lane 2: explicit close -->
+  <text x="20" y="126" class="t">Explicit close</text>
+  <text x="20" y="142" class="t3">(relay deploy, peer closed)</text>
+  <rect x="80" y="112" width="60" height="26" class="bar-acc"/>
+  <text x="110" y="130" class="tw" text-anchor="middle">≈ 3 RTT</text>
+  <rect x="140" y="112" width="16" height="26" class="bar-mute"/>
+  <text x="170" y="130" class="t2">render · live (about 0.5 s at home, 1 s intercontinental)</text>
+  <line x1="80" y1="100" x2="80" y2="112" class="ln-bad"/>
+  <!-- lane 3: interface loss -->
+  <text x="20" y="186" class="t">Interface loss</text>
+  <text x="20" y="202" class="t3">(Wi‑Fi gone, LTE only)</text>
+  <rect x="80" y="172" width="100" height="26" class="bar-warn"/>
+  <text x="130" y="190" class="tw" text-anchor="middle">new outer conn</text>
+  <rect x="180" y="172" width="60" height="26" class="bar-acc"/>
+  <text x="210" y="190" class="tw" text-anchor="middle">≈ 3 RTT</text>
+  <rect x="240" y="172" width="16" height="26" class="bar-mute"/>
+  <text x="270" y="190" class="t2">render · live ≤ 3 s from the path event (both warm sockets died together)</text>
+  <line x1="80" y1="160" x2="80" y2="172" class="ln-bad"/>
+</svg>
+</div>
+<figcaption><b>Fig. 4 · Three faults, three clocks.</b> The green segment is promotion of the warm alternate: a new inner TLS handshake, a WebSocket upgrade, and one activation round trip. A warm route means the outer connection is up and challenged and the proxy holds an idle inner TLS connection through it; it deliberately does not hold a terminal attachment. The 10 s detection bound is what the silent case costs; the review made the plan stop claiming one second for it.</figcaption>
+</figure>
+
+<h3>Identity, so the relay can be dumb</h3>
+<ul>
+<li><strong>Host key pair.</strong> The host generates a key, serves TLS with a self-signed certificate for it, and the fingerprint shown on both screens is derived from it. Pairing v2 puts the full public key, both relays' endpoints and the single-use secret in the QR.</li>
+<li><strong>Device keys.</strong> The phone generates its own key pair at pairing; the host records the public key beside the bearer credential and publishes the list of its paired devices' public keys with every relay registration.</li>
+<li><strong>Admission without a deadlock.</strong> A returning phone signs the relay's challenge with its device key; nothing expires, nothing renews. First pairing uses a separate admission token registered by <code>tavi pair</code> for five minutes; the pairing secret itself is only ever shown to the host inside pinned TLS and is bound to the phone's device key, so a malicious relay cannot redeem it.</li>
+<li><strong>Revocation.</strong> The host's registry stays the single authority and needs no relay cooperation; the relay learns the updated list on the next registration update, stated as a delay, not "immediately". A wrong host key on one route quarantines that route only; the pin is never replaced automatically.</li>
+</ul>
+
+<h2 id="s9">9 · Proposal B · iroh, one library that already does all of it</h2>
+<p>iroh is a Rust networking library, 1.0 since June 2026, that dials peers by public key, hole-punches with relay-coordinated discovery, and falls back to relays it runs or you run. Since version 0.96 a single QUIC connection keeps the relay path and the direct path <em>at the same time</em>; when the phone moves from Wi‑Fi to LTE the relay path carries traffic while the direct path is re-punched, with no new handshake. It ships a Swift xcframework and a Node binding, and needs no VPN extension. On paper it is the Parsec-and-Tailscale design in one dependency.</p>
+
+<figure class="wide">
+<div class="art">
+<svg viewBox="0 0 1000 300" role="img" aria-label="Proposal B: iroh endpoints in the app and the host with direct and relay paths on one QUIC connection">
+  <text x="20" y="22" style="fill:var(--ink3);font-size:11px;font-weight:700;letter-spacing:.12em">PHONE</text>
+  <text x="420" y="22" style="fill:var(--ink3);font-size:11px;font-weight:700;letter-spacing:.12em">ONE QUIC CONNECTION · TWO PATHS</text>
+  <text x="760" y="22" style="fill:var(--ink3);font-size:11px;font-weight:700;letter-spacing:.12em">THE COMPUTER</text>
+  <rect x="20" y="36" width="260" height="220" rx="8" class="bx-fill"/>
+  <rect x="40" y="56" width="220" height="60" rx="6" class="bx"/>
+  <text x="150" y="80" class="t" text-anchor="middle">Tavi app</text>
+  <text x="150" y="98" class="t2" text-anchor="middle">HTTP + WebSockets over iroh streams</text>
+  <rect x="40" y="136" width="220" height="100" rx="6" class="bx-acc"/>
+  <text x="150" y="158" class="t" text-anchor="middle">iroh endpoint (Rust, in-process)</text>
+  <text x="150" y="176" class="t2" text-anchor="middle">identity = ed25519 key · QUIC multipath</text>
+  <text x="150" y="192" class="t2" text-anchor="middle">hole punching · relay fallback · migration</text>
+  <text x="150" y="210" class="twarn" text-anchor="middle">Swift FFI · xcframework 44 MB before thinning</text>
+  <text x="150" y="226" class="t3" text-anchor="middle">CoreWLAN link on iOS to verify</text>
+  <line x1="150" y1="116" x2="150" y2="136" class="ln"/>
+  <!-- paths -->
+  <path d="M260 160 C 400 60, 600 60, 740 160" class="ln-acc"/>
+  <text x="500" y="72" class="tacc" text-anchor="middle">direct path · hole-punched UDP · when carrier NAT allows</text>
+  <rect x="400" y="150" width="200" height="72" rx="6" class="bx"/>
+  <text x="500" y="172" class="t" text-anchor="middle">iroh-relay ×2</text>
+  <text x="500" y="190" class="t2" text-anchor="middle">self-hosted on two providers</text>
+  <text x="500" y="206" class="t2" text-anchor="middle">(n0's free relays: US/EU/SG, no guarantees)</text>
+  <line x1="260" y1="186" x2="400" y2="186" class="ln-acc"/>
+  <line x1="600" y1="186" x2="740" y2="186" class="ln-acc"/>
+  <text x="500" y="244" class="t2" text-anchor="middle">both paths live on the same connection; QUIC picks where to send</text>
+  <text x="500" y="262" class="t2" text-anchor="middle">Wi‑Fi → LTE: relay carries traffic while direct is re-punched, no new handshake</text>
+  <rect x="720" y="36" width="260" height="220" rx="8" class="bx-fill"/>
+  <rect x="740" y="56" width="220" height="60" rx="6" class="bx"/>
+  <text x="850" y="80" class="t" text-anchor="middle">tavi-host</text>
+  <text x="850" y="98" class="t2" text-anchor="middle">HTTP + WebSockets over iroh streams</text>
+  <rect x="740" y="136" width="220" height="100" rx="6" class="bx-acc"/>
+  <text x="850" y="158" class="t" text-anchor="middle">iroh endpoint (Node addon)</text>
+  <text x="850" y="176" class="t2" text-anchor="middle">@number0/iroh 1.1 · prebuilt darwin-arm64, linux</text>
+  <text x="850" y="192" class="t2" text-anchor="middle">E2E at the QUIC/TLS layer with raw public keys</text>
+  <text x="850" y="210" class="twarn" text-anchor="middle">binding lagged 13 months before 1.0</text>
+  <text x="850" y="226" class="t3" text-anchor="middle">hole-punch rate on LTE unpublished</text>
+  <line x1="850" y1="116" x2="850" y2="136" class="ln"/>
+  <text x="500" y="290" class="t3" text-anchor="middle">Same identity, session layer and phone-side behaviour as Proposal A; only the transport box changes</text>
+</svg>
+</div>
+<figcaption><b>Fig. 5 · Proposal B.</b> The strongest thing about iroh is that a network change is not a reconnect at all. The strongest thing against it is age: 1.0 is three months old, its Node binding lagged for over a year before that, its iOS build has an unverified framework link and an unmeasured size, and its success rate on carrier NAT is unpublished.</figcaption>
+</figure>
+
+<div class="note"><div class="eyebrow">How the choice is made</div>Phase 1 is a one-week bake-off, not a gate that prejudges the answer. Both candidates are built to the same tiny workload (pair, host info, a terminal, a preview page with its hot-reload socket, one upload) and run through the same failure matrix: connect success, recovery tails on route loss and on interface loss, suspension and return, CPU, memory, battery, terminal latency during a maximum upload, and the Dhaka‑LTE→Virginia and Europe→Virginia geographies. It ends with numbers and an explicit selection. If iroh wins it becomes the principal transport and the relay in Proposal A shrinks to iroh's own relay; if the pipe wins, iroh may still return later as a direct-path route. Everything above the transport stays the same either way.</div>
+
+<h2 id="s10">10 · The session layer, which is what the user actually feels</h2>
+<p>Routes decide whether bytes can flow. The session layer decides whether the person notices. It sits above whichever transport wins, and it is where most of the review effort went.</p>
+
+<figure class="wide">
+<div class="art">
+<svg viewBox="0 0 1000 330" role="img" aria-label="Four layers of the proposal: identity, session, routes, relay">
+  <g>
+    <rect x="20" y="20" width="960" height="66" rx="6" class="bx-acc"/>
+    <text x="40" y="46" class="t">Identity and trust</text>
+    <text x="40" y="66" class="t2">host key pair · host TLS · pairing v2 (key + relay endpoints + secret in the QR) · device keys · possession-proof admission · revocation from the host's registry</text>
+    <text x="40" y="80" class="t3">prerequisite for everything else · the first contract to lock</text>
+  </g>
+  <g>
+    <rect x="20" y="96" width="960" height="102" rx="6" class="bx"/>
+    <text x="40" y="122" class="t">Session</text>
+    <text x="40" y="142" class="t2">establishment ≠ activation: three identifiers (terminal ownership epoch · client session · route generation) so a slow route can never evict the winner</text>
+    <text x="40" y="158" class="t2">input: numbered, contiguous acks, "accepted" = handed to the PTY; unacked after a switch is resent; lost state is reported as uncertain, never replayed</text>
+    <text x="40" y="174" class="t2">output: byte offsets + ring as today, geometry versions, host-wide retention budget · events: snapshots with a per-incarnation revision</text>
+    <text x="40" y="190" class="t2">kept frame: a non-empty stale frame is never replaced by an empty live surface · suspension is normal: foreground checkpoint, stale-frame-first resume</text>
+  </g>
+  <g>
+    <rect x="20" y="208" width="960" height="54" rx="6" class="bx"/>
+    <text x="40" y="234" class="t">Routes</text>
+    <text x="40" y="254" class="t2">direct (VPS) · relay-cf · relay-vps · tailnet (optional) · p2p (later) — dialled in parallel, one warm, authenticated 5 s challenges, promotion on dead / path change / close</text>
+  </g>
+  <g>
+    <rect x="20" y="272" width="960" height="48" rx="6" class="bx"/>
+    <text x="40" y="298" class="t">Relay service</text>
+    <text x="40" y="314" class="t2">opaque per-channel forwarding · admission before allocation · global caps · bulk traffic on a second outer connection · hibernation-safe · two deployments, one codebase</text>
+  </g>
+</svg>
+</div>
+<figcaption><b>Fig. 6 · The four layers.</b> Each one can be locked and built without the ones below being finished, except that identity comes first: without a real host key there is nothing to pin, nothing to sign, and no way for a relay to admit a phone without trusting it.</figcaption>
+</figure>
+
+<h3>Three promises the review made the plan sharpen</h3>
+<ul>
+<li><strong>"Exactly-once input" became "ordered and duplicate-free within one live session."</strong> Writing to a PTY and recording the acknowledgement are not one atomic act; a host that dies between them cannot later prove what happened. So when the ledger is gone the app says "delivery uncertain" and asks, which is what it does today. Expiry never turns uncertainty into a verdict.</li>
+<li><strong>"Never blank" became exact.</strong> A stale frame with content is never replaced by an empty live surface unless a repaint has delivered content or the user typed. The repaint boundary is a named heuristic (content after the last clear-screen, then 300 ms of quiet), because a clear-screen followed by a pause is exactly how a real repaint starts.</li>
+<li><strong>"Sub-second recovery" was tied to round trips</strong> and separated from the ten-second detection bound for silent stalls. A warm alternate removes establishment time, not detection time.</li>
+</ul>
+<p>Predictive local echo, Mosh's trick of drawing a typed character before the host confirms it, stays an experiment for the last phase. The phone's existing composer already gives immediate feedback for typed text; coding-agent TUIs redraw arbitrarily; and Mosh's 70 % figure is Mosh's workload, not Tavi's.</p>
+
+<h2 id="s11">11 · Latency and feel</h2>
+<p>A relay adds the distance to the nearest edge; geography adds the rest, and nothing removes it. The question is whether the total is inside what a terminal can hide.</p>
+
+<figure class="wide">
+<div class="art">
+<svg viewBox="0 0 1000 320" role="img" aria-label="Bar chart of inter-region round trip times with the 100 ms perception threshold">
+  <text x="20" y="22" class="t">Round trip between cloud regions, P50, Azure measurement, 30 days to 2026‑07‑30 (ms)</text>
+  <!-- scale: 0..250 ms over x 300..900 -> 2.4 px/ms -->
+  <g class="grid">
+    <line x1="300" y1="40" x2="300" y2="292"/><line x1="420" y1="40" x2="420" y2="292"/><line x1="540" y1="40" x2="540" y2="292"/><line x1="660" y1="40" x2="660" y2="292"/><line x1="780" y1="40" x2="780" y2="292"/><line x1="900" y1="40" x2="900" y2="292"/>
+  </g>
+  <g class="tm"><text x="300" y="308" text-anchor="middle">0</text><text x="420" y="308" text-anchor="middle">50</text><text x="540" y="308" text-anchor="middle">100</text><text x="660" y="308" text-anchor="middle">150</text><text x="780" y="308" text-anchor="middle">200</text><text x="900" y="308" text-anchor="middle">250</text></g>
+  <line x1="540" y1="36" x2="540" y2="292" class="ln-warn ln-dash"/>
+  <text x="546" y="48" class="twarn">100 ms · "feels instantaneous" limit (Nielsen)</text>
+  <!-- bars: value*2.4 -->
+  <g>
+    <text x="290" y="70" class="t2" text-anchor="end">Southeast Asia ↔ Central India</text><rect x="300" y="58" width="127" height="18" class="bar-acc"/><text x="433" y="72" class="tm">53</text>
+    <text x="290" y="100" class="t2" text-anchor="end">East US ↔ West US</text><rect x="300" y="88" width="163" height="18" class="bar-acc"/><text x="469" y="102" class="tm">68</text>
+    <text x="290" y="130" class="t2" text-anchor="end">East US ↔ West Europe</text><rect x="300" y="118" width="209" height="18" class="bar-acc"/><text x="515" y="132" class="tm">87</text>
+    <text x="290" y="160" class="t2" text-anchor="end">West Europe ↔ Central India</text><rect x="300" y="148" width="329" height="18" class="bar-warn"/><text x="635" y="162" class="tm">137</text>
+    <text x="290" y="190" class="t2" text-anchor="end">West Europe ↔ Southeast Asia</text><rect x="300" y="178" width="406" height="18" class="bar-warn"/><text x="712" y="192" class="tm">169</text>
+    <text x="290" y="220" class="t2" text-anchor="end">Central India ↔ East US</text><rect x="300" y="208" width="482" height="18" class="bar-warn"/><text x="788" y="222" class="tm">201</text>
+    <text x="290" y="250" class="t2" text-anchor="end">East US ↔ Southeast Asia</text><rect x="300" y="238" width="542" height="18" class="bar-warn"/><text x="848" y="252" class="tm">226</text>
+  </g>
+  <text x="20" y="286" class="t3">A single relay in Singapore would add ~225 ms for a US customer and ~170 ms for a European one before the radio. Edge relays put the extra hop within 20–50 ms; the geography remains.</text>
+</svg>
+</div>
+<figcaption><b>Fig. 7 · Where the milliseconds come from.</b> A customer in Europe driving a VPS in Virginia sees roughly 40 ms to the edge, 87 ms across the Atlantic, and a few ms to the host: about 130 ms per round trip, whichever route carries it. Character echo lands around 140–170 ms. That is why the direct-path argument for a terminal is about resilience and privacy, not speed, and why local echo matters more than hole punching.</figcaption>
+</figure>
+
+<div class="keys">
+  <div><div class="v num">503<small>ms</small></div><div class="l">SSH keystroke echo, median, on a 3G link (Mosh paper)</div></div>
+  <div><div class="v num">5<small>ms</small></div><div class="l">Mosh on the same link, with predictive local echo</div></div>
+  <div><div class="v num">70<small>%</small></div><div class="l">of keystrokes Mosh could show instantly; 0.9 % mispredicted</div></div>
+  <div><div class="v num">3<small>s</small></div><div class="l">heartbeat chosen independently by Mosh and by Tailscale</div></div>
+</div>
+
+<h2 id="s12">12 · Cost and operations</h2>
+<p>Bandwidth is not the cost. At the modelled workload (2,000 concurrent sessions, two hours a day, roughly 10,000 users) the relay itself is cheap on either provider; per-message managed services would be one to two orders of magnitude worse, and ngrok's terms forbid redistributing its agent to customers at all.</p>
+<div class="tbl"><table>
+<thead><tr><th>Where the relay runs</th><th class="num">Compute / month</th><th class="num">Bandwidth / month</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Cloudflare Workers + Durable Objects</td><td class="num">≈ $39</td><td class="num">$0</td><td>no egress charge; incoming WebSocket messages billed at 20:1; if hibernation is defeated by our socket handling, duration alone could reach ≈ $700</td></tr>
+<tr><td>VPS relays, three regions (Hetzner / Fly)</td><td class="num">$30–100</td><td class="num">$50–2,300</td><td>egress varies 6× by region on Fly; India and Africa are the expensive ones; Hetzner includes generous egress</td></tr>
+<tr><td>Managed realtime (Ably, AWS API Gateway WebSocket, PubNub)</td><td class="num">$550–9,000</td><td class="num">included</td><td>per-message pricing punishes keystroke traffic; not considered further</td></tr>
+</tbody></table></div>
+<p>The real cost is people. From the first managed release, someone is on call; both providers are probed end to end from outside; certificate expiry and billing have alarms; rollouts are provider by provider with the other verified healthy first; VPS relays drain before restart; there is a runbook and a reconnect-storm test. None of that waits for ten thousand users.</p>
+<p>The relay sees metadata: host identity, device public keys, phone and host addresses, timing, volume. Not content. The honest sentence for the app and the privacy policy is <em>"Session content is encrypted between your phone and your computer. Relay operators can observe connection metadata."</em> A no-managed-relay mode (direct, Tailscale, or a self-hosted relay) keeps the PRD's "no mandatory hosted relay" promise as a choice; the default changes.</p>
+
+<h2 id="s13">13 · Phases</h2>
+<div class="phases">
+  <div class="phase"><div class="k now">0</div><div><b>Truth and the kept frame</b> · days, ships this week regardless<div>Status says "Internet reachable; computer unreachable through Tailscale" with the toggle as a troubleshooting step and an <code>unknown</code> state; the kept-frame invariant; find why 07:03 blanked; recovery logs at <code>.notice</code>; timestamps on the host log.</div><div class="exit">reproduce with Tailscale off and with it stalled: the screen stays, the status is truthful</div></div></div>
+  <div class="phase"><div class="k">1</div><div><b>Transport bake-off</b> · one week<div>Proposal A's local proxy and Proposal B's iroh, built to the same tiny workload, run through the same failure matrix, plus a Durable Object placement and billing measurement.</div><div class="exit">written numbers and an explicit selection of the principal transport</div></div></div>
+  <div class="phase"><div class="k">2</div><div><b>Identity</b><div>Host key pair and host TLS; pairing v2; device keys; relay admission by possession proof and by pairing token; migration of existing pairs over their current Tailscale connection.</div><div class="exit">pair a phone with no Tailscale over LAN, direct, and the relay for the first time; a phone returning after 30 days; revoke across every surface; a revoked device attempting admission</div></div></div>
+  <div class="phase"><div class="k">3</div><div><b>One complete route, safely</b><div>The selected transport carrying the entire app surface; establishment separated from activation with the three identifiers; snapshot revisions; today's conservative input behaviour preserved.</div><div class="exit">with Tailscale absent on LTE: pair, list agents, open a terminal, run a Files action, open a preview; real-type tests for slow peer, never-returning send, delayed activation, takeover, host restart, mixed versions</div></div></div>
+  <div class="phase"><div class="k">4</div><div><b>Promotion and the second provider</b> · the launch gate<div>Warm standby, authenticated challenges with absolute deadlines, promotion, relay-vps, host registered on both, endpoints cached with addresses, two DNS operators, operating readiness.</div><div class="exit">four separate clocks: warm provider failure; cold bootstrap with a provider and its DNS down; explicit eviction; Wi‑Fi→LTE mid-typing. Plus a host-leg blackhole while outer pongs continue, a VPN that captures every route, a fast wrong-key relay beside a slow correct one, NAT64, immediate suspension</div></div></div>
+  <div class="phase"><div class="k">5</div><div><b>Input safety and retention</b><div>Numbered input with contiguous acks and reconciliation; host-confirmed fencing; host-wide retention budget; geometry versions.</div><div class="exit">1,000 route switches under soak: every marker classified host-accepted, proven unaccepted, or uncertain; zero silent loss; zero duplicates</div></div></div>
+  <div class="phase"><div class="k">6</div><div><b>Suspension</b><div>Foreground checkpoint, protected storage, stale-frame-first resume.</div><div class="exit">20 minutes in the background on LTE, then foreground: cached frame in under 100 ms, live in under 2 s</div></div></div>
+  <div class="phase"><div class="k">7</div><div><b>Feel</b><div>Predictive-echo overlay experiment, measured per application.</div><div class="exit">numbers, then a decision</div></div></div>
+</div>
+
+<h2 id="s14">14 · The review record</h2>
+<p>Each memo version was sent to GPT‑6 Astra seats that had not seen the project, with the research files, the incident report and the repository sources, under the repo's second-opinion process. No round approved. Every finding is dispositioned in the plan's replay tables.</p>
+
+<figure>
+<div class="art">
+<svg viewBox="0 0 1000 200" role="img" aria-label="Findings per review round: 41, 23, 12">
+  <!-- scale: 1 finding = 18 px, from x=260 -->
+  <g class="grid"><line x1="260" y1="30" x2="260" y2="170"/><line x1="440" y1="30" x2="440" y2="170"/><line x1="620" y1="30" x2="620" y2="170"/><line x1="800" y1="30" x2="800" y2="170"/><line x1="980" y1="30" x2="980" y2="170"/></g>
+  <g class="tm"><text x="260" y="188" text-anchor="middle">0</text><text x="440" y="188" text-anchor="middle">10</text><text x="620" y="188" text-anchor="middle">20</text><text x="800" y="188" text-anchor="middle">30</text><text x="980" y="188" text-anchor="middle">40</text></g>
+  <text x="250" y="58" class="t2" text-anchor="end">Round 1 · v2 · three seats</text>
+  <rect x="260" y="44" width="738" height="22" class="bar-bad"/><text x="272" y="60" class="tw">41 findings · 3 blockers · NOT APPROVED ×3</text>
+  <text x="250" y="102" class="t2" text-anchor="end">Round 2 · v3 · two seats</text>
+  <rect x="260" y="88" width="414" height="22" class="bar-warn"/><text x="272" y="104" class="tw">23 · 2 blockers · NOT LOCKABLE</text>
+  <text x="250" y="146" class="t2" text-anchor="end">Round 3 · v4 · one seat</text>
+  <rect x="260" y="132" width="216" height="22" class="bar-acc"/><text x="272" y="148" class="tw">12 · 1 blocker</text>
+  <text x="490" y="148" class="t2">→ v5 folds it; not re-reviewed, each phase locks separately</text>
+</svg>
+</div>
+<figcaption><b>Fig. 8 · Findings per round.</b> The rounds converged from "the design is wrong" to "these clocks disagree". Round 3's blocker was real: the first-pairing flow as written in v4 would have handed a malicious relay the pairing secret.</figcaption>
+</figure>
+
+<h3>What the reviews changed, in one line each</h3>
+<ul>
+<li>A Noise-protocol design was replaced by inner TLS, because the fingerprint was never a public key and the relay would otherwise have had to carry every HTTP surface itself.</li>
+<li>Route racing was split from terminal ownership: as written, a slower route would have evicted the winner under today's "last attachment wins" rule.</li>
+<li>"Exactly-once input" became honest about lost state.</li>
+<li>The one-second recovery promise was tied to round trips and separated from the ten-second detection bound.</li>
+<li>"No control plane" became "coordination written down": registrations with generations, endpoints cached with addresses, two DNS operators.</li>
+<li>Costs were labelled as estimates with the $700 downside stated; App Review 4.2.7 was marked unresolved; the PRD reversal was named as the owner's decision.</li>
+<li>The first-pairing admission was redesigned so the pairing secret is shown only to the host.</li>
+</ul>
+
+<h2 id="s15">15 · Decisions for the owner</h2>
+<ol class="decisions">
+<li><div><b>The reversal, with its running cost.</b><p>Default route becomes a Tavi-operated relay, end-to-end encrypted, with a no-managed-relay mode kept. Saying yes means Tavi runs infrastructure from the first release, an estimated $40–800 a month at 10,000 users depending on what phase 1 measures, plus a named person on call.</p></div></li>
+<li><div><b>The launch bargain.</b><p>Ship the first relay release at the end of phase 4 at 99.9 % session availability with two stated limitations: input typed across a route change is reported as uncertain rather than replayed, and resuming after suspension starts from a fresh repaint. 99.99 % is the target the next phases work toward. Or hold the launch until 99.99 % is demonstrated, which needs a fleet to measure on.</p></div></li>
+<li><div><b>Approve the bake-off week.</b><p>Phase 1 spends one week building both transport candidates to the same workload and choosing with numbers rather than by argument.</p></div></li>
+<li><div><b>Which customer regions matter first.</b><p>Bangladesh and one of Europe or the US is the assumption; relay locations follow from where customers and their hosts are.</p></div></li>
+<li><div><b>Tailscale's place.</b><p>Keep an optional "Tailscale mode" that pairing no longer requires, so existing pairs keep working through migration; or drop Tailscale once the relay ships and have existing users re-pair. Support cost is the difference.</p></div></li>
+</ol>
+
+<h2 id="s16">16 · Sources</h2>
+<p class="small">Everything above traces to the repository: the plan (<code>docs/CONNECTION_ARCHITECTURE.md</code>), the five research reports and every review verdict (<code>docs/research/connection-2026-09/</code>), and the incident report (<code>docs/history/2026-09-09-tailscale-stall/</code>). Primary sources cited in those files include:</p>
+<ul class="sources">
+<li>tailscale/tailscale issues #19504, #18889, #15271, #17967, #15776, #21125, #21114; the Tailscale changelog to 1.102.3</li>
+<li>Tailscale, "How NAT traversal works"; DERP package docs; peer relays announcement (2025‑10‑29)</li>
+<li>Winstein &amp; Balakrishnan, "Mosh: An Interactive Remote Shell for Mobile Clients", USENIX ATC 2012</li>
+<li>Eternal Terminal protocol.md; Coder reconnectingpty; VS Code terminal persistence docs</li>
+<li>iroh 0.96 "QUIC multipaths", "healing connections", 0.98 release notes; iroh-ffi; @number0/iroh on npm</li>
+<li>Cloudflare Durable Objects pricing, limits, data-location and hibernation docs; postmortems of 2025‑11‑18 and 2026‑02‑20; Workers SLA (2026‑04‑01)</li>
+<li>Fly.io pricing and regions; infra-log 2024‑10‑26</li>
+<li>Azure inter-region latency statistics (30 days to 2026‑07‑30)</li>
+<li>Apple: TN3151, NWConnection betterPathUpdateHandler, URLSession waitsForConnectivity, App Store Review Guidelines 4.2.3, 4.2.7, 5.4, 2.5.5</li>
+<li>Parsec technology and security pages; Jump Desktop admin guide; Chrome Remote Desktop architecture doc; RustDesk PR #15684; Edovia Screens Connect documentation</li>
+<li>Claude Code Remote Control docs; Happy Coder encryption.md and issues #1229, #989, #1308; Cursor self-hosted machines docs; VS Code Remote Tunnels docs</li>
+<li>cloudflare/cloudflared issue #1652; ngrok terms of service</li>
+</ul>
+<p class="small">Numbers in this paper are measurements from those sources or estimates labelled as such; nothing here is a Tavi measurement yet. That is what phase 1 is for.</p>
+
+</article>
+</div>
+</div>

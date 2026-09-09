@@ -17,3 +17,5 @@ Review record (`review/`, GPT-6 Astra via `.claude/skills/second-opinion`, effor
 - `memo-v3.md` → round 2: `r2-fold-audit.md`, `r2-fresh-eyes.md`. NOT LOCKABLE / NOT APPROVED; 23 findings.
 - `memo-v4.md` → round 3: `r3-fold-audit.md`. NOT LOCKABLE; 12 findings, one blocker.
 - v5 = `docs/CONNECTION_ARCHITECTURE.md`, folding round 3 (§7c). Not re-reviewed: the plan is for the owner's decision; each phase gets its own contract lock before implementation, Layer 1 first.
+
+**Shareable paper:** `paper.html` (same content as the plan, with the incident timeline, today's architecture, both proposals, the failover clocks, the layer stack, latency and the review record as diagrams). Published for the team at https://claude.ai/code/artifact/38e73904-7e0c-4822-98ee-25f801b10c8d — republish from this file to keep that link.
