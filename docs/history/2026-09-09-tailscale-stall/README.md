@@ -38,6 +38,8 @@ The host behaved correctly: its new heartbeat closed the events socket after two
 6. **Resumable sessions** (host keeps terminal state + frame sequence; phone resumes from frame N on any route) turn every drop into a sub-second stutter. Third package on #119.
 7. **Until the relay exists, tell the truth**: probe a public endpoint beside the host probe; internet up + host dead through the tunnel ⇒ "Tailscale on this phone has stalled" + Open Tailscale. Customers will not toggle a VPN, but it beats five force-quits and blaming the Mac. Terminal keeps its last frame unconditionally (it did at 07:47, it did not at 07:03 — find out why).
 
+- **Phone RAM / the iOS extension memory cap**: not it. `IPNExtension` was one pid (42764) from 05:45 to 07:50 (never killed or restarted), its self-reported memory was 27–33 MB against iOS's 50 MB VPN-extension ceiling (same on every iPhone), and there are no jetsam lines for it. The extension was alive and under its limit; it just stopped passing packets.
+
 ## Open questions
 
 - Why DERP did not carry the app's TCP during the stall (both ends connected to derp-3).
