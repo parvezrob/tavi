@@ -5,6 +5,7 @@ This folder is the planning and research baseline for Tavi. It supersedes the ea
 ## Start here
 
 - [`ROADMAP.md`](./ROADMAP.md) — the active phase-by-phase build plan and execution order; supersedes the implementation plan's phase ordering.
+- [`CONNECTION_ARCHITECTURE.md`](./CONNECTION_ARCHITECTURE.md) — the connection plan after the 2026-09-09 Tailscale stall (#119): SLIs, identity, session layer, routes, relay, phases, and the decisions the owner is asked for; evidence and the three Astra review rounds in [`research/connection-2026-09/`](./research/connection-2026-09/README.md). **Pending the owner's decision; overrides the "Tailscale direct-first, no hosted relay" lines in the PRD and strategy doc only once decided.**
 - [`DEVELOPMENT.md`](./DEVELOPMENT.md) — the practical build/deploy/verification loop (host service, simulator harness, device installs, test gotchas).
 - [`HERDR_INTEGRATION.md`](./HERDR_INTEGRATION.md) — the verified Herdr socket API contract and its traps.
 - [`DEVELOPMENT_PRINCIPLES.md`](./DEVELOPMENT_PRINCIPLES.md) — non-negotiable engineering policy for code quality, architecture, state, security, concurrency, reliability, testing, privacy, accessibility, dependencies, performance, and releases.
