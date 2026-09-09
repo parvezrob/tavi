@@ -11,6 +11,13 @@ Research (five parallel tracks, web + primary sources, facts only, inferences ma
 - `04-resumable-sessions.md` — Mosh SSP, Eternal Terminal, tmux/VS Code/Coder replay, input safety designs, iOS specifics, QUIC migration semantics; eighteen design ingredients.
 - `05-ios-and-tailscale.md` — the Tailscale iOS stall bug class (issue numbers, versions), NetworkExtension limits, Network.framework facts, background execution, QUIC on iOS, cellular NAT, App Review guidelines.
 
+Also here:
+
+- `raw/` — each research agent's **full verbatim report** (the `0*.md` files at the top level are condensed by the orchestrator; when a number or a source is in doubt, the raw file is the authority).
+- `discussion.md` — the owner's questions during the day and the answers given, including the colleague's "why not just open an SSH port" and the plain-words reply.
+- `paper.html` — the shareable paper.
+- `review/prompts/` — the exact prompt every Astra seat received; `review/memo-v1.md` … `memo-v4.md` — every memo version the seats saw.
+
 Review record (`review/`, GPT-6 Astra via `.claude/skills/second-opinion`, effort xhigh, each seat cold):
 
 - `memo-v2.md` → round 1: `r1-seat1.md` (fresh eyes), `r1-seat2.md` (networking/iOS, opened the sources), `r1-seat3.md` (security/ops). All NOT APPROVED; 41 findings.
